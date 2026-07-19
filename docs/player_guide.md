@@ -164,18 +164,17 @@ Full technical detail on each of these lives in
 > numbers below will change as we playtest and figure out what the scenario
 > actually wants to be.
 
-No home base. No head start. Just two crews, each handed a fleet, and a
-galaxy to scatter into.
+One foothold, and a fleet to expand from it.
 
 - **Players:** 2.
-- **Starting fleet:** 8 ships per player, all identical, all spawned at your
-  home sector on turn 1.
-- **No starting colony.** Everyone begins fully mobile — there's nothing to
-  fall back on. Every ship you send out is a real decision: keep exploring,
-  or commit it to becoming a colony.
+- **Starting colony:** each player begins with one colony already
+  established at their home sector — a fixed foothold from turn 1.
+- **Starting fleet:** 7 ships per player, all identical, all spawned
+  alongside the home colony on turn 1.
 - **Pods:** each ship carries 18 pods — 6 producing energy, 6 producing
   goods, 6 producing food — all active and producing from turn 1. No setup
-  needed to get started.
+  needed to get started. (The home colony's own pod loadout isn't decided
+  yet — see the open question below.)
 - **Starting positions:** home sectors are set well apart (far enough for a
   real exploration phase, close enough that contact with your rival is
   likely mid-game).
@@ -184,5 +183,12 @@ galaxy to scatter into.
   ship and colony you own, highest score at the end of turn 20 takes it.
 
 The name is a placeholder for the vibe, not a locked design: this is the
-scenario we're using to find out how much a fleet with no safety net can
-actually build in 20 turns.
+scenario we're using to find out how much a fleet built out from a single
+foothold can actually build in 20 turns.
+
+**Open question:** the game currently doesn't give a starting colony any
+pods of its own — bootstrap creates the colony organization but attaches
+nothing to it, so as implemented today it wouldn't produce anything. Giving
+the home colony a real pod loadout (matching the ships, or its own
+dedicated mix) is still an open design/implementation question, not yet
+decided.

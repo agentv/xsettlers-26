@@ -1,0 +1,8 @@
+mcp>=1.0.0
+spatialite
+pysqlite3
+python-dotenv
+pyyaml
+pytest
+pytest-asyncio
+anyio

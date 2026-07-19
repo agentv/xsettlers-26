@@ -1,0 +1,26 @@
+# TODO: Fill in app name and region before deploying
+app = "xsettlers"
+primary_region = "sea"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DB_PATH = "/data/xsettlers.db"
+  GAME_CONFIG_PATH = "config/game_config.yaml"
+
+[mounts]
+  source = "xsettlers_data"
+  destination = "/data"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]

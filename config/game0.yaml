@@ -1,0 +1,20 @@
+# Starting configuration for XSettlers MVP (game0).
+# To create a new game variant, copy this file, rename it (e.g. game1.yaml),
+# and update starting_configuration_file in game_config.yaml to point to it.
+
+home_sector_by_player:
+  - [3, 3, 0]    # Player 1
+  - [12, 12, 0]  # Player 2
+
+ships_per_player: 8
+
+# Each ship receives one pod per entry below, repeated `count` times.
+# Mission values are the canonical pod missions (see Product Requirements /
+# Data Model & Storage Design): idle | produce_energy | produce_food | produce_goods | scan.
+pods_per_ship:
+  - {mission: produce_energy, count: 6, storage_capacity: 100.0, energy_consumption: 0.0, food_consumption: 1.0}
+  - {mission: produce_goods,  count: 6, storage_capacity: 100.0, energy_consumption: 2.0, food_consumption: 1.0}
+  - {mission: produce_food,   count: 6, storage_capacity: 100.0, energy_consumption: 2.0, food_consumption: 0.0}
+
+# Set to true to spawn a starting colony at each player's home sector.
+home_colony: false

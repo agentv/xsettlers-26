@@ -171,10 +171,10 @@ One foothold, and a fleet to expand from it.
   established at their home sector — a fixed foothold from turn 1.
 - **Starting fleet:** 7 ships per player, all identical, all spawned
   alongside the home colony on turn 1.
-- **Pods:** each ship carries 18 pods — 6 producing energy, 6 producing
-  goods, 6 producing food — all active and producing from turn 1. No setup
-  needed to get started. (The home colony's own pod loadout isn't decided
-  yet — see the open question below.)
+- **Pods:** every organization — each ship and the home colony alike —
+  carries the same 18-pod loadout: 6 producing energy, 6 producing goods,
+  6 producing food, all active and producing from turn 1. No setup needed
+  to get started.
 - **Starting positions:** home sectors are set well apart (far enough for a
   real exploration phase, close enough that contact with your rival is
   likely mid-game).
@@ -186,9 +186,8 @@ The name is a placeholder for the vibe, not a locked design: this is the
 scenario we're using to find out how much a fleet built out from a single
 foothold can actually build in 20 turns.
 
-**Open question:** the game currently doesn't give a starting colony any
-pods of its own — bootstrap creates the colony organization but attaches
-nothing to it, so as implemented today it wouldn't produce anything. Giving
-the home colony a real pod loadout (matching the ships, or its own
-dedicated mix) is still an open design/implementation question, not yet
-decided.
+**Implementation note:** as of this writing, `db/bootstrap.py`'s
+`home_colony` flag creates the colony organization but doesn't yet attach
+any pods to it — giving it the same 18-pod loadout as a ship is decided
+design, just not yet wired up in code. That change is queued behind the
+in-progress scenario-selection work landing on `main`.

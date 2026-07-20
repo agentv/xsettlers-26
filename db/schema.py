@@ -13,7 +13,8 @@ def init_schema():
             email             TEXT NOT NULL UNIQUE,
             display_name      TEXT NOT NULL,
             slack_user_id     TEXT UNIQUE,
-            end_turn_declared INTEGER DEFAULT 0
+            end_turn_declared INTEGER DEFAULT 0,
+            is_npc            INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS sectors (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,6 +32,14 @@ def init_schema():
             CHECK (id = 1)
         );
         INSERT OR IGNORE INTO game_state (id, current_turn) VALUES (1, 0);
+        CREATE TABLE IF NOT EXISTS games (
+            id              INTEGER PRIMARY KEY DEFAULT 1,
+            scenario_name   TEXT NOT NULL,
+            scenario_file   TEXT NOT NULL,
+            selected_by     TEXT,
+            bootstrapped_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            CHECK (id = 1)
+        );
         CREATE TABLE IF NOT EXISTS organizations (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             org_type       TEXT CHECK(org_type IN ('ship','colony')),
@@ -70,21 +79,23 @@ def init_schema():
             PRIMARY KEY (arrival_turn, org_id)
         );
         CREATE TABLE IF NOT EXISTS events (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id      INTEGER,
-            turn         INTEGER NOT NULL,
-            seq          INTEGER NOT NULL,
-            ts           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            event_type   TEXT NOT NULL,
-            actor_id     INTEGER REFERENCES players(id),
-            subject_id   INTEGER,
-            subject_type TEXT,
-            payload      TEXT NOT NULL DEFAULT '{}'
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id         INTEGER,
+            turn            INTEGER NOT NULL,
+            seq             INTEGER NOT NULL,
+            ts              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            event_type      TEXT NOT NULL,
+            actor_id        INTEGER REFERENCES players(id),
+            subject_id      INTEGER,
+            subject_type    TEXT,
+            resolve_at_turn INTEGER,
+            payload         TEXT NOT NULL DEFAULT '{}'
         );
         CREATE INDEX IF NOT EXISTS idx_events_turn    ON events(turn, seq);
         CREATE INDEX IF NOT EXISTS idx_events_actor   ON events(actor_id);
         CREATE INDEX IF NOT EXISTS idx_events_subject ON events(subject_type, subject_id);
         CREATE INDEX IF NOT EXISTS idx_events_type    ON events(event_type);
+        CREATE INDEX IF NOT EXISTS idx_events_resolve ON events(event_type, resolve_at_turn);
     """)
     cur.execute("""SELECT COUNT(*) FROM geometry_columns
                    WHERE f_table_name='sectors' AND f_geometry_column='location'""")

@@ -3,17 +3,24 @@ from db.connection import get_connection
 from engine.turn import get_current_turn
 
 def record_event(event_type, payload, actor_id=None,
-                 subject_id=None, subject_type=None, game_id=None) -> int:
-    """Write-ahead: log BEFORE applying state changes. Returns event id."""
+                 subject_id=None, subject_type=None, game_id=None,
+                 resolve_at_turn=None) -> int:
+    """Write-ahead: log BEFORE applying state changes. Returns event id.
+
+    resolve_at_turn is set for scheduled/future events (e.g. colonize_complete)
+    that a later end_of_turn() pass must pick up once current_turn reaches it.
+    """
     conn = get_connection()
     cur  = conn.cursor()
     turn = get_current_turn()
     cur.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM events WHERE turn=?", (turn,))
     seq  = cur.fetchone()[0]
     cur.execute("""
-        INSERT INTO events (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,payload)
-        VALUES (?,?,?,?,?,?,?,?)
-    """, (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,json.dumps(payload)))
+        INSERT INTO events (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,
+                            resolve_at_turn,payload)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,
+          resolve_at_turn,json.dumps(payload)))
     event_id = cur.lastrowid
     conn.commit(); conn.close()
     return event_id

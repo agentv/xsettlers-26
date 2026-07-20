@@ -47,7 +47,7 @@ def preview_move(slack_user_id: str, ship_id: int,
     if not ship:
         conn.close(); return {"error": "Ship not found, not owned by player, or already in transit"}
     if not ship["is_mobile"]:
-        conn.close(); return {"error": "This organization is a colony and cannot move"}
+        conn.close(); return {"error": "This organization is locked (colony or mid-colonization) and cannot move"}
     cur.execute("SELECT coord_x,coord_y,coord_z FROM sectors WHERE id=?", (dest_sector_id,))
     dest = cur.fetchone()
     if not dest:
@@ -83,7 +83,7 @@ def confirm_move(slack_user_id: str, ship_id: int,
     if not ship:
         conn.close(); return {"error": "Ship not found, not owned by player, or already in transit"}
     if not ship["is_mobile"]:
-        conn.close(); return {"error": "This organization is a colony and cannot move"}
+        conn.close(); return {"error": "This organization is locked (colony or mid-colonization) and cannot move"}
     cur.execute("SELECT coord_x,coord_y,coord_z FROM sectors WHERE id=?", (dest_sector_id,))
     dest = cur.fetchone()
     if not dest:
@@ -102,9 +102,9 @@ def confirm_move(slack_user_id: str, ship_id: int,
         payload={"org_id": ship_id, "from_sector_id": origin_sector_id,
                  "to_sector_id": dest_sector_id, "arrival_turn": arrival_turn},
         actor_id=player["id"], subject_id=ship_id, subject_type="organization")
-    # Park at sentinel
-    cur.execute("""UPDATE organizations SET sector_id=-1, mission='move', mission_params=?
-        WHERE id=?""",
+    # Park at sentinel, locking the org against reassignment until arrival/cancel
+    cur.execute("""UPDATE organizations SET sector_id=-1, mission='move', mission_params=?,
+        is_mobile=0 WHERE id=?""",
         (f'{{"dest_sector_id":{dest_sector_id},"arrival_turn":{arrival_turn}}}', ship_id))
     # Queue arrival
     cur.execute("""INSERT OR REPLACE INTO arrival_queue
@@ -141,8 +141,8 @@ def cancel_move(slack_user_id: str, ship_id: int) -> dict:
         payload={"org_id": ship_id, "rubber_banded_to_sector_id": origin_sector_id},
         actor_id=player["id"], subject_id=ship_id, subject_type="organization")
     cur.execute("DELETE FROM arrival_queue WHERE org_id=?", (ship_id,))
-    cur.execute("""UPDATE organizations SET sector_id=?, mission='idle', mission_params=NULL
-        WHERE id=?""", (origin_sector_id, ship_id))
+    cur.execute("""UPDATE organizations SET sector_id=?, mission='idle', mission_params=NULL,
+        is_mobile=1 WHERE id=?""", (origin_sector_id, ship_id))
     conn.commit(); conn.close()
     return {"cancelled": True, "ship_id": ship_id,
             "rubber_banded_to_sector_id": origin_sector_id}

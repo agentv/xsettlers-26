@@ -17,6 +17,11 @@ def end_of_turn():
     if is_game_over():
         print("Turn limit reached — game over."); return
     conn = get_connection(); cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM games WHERE id=1")
+    if cur.fetchone()[0] == 0:
+        # No scenario selected yet (mcp/game_select.py's select_scenario populates
+        # this on bootstrap). Nothing to process -- don't burn turns on an empty game.
+        conn.close(); return
 
     # 1. Reset declarations
     cur.execute("UPDATE players SET end_turn_declared=0")
@@ -27,8 +32,8 @@ def end_of_turn():
     cur.execute("SELECT org_id,dest_sector_id FROM arrival_queue WHERE arrival_turn<=?",
                 (current_turn,))
     for arrival in cur.fetchall():
-        cur.execute("""UPDATE organizations SET sector_id=?,mission='idle',mission_params=NULL
-                       WHERE id=?""", (arrival["dest_sector_id"],arrival["org_id"]))
+        cur.execute("""UPDATE organizations SET sector_id=?,mission='idle',mission_params=NULL,
+                       is_mobile=1 WHERE id=?""", (arrival["dest_sector_id"],arrival["org_id"]))
         org = cur.execute("SELECT player_id FROM organizations WHERE id=?",
                           (arrival["org_id"],)).fetchone()
         if org:
@@ -76,13 +81,26 @@ def end_of_turn():
                         (org["player_id"], target_id))
                     # TODO: emit pod.scanned event; detect rivals
 
-    # 4. Mission dispatch (stationary orgs only)
+    # 4. Colonization resolution — only orgs whose 3-turn colonize_complete event has matured.
+    #    Scheduled by set_mission() via record_event(resolve_at_turn=...). Idempotent via the
+    #    org_type='ship' filter: once resolved, org_type flips to 'colony' and this stops
+    #    matching, so no separate "resolved" flag is needed.
+    cur.execute("""
+        SELECT o.id,o.org_type,o.player_id,o.sector_id,o.mission,o.mission_params
+        FROM events e
+        JOIN organizations o ON o.id = e.subject_id AND e.subject_type = 'organization'
+        WHERE e.event_type = 'colonize_complete' AND e.resolve_at_turn <= ?
+          AND o.org_type = 'ship' AND o.mission = 'colonize'
+    """, (current_turn,))
+    for org in cur.fetchall():
+        _handle_colonize(cur, org, current_turn)
+
+    # 5. Mission dispatch (defend/attack — stationary orgs only; stubs for now)
     cur.execute("""SELECT id,org_type,player_id,sector_id,mission,mission_params
-        FROM organizations WHERE mission NOT IN ('idle','move') AND sector_id!=-1""")
+        FROM organizations WHERE mission IN ('defend','attack') AND sector_id!=-1""")
     for org in cur.fetchall():
         params = json.loads(org["mission_params"] or "{}")
-        {"colonize": _handle_colonize, "defend": _handle_defend,
-         "attack": _handle_attack}.get(org["mission"], lambda *a: None)(cur, org, params)
+        {"defend": _handle_defend, "attack": _handle_attack}.get(org["mission"], lambda *a: None)(cur, org, params)
 
     # 5. Fog decay
     cur.execute("""SELECT ps.player_id,ps.sector_id,ps.confidence FROM player_sectors ps
@@ -146,11 +164,24 @@ def _calculate_final_scores():
         print(f"  {row['display_name']}: {row['score']:.1f} pts")
     conn.close()
 
-def _handle_colonize(cur, org, params):
-    if org["org_type"] == "ship":
-        cur.execute("""UPDATE organizations
-            SET org_type='colony',is_mobile=0,mission='idle',mission_params=NULL WHERE id=?""",
-            (org["id"],))
+def _handle_colonize(cur, org, current_turn):
+    """
+    Resolve a matured colonize_complete event: flip org_type to 'colony' and log
+    ship.colonized. Written directly (not via db.events.record_event) to avoid a
+    circular import — db/events.py imports get_current_turn from this module.
+    """
+    if org["org_type"] != "ship":
+        return
+    cur.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM events WHERE turn=?", (current_turn,))
+    seq = cur.fetchone()[0]
+    cur.execute("""
+        INSERT INTO events (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,payload)
+        VALUES (NULL,?,?,'ship.colonized',NULL,?,'organization',?)
+    """, (current_turn, seq, org["id"],
+          json.dumps({"org_id": org["id"], "sector_id": org["sector_id"]})))
+    cur.execute("""UPDATE organizations
+        SET org_type='colony',is_mobile=0,mission='idle',mission_params=NULL WHERE id=?""",
+        (org["id"],))
 
 def _handle_defend(cur, org, params): pass   # stub
 def _handle_attack(cur, org, params): pass   # stub

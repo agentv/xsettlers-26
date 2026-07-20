@@ -2,6 +2,7 @@ import asyncio
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
+from mcp.game_select import list_scenarios, select_scenario
 from mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
 from mcp.tools.sector_tools import get_sector, get_sector_map, show_sector_neighborhood
 from mcp.tools.navigation_tools import (
@@ -11,7 +12,6 @@ from mcp.tools.organization_tools import (
     set_mission, set_pod_mission, set_pod_scan_target, show_organization, show_game_status
 )
 from db.schema import init_schema
-from db.bootstrap import bootstrap_game
 from engine.clock import run_clock
 
 app = Server("xsettlers")
@@ -19,6 +19,21 @@ app = Server("xsettlers")
 @app.list_tools()
 async def list_tools():
     return [
+        types.Tool(name="list_scenarios",
+            description="List available game scenarios a player can choose to start/join. "
+                        "Must be called (and select_scenario used to pick one) before any "
+                        "other tool works -- until a scenario is selected, no game exists "
+                        "and every other tool will report 'Player not found'.",
+            inputSchema={"type":"object","properties":{"slack_user_id":{"type":"string"}},
+                         "required":["slack_user_id"]}),
+        types.Tool(name="select_scenario",
+            description="Choose a scenario by name (see list_scenarios) to start playing. "
+                        "Bootstraps the game on first selection; the MVP runs one shared "
+                        "game per deployed instance, so this can't be used to switch "
+                        "scenarios once one is already active.",
+            inputSchema={"type":"object","properties":{
+                "slack_user_id":{"type":"string"},"scenario_name":{"type":"string"}},
+                "required":["slack_user_id","scenario_name"]}),
         types.Tool(name="get_player_state",
             description="Dashboard: player record, all organizations, all pods",
             inputSchema={"type":"object","properties":{"slack_user_id":{"type":"string"}},
@@ -108,6 +123,8 @@ async def list_tools():
 @app.call_tool()
 async def call_tool(name: str, arguments: dict):
     dispatch = {
+        "list_scenarios":             list_scenarios,
+        "select_scenario":            select_scenario,
         "get_player_state":           get_player_state,
         "declare_end_turn":           declare_end_turn,
         "rescind_end_turn":           rescind_end_turn,
@@ -130,8 +147,10 @@ async def call_tool(name: str, arguments: dict):
     return [types.TextContent(type="text", text=str(fn(**arguments)))]
 
 async def main():
+    # Tables only -- no seeding. bootstrap_game() now runs lazily, triggered
+    # by the first successful select_scenario() call. Until then, players is
+    # empty and every gameplay tool naturally rejects with "Player not found".
     init_schema()
-    bootstrap_game()
     async with stdio_server() as (read_stream, write_stream):
         await asyncio.gather(
             app.run(read_stream, write_stream, app.create_initialization_options()),

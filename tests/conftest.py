@@ -6,6 +6,21 @@ from db.connection import get_connection
 def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
     init_schema()
+    seed_active_game()
+
+def seed_active_game(scenario_name="test-scenario"):
+    """
+    Most tests are about gameplay already in progress, not the
+    scenario-selection flow itself -- engine/turn.py's end_of_turn() no-ops
+    if the games table is empty (see mcp/game_select.select_scenario), so
+    fresh_db seeds a default active-game row automatically. Tests that
+    specifically exercise "no scenario chosen yet" (see test_game_select.py)
+    should DELETE FROM games to opt back out.
+    """
+    conn = get_connection()
+    conn.execute("""INSERT OR REPLACE INTO games (id,scenario_name,scenario_file,selected_by)
+        VALUES (1,?,?,?)""", (scenario_name, f"config/{scenario_name}.yaml", None))
+    conn.commit(); conn.close()
 
 def seed_player(email="player@test.com", slack_id="U_P1", display_name="Player One"):
     conn = get_connection()

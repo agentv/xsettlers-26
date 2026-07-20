@@ -33,6 +33,8 @@ class PodTemplateDef:
 
 @dataclass
 class StartingConfiguration:
+    name: str
+    description: str
     home_sector_by_player: List[List[int]]
     ships_per_player: int
     pods_per_ship: List[PodTemplateDef]
@@ -66,6 +68,8 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
         food_consumption=float(p.get("food_consumption", 0.0)),
     ) for p in sc_raw.get("pods_per_ship", [])]
     return StartingConfiguration(
+        name=_require(sc_raw, "name", "name"),
+        description=_require(sc_raw, "description", "description"),
         home_sector_by_player=_require(sc_raw, "home_sector_by_player",
                                        "home_sector_by_player"),
         ships_per_player=int(_require(sc_raw, "ships_per_player",
@@ -74,7 +78,13 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
         home_colony=bool(sc_raw.get("home_colony", False)),
     )
 
-def load_config(path: str = CONFIG_PATH) -> GameConfig:
+def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameConfig:
+    """
+    scenario_override, if given, is a repo-root-relative path to a scenario file
+    (e.g. "config/game1.yaml") used instead of the starting_configuration_file
+    named inside game_config.yaml. Lets game_select.select_scenario() bootstrap
+    a specific, player-chosen scenario without needing to rewrite game_config.yaml.
+    """
     with open(path, "r") as f:
         raw = yaml.safe_load(f)
     g = raw.get("game", {})
@@ -95,8 +105,8 @@ def load_config(path: str = CONFIG_PATH) -> GameConfig:
         goods_capacity=float(s.get("goods_capacity", 0.0)),
     ) for s in raw.get("sectors", [])]
     # Load starting configuration from its own file
-    sc_file = _require(raw, "starting_configuration_file",
-                       "starting_configuration_file")
+    sc_file = scenario_override or _require(raw, "starting_configuration_file",
+                                            "starting_configuration_file")
     # Resolve relative to the directory of the main config file
     sc_path = os.path.join(os.path.dirname(os.path.abspath(path)), "..", sc_file)
     starting_configuration = load_starting_configuration(

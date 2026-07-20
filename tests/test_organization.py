@@ -14,10 +14,27 @@ def test_set_mission_idle():
                         (oid,)).fetchone()["mission"] == "idle"
     conn.close()
 
-def test_set_mission_colonize_converts_at_end_of_turn():
+def test_set_mission_colonize_locks_immediately_but_does_not_convert_yet():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     set_mission("U_P1", oid, "colonize")
-    end_of_turn()
+    conn = get_connection()
+    org = conn.execute("SELECT org_type,is_mobile,mission FROM organizations WHERE id=?",
+                       (oid,)).fetchone()
+    conn.close()
+    assert org["org_type"] == "ship"      # not flipped yet -- only at resolution
+    assert org["is_mobile"] == 0          # locked immediately, per set_mission
+    assert org["mission"] == "colonize"
+
+def test_set_mission_colonize_converts_after_three_turns():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    set_mission("U_P1", oid, "colonize")   # scheduled for current_turn(0) + 3
+    end_of_turn(); end_of_turn()           # turns 1, 2 -- not resolved yet
+    conn = get_connection()
+    still_ship = conn.execute("SELECT org_type FROM organizations WHERE id=?",
+                              (oid,)).fetchone()["org_type"]
+    conn.close()
+    assert still_ship == "ship"
+    end_of_turn()                          # turn 3 -- resolve_at_turn matches
     conn = get_connection()
     org = conn.execute("SELECT org_type,is_mobile,mission FROM organizations WHERE id=?",
                        (oid,)).fetchone()

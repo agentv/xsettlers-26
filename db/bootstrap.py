@@ -1,18 +1,38 @@
 # Closed roster rule: The player set for a game is fixed at bootstrap time.
-# game_config.yaml is the sole source of player identity. There is no runtime
-# player-join path; to change the roster, bootstrap a new database.
+# game_config.yaml is the sole source of player identity by default, and
+# there is no runtime player-join path -- to change the roster, bootstrap a
+# new database. roster_override (below) is an explicit escape hatch for a
+# future caller (e.g. a lobby) that assembles a roster dynamically instead
+# of reading the YAML list; nothing calls it yet.
+#
+# Which scenario gets bootstrapped is chosen at runtime via
+# mcp/game_select.py's select_scenario() -- see scenario_file/scenario_name/
+# selected_by below. The games table records that choice.
 
 from db.connection import get_connection
 from config.loader import load_config
 
-def bootstrap_game(config_path: str = None):
-    """Initialize a fresh game. Safe to call repeatedly — guards against double-init."""
-    cfg  = load_config(config_path) if config_path else load_config()
+def bootstrap_game(config_path: str = None, scenario_file: str = None,
+                   scenario_name: str = None, selected_by: str = None,
+                   roster_override: list = None):
+    """
+    Initialize a fresh game. Safe to call repeatedly — guards against double-init.
+
+    roster_override, if given, is a list of dicts (email, display_name,
+    slack_user_id, optional is_npc) used instead of reading players from
+    config_path's players: list. Escape hatch for a future lobby that
+    assembles a roster dynamically (real players + NPC fill-in) rather
+    than reading a fixed YAML list. Not currently called by anything --
+    mcp/game_select.py's select_scenario() still always uses the config
+    file's roster.
+    """
+    cfg  = load_config(config_path, scenario_override=scenario_file) if config_path \
+           else load_config(scenario_override=scenario_file)
     conn = get_connection(); cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM sectors WHERE coord_x != -1")
     if cur.fetchone()[0] > 0:
         print("Game already bootstrapped — skipping."); conn.close(); return
-    print(f"Bootstrapping game: {cfg.game.name}")
+    print(f"Bootstrapping game: {cfg.game.name} (scenario: {cfg.starting_configuration.name})")
 
     # 1. Seed sectors
     sector_id_map = {}
@@ -30,11 +50,24 @@ def bootstrap_game(config_path: str = None):
 
     # 2. Seed players
     player_id_list = []
-    for p in cfg.players:
-        cur.execute("INSERT INTO players (email,display_name,slack_user_id) VALUES (?,?,?)",
-                    (p.email, p.display_name, p.slack_user_id))
-        player_id_list.append(cur.lastrowid)
-        print(f"  Created player: {p.display_name}")
+    if roster_override is not None:
+        if len(roster_override) > cfg.game.max_players:
+            raise ValueError(
+                f"roster_override has {len(roster_override)} players but "
+                f"max_players={cfg.game.max_players}")
+        for p in roster_override:
+            cur.execute("""INSERT INTO players
+                (email,display_name,slack_user_id,is_npc) VALUES (?,?,?,?)""",
+                (p["email"], p["display_name"], p["slack_user_id"],
+                 int(bool(p.get("is_npc", False)))))
+            player_id_list.append(cur.lastrowid)
+            print(f"  Created player: {p['display_name']}")
+    else:
+        for p in cfg.players:
+            cur.execute("INSERT INTO players (email,display_name,slack_user_id) VALUES (?,?,?)",
+                        (p.email, p.display_name, p.slack_user_id))
+            player_id_list.append(cur.lastrowid)
+            print(f"  Created player: {p.display_name}")
 
     # 3. Create starting ships for each player
     sc = cfg.starting_configuration
@@ -75,5 +108,10 @@ def bootstrap_game(config_path: str = None):
                 (f"Colony-P{idx+1}", player_id, home_sector_id))
 
     cur.execute("INSERT OR IGNORE INTO game_state (id,current_turn) VALUES (1,0)")
+    cur.execute("""INSERT OR IGNORE INTO games (id,scenario_name,scenario_file,selected_by)
+        VALUES (1,?,?,?)""",
+        (scenario_name or cfg.starting_configuration.name,
+         scenario_file or "(default from game_config.yaml)",
+         selected_by))
     conn.commit(); conn.close()
     print("Bootstrap complete.")

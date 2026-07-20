@@ -1,6 +1,13 @@
 # Starting configuration for XSettlers MVP (game0).
-# To create a new game variant, copy this file, rename it (e.g. game1.yaml),
-# and update starting_configuration_file in game_config.yaml to point to it.
+# To create a new game variant, copy this file, rename it (e.g. game1.yaml).
+# It's automatically discoverable via mcp/game_select.py's list_scenarios() --
+# no need to touch game_config.yaml. name/description are required and shown
+# to players when they're choosing which scenario to play.
+
+name: "Candidate Zero"
+description: >
+  The default MVP scenario. Two players, 8 ships each, no starting colony --
+  everyone begins mobile and picks their own moment to colonize.
 
 home_sector_by_player:
   - [3, 3, 0]    # Player 1

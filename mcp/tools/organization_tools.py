@@ -1,12 +1,22 @@
 from db.connection import get_connection
 from db.events import record_event
+from engine.turn import get_current_turn
 import json
 
 VALID_ORG_MISSIONS = {"idle", "move", "colonize", "defend", "attack"}
 VALID_POD_MISSIONS = {"idle", "produce_energy", "produce_food", "produce_goods", "scan"}
 
 def set_mission(slack_user_id: str, org_id: int, mission: str, params: dict = None) -> dict:
-    """Set an organization's mission. Validates ownership, mobility, and mission type."""
+    """
+    Set an organization's mission. Validates ownership and mission type, and
+    enforces the three org-lock states (see Data Model & Storage Design):
+      - in transit (sector_id == -1): locked entirely, must cancel_move first
+      - colony: locked against 'move' only — defend/attack/idle remain assignable
+      - mid-colonization (ship, is_mobile == 0, not in transit): locked entirely,
+        committed for the 3-turn transition window
+    Setting mission='colonize' flips is_mobile to 0 immediately and schedules a
+    colonize_complete event 3 turns out for engine/turn.py to resolve.
+    """
     if mission not in VALID_ORG_MISSIONS:
         return {"error": f"Invalid mission '{mission}'. Valid: {sorted(VALID_ORG_MISSIONS)}"}
     conn = get_connection(); cur = conn.cursor()
@@ -14,19 +24,36 @@ def set_mission(slack_user_id: str, org_id: int, mission: str, params: dict = No
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
-    cur.execute("SELECT id,is_mobile,org_type FROM organizations WHERE id=? AND player_id=?",
+    cur.execute("SELECT id,is_mobile,org_type,sector_id FROM organizations WHERE id=? AND player_id=?",
                 (org_id, player["id"]))
     org = cur.fetchone()
     if not org:
         conn.close(); return {"error": "Organization not found or not owned by player"}
-    if mission == "move" and not org["is_mobile"]:
-        conn.close(); return {"error": "Colonies cannot move — use confirm_move for ships"}
+    if org["sector_id"] == -1:
+        conn.close()
+        return {"error": "This organization is currently in transit — call cancel_move before assigning a new mission"}
+    if org["org_type"] == "colony":
+        if mission == "move":
+            conn.close(); return {"error": "Colonies cannot move"}
+    elif not org["is_mobile"]:
+        conn.close()
+        return {"error": "This ship is committed to colonizing and cannot be reassigned until the transition resolves"}
     record_event(
         event_type="mission.set",
         payload={"org_id": org_id, "mission": mission, "params": params or {}},
         actor_id=player["id"], subject_id=org_id, subject_type="organization")
-    cur.execute("UPDATE organizations SET mission=?, mission_params=? WHERE id=?",
-                (mission, json.dumps(params) if params else None, org_id))
+    if mission == "colonize":
+        resolve_turn = get_current_turn() + 3
+        record_event(
+            event_type="colonize_complete",
+            payload={"org_id": org_id, "sector_id": org["sector_id"]},
+            actor_id=player["id"], subject_id=org_id, subject_type="organization",
+            resolve_at_turn=resolve_turn)
+        cur.execute("UPDATE organizations SET mission=?, mission_params=?, is_mobile=0 WHERE id=?",
+                    (mission, json.dumps(params) if params else None, org_id))
+    else:
+        cur.execute("UPDATE organizations SET mission=?, mission_params=? WHERE id=?",
+                    (mission, json.dumps(params) if params else None, org_id))
     conn.commit(); conn.close()
     return {"ok": True, "org_id": org_id, "mission": mission}
 

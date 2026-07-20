@@ -18,6 +18,7 @@ The player who builds the most powerful civilization wins.
 
 > This repository is the source of truth for XSettlers going forward. The docs below originated as Slack canvases and were migrated here on 2026-07-18; the original canvases now serve only as historical/archival reference — this repo, not Slack, is authoritative for design and code from here on.
 
+- [Player Guide](docs/player_guide.md) — start here if you just want to learn how to play
 - [Product Requirements](docs/product_requirements.md)
 - [Data Model & Storage Design](docs/data_model_and_storage_design.md)
 - [MCP Server Layer Design](docs/mcp_server_layer_design.md)

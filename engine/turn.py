@@ -85,13 +85,18 @@ def end_of_turn():
     #    Scheduled by set_mission() via record_event(resolve_at_turn=...). Idempotent via the
     #    org_type='ship' filter: once resolved, org_type flips to 'colony' and this stops
     #    matching, so no separate "resolved" flag is needed.
+    #    resolve_at_turn was scheduled against get_current_turn() (the turn-in-progress at
+    #    scheduling time); current_turn here is that same in-progress value read at the top
+    #    of *this* call, one turn behind what it'll be once this call's increment (step 7)
+    #    lands. Compare against current_turn+1 so "3 turns" means 3 completed end_of_turn()
+    #    passes, not 4.
     cur.execute("""
         SELECT o.id,o.org_type,o.player_id,o.sector_id,o.mission,o.mission_params
         FROM events e
         JOIN organizations o ON o.id = e.subject_id AND e.subject_type = 'organization'
         WHERE e.event_type = 'colonize_complete' AND e.resolve_at_turn <= ?
           AND o.org_type = 'ship' AND o.mission = 'colonize'
-    """, (current_turn,))
+    """, (current_turn + 1,))
     for org in cur.fetchall():
         _handle_colonize(cur, org, current_turn)
 

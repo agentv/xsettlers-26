@@ -97,7 +97,9 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
             VALUES (?,?,100)""", (player_id, home_sector_id))
         print(f"  Created {sc.ships_per_player} ships for player {player_id}.")
 
-    # 4. Optionally create a home colony
+    # 4. Optionally create a home colony -- same pod loadout as a ship (see
+    #    docs/player_guide.md's Diaspora section: "every organization -- each
+    #    ship and the home colony alike -- carries the same 18-pod loadout").
     if sc.home_colony:
         for idx, player_id in enumerate(player_id_list):
             home_coords = tuple(sc.home_sector_by_player[idx])
@@ -106,6 +108,15 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
                 (org_type,name,player_id,sector_id,is_mobile,mission)
                 VALUES ('colony',?,?,?,0,'idle')""",
                 (f"Colony-P{idx+1}", player_id, home_sector_id))
+            colony_org_id = cur.lastrowid
+            for pod_tmpl in sc.pods_per_ship:
+                for _ in range(pod_tmpl.count):
+                    cur.execute("""INSERT INTO pods
+                        (mission,org_id,storage_capacity,storage_current,
+                         energy_consumption,food_consumption)
+                        VALUES (?,?,?,0.0,?,?)""",
+                        (pod_tmpl.mission, colony_org_id, pod_tmpl.storage_capacity,
+                         pod_tmpl.energy_consumption, pod_tmpl.food_consumption))
 
     cur.execute("INSERT OR IGNORE INTO game_state (id,current_turn) VALUES (1,0)")
     cur.execute("""INSERT OR IGNORE INTO games (id,scenario_name,scenario_file,selected_by)

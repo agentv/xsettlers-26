@@ -159,25 +159,26 @@ Full technical detail on each of these lives in
 
 ## Scenario Zero: Diaspora
 
-> This section describes the current starting scenario (`config/game0.yaml`,
-> internally still named `Candidate Zero`). It's a living description — the
-> numbers below will change as we playtest and figure out what the scenario
-> actually wants to be.
+> This section describes `config/game1.yaml` ("Diaspora"), a distinct
+> scenario alongside the no-colony MVP default (`config/game0.yaml`,
+> "Candidate Zero"). Both are selectable via the `list_scenarios` and
+> `select_scenario` MCP tools — see [MCP Server Layer Design](mcp_server_layer_design.md)
+> for the gateway/selection flow.
 
 One foothold, and a fleet to expand from it.
 
 - **Players:** 2.
 - **Starting colony:** each player begins with one colony already
   established at their home sector — a fixed foothold from turn 1.
-- **Starting fleet:** 7 ships per player, all identical, all spawned
+- **Starting fleet:** 8 ships per player, all identical, all spawned
   alongside the home colony on turn 1.
 - **Pods:** every organization — each ship and the home colony alike —
   carries the same 18-pod loadout: 6 producing energy, 6 producing goods,
   6 producing food, all active and producing from turn 1. No setup needed
   to get started.
-- **Starting positions:** home sectors are set well apart (far enough for a
-  real exploration phase, close enough that contact with your rival is
-  likely mid-game).
+- **Starting positions:** home sectors are set well apart (12.7 sectors,
+  Euclidean, in the current layout) — far enough for a real exploration
+  phase, close enough that contact with your rival is likely mid-game.
 - **Length:** 20 turns, then the game ends and scores are tallied.
 - **How you win:** same as always — total resources accumulated across every
   ship and colony you own, highest score at the end of turn 20 takes it.
@@ -185,9 +186,3 @@ One foothold, and a fleet to expand from it.
 The name is a placeholder for the vibe, not a locked design: this is the
 scenario we're using to find out how much a fleet built out from a single
 foothold can actually build in 20 turns.
-
-**Implementation note:** as of this writing, `db/bootstrap.py`'s
-`home_colony` flag creates the colony organization but doesn't yet attach
-any pods to it — giving it the same 18-pod loadout as a ship is decided
-design, just not yet wired up in code. That change is queued behind the
-in-progress scenario-selection work landing on `main`.

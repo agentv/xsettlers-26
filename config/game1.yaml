@@ -1,10 +1,11 @@
-# Starting configuration for XSettlers -- Diaspora (game1).
+# Starting configuration for XSettlers -- Outbreak (game1).
 # One foothold, and a fleet to expand from it. See docs/player_guide.md's
-# "Scenario Zero: Diaspora" section for the full narrative description --
+# "Scenario One: Outbreak" section for the full narrative description --
 # this file is the first actual implementation of that scenario (previously
-# described in the player guide but never built as a real config/game*.yaml).
+# described in the player guide, under the name Diaspora, but never built
+# as a real config/game*.yaml -- see docs/TODO.md for the renaming history).
 
-name: "Diaspora"
+name: "Outbreak"
 description: >
   Each player begins with an established colony at their home sector plus a
   fleet of 8 ships, all producing from turn 1. Home sectors are set apart
@@ -16,13 +17,13 @@ home_sector_by_player:
 
 ships_per_player: 8
 
-# Same 18-pod loadout as game0's Candidate Zero, applied to every ship AND
+# Same 18-pod loadout as game0's Diaspora, applied to every ship AND
 # to the home colony (see home_colony below and db/bootstrap.py).
 pods_per_ship:
   - {mission: produce_energy, count: 6, storage_capacity: 100.0, energy_consumption: 0.0, food_consumption: 1.0}
   - {mission: produce_goods,  count: 6, storage_capacity: 100.0, energy_consumption: 2.0, food_consumption: 1.0}
   - {mission: produce_food,   count: 6, storage_capacity: 100.0, energy_consumption: 2.0, food_consumption: 0.0}
 
-# Unlike Candidate Zero, Diaspora starts each player with an established
+# Unlike game0's Diaspora, Outbreak starts each player with an established
 # colony at their home sector -- a fixed foothold from turn 1.
 home_colony: true

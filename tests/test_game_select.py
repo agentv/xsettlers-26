@@ -11,8 +11,16 @@ def test_list_scenarios_finds_game0():
     names = {s["scenario_name"] for s in scenarios}
     assert "game0" in names
     game0 = next(s for s in scenarios if s["scenario_name"] == "game0")
-    assert game0["name"] == "Candidate Zero"
+    assert game0["name"] == "Diaspora"
     assert game0["description"]
+
+def test_list_scenarios_finds_game1():
+    scenarios = list_scenarios()
+    names = {s["scenario_name"] for s in scenarios}
+    assert "game1" in names
+    game1 = next(s for s in scenarios if s["scenario_name"] == "game1")
+    assert game1["name"] == "Outbreak"
+    assert game1["description"]
 
 def test_get_active_game_none_before_selection():
     _clear_active_game()
@@ -48,6 +56,10 @@ def test_select_scenario_idempotent_same_scenario():
     assert result["ok"] is True
     assert result["already_active"] is True
 
-# No test for "reject switching to a different active scenario" -- only one
-# real scenario file (game0.yaml) exists today, so there's no second valid
-# scenario_name to exercise that branch against realistically yet.
+def test_select_scenario_rejects_switching_once_active():
+    _clear_active_game()
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game1")
+    assert "error" in result
+    active = get_active_game()
+    assert active["scenario_name"] == "game0"  # unchanged

@@ -157,13 +157,16 @@ Full technical detail on each of these lives in
 
 ---
 
-## Scenario Zero: Diaspora
+## Scenario One: Outbreak
 
-> This section describes `config/game1.yaml` ("Diaspora"), a distinct
+> This section describes `config/game1.yaml` ("Outbreak"), a distinct
 > scenario alongside the no-colony MVP default (`config/game0.yaml`,
-> "Candidate Zero"). Both are selectable via the `list_scenarios` and
+> "Diaspora"). Both are selectable via the `list_scenarios` and
 > `select_scenario` MCP tools — see [MCP Server Layer Design](mcp_server_layer_design.md)
-> for the gateway/selection flow.
+> for the gateway/selection flow. (Naming note: this scenario was originally
+> sketched under the name "Diaspora" before either scenario file existed;
+> that name now belongs to `game0.yaml` instead — see `docs/TODO.md` for
+> the history.)
 
 One foothold, and a fleet to expand from it.
 

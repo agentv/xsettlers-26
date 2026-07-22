@@ -22,7 +22,7 @@ def test_bootstrap_home_colony_gets_same_pod_loadout_as_ship():
     """
     Regression test: db/bootstrap.py's home_colony step used to create the
     colony organization but never attach any pods to it (see
-    docs/player_guide.md's Diaspora section, "Implementation note"). Colonies
+    docs/player_guide.md's Outbreak section, "Implementation note"). Colonies
     must get the same 18-pod loadout as ships, not zero pods.
     """
     _bootstrap(scenario_file="config/game1.yaml", scenario_name="game1")

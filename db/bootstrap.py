@@ -98,7 +98,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
         print(f"  Created {sc.ships_per_player} ships for player {player_id}.")
 
     # 4. Optionally create a home colony -- same pod loadout as a ship (see
-    #    docs/player_guide.md's Diaspora section: "every organization -- each
+    #    docs/player_guide.md's Outbreak section: "every organization -- each
     #    ship and the home colony alike -- carries the same 18-pod loadout").
     if sc.home_colony:
         for idx, player_id in enumerate(player_id_list):

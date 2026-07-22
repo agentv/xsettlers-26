@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import hmac
 import os
 import uvicorn
 from starlette.applications import Starlette
@@ -165,6 +166,24 @@ session_manager = StreamableHTTPSessionManager(app=app, stateless=True)
 async def health(request):
     return PlainTextResponse("ok")
 
+# Stopgap perimeter auth: a single static shared secret, not per-player keys.
+# This only gates *reaching* /mcp at all -- it does not verify that a given
+# slack_user_id in a request's arguments really is who it claims to be (every
+# tool still trusts slack_user_id at face value; see docs/TODO.md). It stops
+# an anonymous internet stranger from calling tools; it does not stop
+# whoever holds the secret from impersonating any player in the roster.
+# Fails closed: if MCP_SHARED_SECRET isn't set, every request is rejected
+# rather than silently left open -- avoids "forgot to configure it" in prod.
+MCP_SHARED_SECRET = os.getenv("MCP_SHARED_SECRET")
+
+def _authorized(scope) -> bool:
+    if not MCP_SHARED_SECRET:
+        return False
+    headers = dict(scope.get("headers") or [])
+    presented = headers.get(b"authorization", b"").decode("utf-8", "ignore")
+    expected = f"Bearer {MCP_SHARED_SECRET}"
+    return hmac.compare_digest(presented, expected)
+
 class _MCPASGIApp:
     """
     Wraps session_manager.handle_request as a plain-class ASGI callable.
@@ -177,6 +196,11 @@ class _MCPASGIApp:
     POST /mcp to /mcp/.
     """
     async def __call__(self, scope, receive, send):
+        if not _authorized(scope):
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"content-type", b"text/plain")]})
+            await send({"type": "http.response.body", "body": b"Unauthorized"})
+            return
         await session_manager.handle_request(scope, receive, send)
 
 @contextlib.asynccontextmanager

@@ -6,7 +6,7 @@ import json
 VALID_ORG_MISSIONS = {"idle", "move", "colonize", "defend", "attack"}
 VALID_POD_MISSIONS = {"idle", "produce_energy", "produce_food", "produce_goods", "scan"}
 
-def set_mission(slack_user_id: str, org_id: int, mission: str, params: dict = None) -> dict:
+def set_mission(player_token: str, org_id: int, mission: str, params: dict = None) -> dict:
     """
     Set an organization's mission. Validates ownership and mission type, and
     enforces the three org-lock states (see Data Model & Storage Design):
@@ -20,7 +20,7 @@ def set_mission(slack_user_id: str, org_id: int, mission: str, params: dict = No
     if mission not in VALID_ORG_MISSIONS:
         return {"error": f"Invalid mission '{mission}'. Valid: {sorted(VALID_ORG_MISSIONS)}"}
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
@@ -57,7 +57,7 @@ def set_mission(slack_user_id: str, org_id: int, mission: str, params: dict = No
     conn.commit(); conn.close()
     return {"ok": True, "org_id": org_id, "mission": mission}
 
-def set_pod_mission(slack_user_id: str, pod_id: int, mission: str,
+def set_pod_mission(player_token: str, pod_id: int, mission: str,
                    target_sector_id: int = None) -> dict:
     """
     Set a pod's mission. Validates ownership and mission type.
@@ -68,7 +68,7 @@ def set_pod_mission(slack_user_id: str, pod_id: int, mission: str,
     if mission not in VALID_POD_MISSIONS:
         return {"error": f"Invalid pod mission '{mission}'. Valid: {sorted(VALID_POD_MISSIONS)}"}
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
@@ -90,14 +90,14 @@ def set_pod_mission(slack_user_id: str, pod_id: int, mission: str,
     return {"ok": True, "pod_id": pod_id, "mission": mission,
             "target_sector_id": target_sector_id}
 
-def set_pod_scan_target(slack_user_id: str, pod_id: int, target_sector_id: int) -> dict:
+def set_pod_scan_target(player_token: str, pod_id: int, target_sector_id: int) -> dict:
     """
     Assign or change the scan target sector for a pod already in 'scan' mission.
     Range is validated at end-of-turn resolution, not here — an out-of-range target
     is accepted but will trigger an alert.scan_out_of_range event at resolution.
     """
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
@@ -118,7 +118,7 @@ def set_pod_scan_target(slack_user_id: str, pod_id: int, target_sector_id: int) 
     conn.commit(); conn.close()
     return {"ok": True, "pod_id": pod_id, "target_sector_id": target_sector_id}
 
-def show_organization(slack_user_id: str, org_id: int) -> dict:
+def show_organization(player_token: str, org_id: int) -> dict:
     """
     Return the complete properties of one of the player's own organizations:
     org record (type, mission, mission_params, is_mobile, sector location)
@@ -126,7 +126,7 @@ def show_organization(slack_user_id: str, org_id: int) -> dict:
     Ownership-gated — only the calling player's orgs are accessible.
     """
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
@@ -148,7 +148,7 @@ def show_organization(slack_user_id: str, org_id: int) -> dict:
     conn.close()
     return result
 
-def show_game_status(slack_user_id: str) -> dict:
+def show_game_status(player_token: str) -> dict:
     """
     Return a player-scoped game status summary:
     - Turn context: current turn and turn limit
@@ -159,7 +159,7 @@ def show_game_status(slack_user_id: str) -> dict:
     Ownership-gated — only the calling player's data.
     """
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}

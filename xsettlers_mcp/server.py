@@ -31,100 +31,100 @@ async def list_tools():
                         "Must be called (and select_scenario used to pick one) before any "
                         "other tool works -- until a scenario is selected, no game exists "
                         "and every other tool will report 'Player not found'.",
-            inputSchema={"type":"object","properties":{"slack_user_id":{"type":"string"}},
-                         "required":["slack_user_id"]}),
+            inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
+                         "required":["player_token"]}),
         types.Tool(name="select_scenario",
             description="Choose a scenario by name (see list_scenarios) to start playing. "
                         "Bootstraps the game on first selection; the MVP runs one shared "
                         "game per deployed instance, so this can't be used to switch "
                         "scenarios once one is already active.",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"scenario_name":{"type":"string"}},
-                "required":["slack_user_id","scenario_name"]}),
+                "player_token":{"type":"string"},"scenario_name":{"type":"string"}},
+                "required":["player_token","scenario_name"]}),
         types.Tool(name="get_player_state",
             description="Dashboard: player record, all organizations, all pods",
-            inputSchema={"type":"object","properties":{"slack_user_id":{"type":"string"}},
-                         "required":["slack_user_id"]}),
+            inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
+                         "required":["player_token"]}),
         types.Tool(name="declare_end_turn",
             description="Player declares no further moves this tick",
-            inputSchema={"type":"object","properties":{"slack_user_id":{"type":"string"}},
-                         "required":["slack_user_id"]}),
+            inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
+                         "required":["player_token"]}),
         types.Tool(name="rescind_end_turn",
             description="Player rescinds their end turn declaration",
-            inputSchema={"type":"object","properties":{"slack_user_id":{"type":"string"}},
-                         "required":["slack_user_id"]}),
+            inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
+                         "required":["player_token"]}),
         types.Tool(name="get_sector",
             description="Get a specific sector (player-scoped visibility)",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"sector_id":{"type":"integer"}},
-                "required":["slack_user_id","sector_id"]}),
+                "player_token":{"type":"string"},"sector_id":{"type":"integer"}},
+                "required":["player_token","sector_id"]}),
         types.Tool(name="get_sector_map",
             description="All sectors visible to the calling player",
-            inputSchema={"type":"object","properties":{"slack_user_id":{"type":"string"}},
-                         "required":["slack_user_id"]}),
+            inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
+                         "required":["player_token"]}),
         types.Tool(name="show_sector_neighborhood",
             description="All visible sectors within Euclidean distance 2 of a center. Center is either an org_id or explicit (center_x, center_y, center_z) coordinates.",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},
+                "player_token":{"type":"string"},
                 "org_id":{"type":"integer"},
                 "center_x":{"type":"integer"},
                 "center_y":{"type":"integer"},
                 "center_z":{"type":"integer"},
                 "radius":{"type":"integer"}},
-                "required":["slack_user_id"]}),
+                "required":["player_token"]}),
         types.Tool(name="show_organization",
             description="Complete properties of one of the player's own organizations, including all pods.",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"org_id":{"type":"integer"}},
-                "required":["slack_user_id","org_id"]}),
+                "player_token":{"type":"string"},"org_id":{"type":"integer"}},
+                "required":["player_token","org_id"]}),
         types.Tool(name="show_game_status",
             description="Player-scoped game summary: turn context, all organizations (in-transit marked), and aggregate asset totals.",
-            inputSchema={"type":"object","properties":{"slack_user_id":{"type":"string"}},
-                         "required":["slack_user_id"]}),
+            inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
+                         "required":["player_token"]}),
         types.Tool(name="get_organizations_in_range",
             description="Sectors within jump range of a player's ship",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"ship_id":{"type":"integer"},
+                "player_token":{"type":"string"},"ship_id":{"type":"integer"},
                 "jump_range":{"type":"integer"}},
-                "required":["slack_user_id","ship_id","jump_range"]}),
+                "required":["player_token","ship_id","jump_range"]}),
         types.Tool(name="preview_move",
             description="Preview a move: calculate travel time without committing",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"ship_id":{"type":"integer"},
+                "player_token":{"type":"string"},"ship_id":{"type":"integer"},
                 "dest_sector_id":{"type":"integer"},
                 "jump_range_per_turn":{"type":"integer"}},
-                "required":["slack_user_id","ship_id","dest_sector_id"]}),
+                "required":["player_token","ship_id","dest_sector_id"]}),
         types.Tool(name="confirm_move",
             description="Commit a previewed move. Ship enters transit until arrival turn.",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"ship_id":{"type":"integer"},
+                "player_token":{"type":"string"},"ship_id":{"type":"integer"},
                 "dest_sector_id":{"type":"integer"},
                 "jump_range_per_turn":{"type":"integer"}},
-                "required":["slack_user_id","ship_id","dest_sector_id"]}),
+                "required":["player_token","ship_id","dest_sector_id"]}),
         types.Tool(name="cancel_move",
             description="Cancel a move in progress. Rubber-bands ship to origin sector.",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"ship_id":{"type":"integer"}},
-                "required":["slack_user_id","ship_id"]}),
+                "player_token":{"type":"string"},"ship_id":{"type":"integer"}},
+                "required":["player_token","ship_id"]}),
         types.Tool(name="set_mission",
             description="Set an organization's mission (idle/move/colonize/defend/attack)",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"org_id":{"type":"integer"},
+                "player_token":{"type":"string"},"org_id":{"type":"integer"},
                 "mission":{"type":"string"},"params":{"type":"object"}},
-                "required":["slack_user_id","org_id","mission"]}),
+                "required":["player_token","org_id","mission"]}),
         types.Tool(name="set_pod_mission",
             description="Set a pod's mission (idle/produce_energy/produce_food/produce_goods/scan). For scan, optionally include target_sector_id.",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"pod_id":{"type":"integer"},
+                "player_token":{"type":"string"},"pod_id":{"type":"integer"},
                 "mission":{"type":"string"},
                 "target_sector_id":{"type":"integer"}},
-                "required":["slack_user_id","pod_id","mission"]}),
+                "required":["player_token","pod_id","mission"]}),
         types.Tool(name="set_pod_scan_target",
             description="Set or update the scan target sector for a pod in scan mission.",
             inputSchema={"type":"object","properties":{
-                "slack_user_id":{"type":"string"},"pod_id":{"type":"integer"},
+                "player_token":{"type":"string"},"pod_id":{"type":"integer"},
                 "target_sector_id":{"type":"integer"}},
-                "required":["slack_user_id","pod_id","target_sector_id"]}),
+                "required":["player_token","pod_id","target_sector_id"]}),
     ]
 
 @app.call_tool()
@@ -168,8 +168,8 @@ async def health(request):
 
 # Stopgap perimeter auth: a single static shared secret, not per-player keys.
 # This only gates *reaching* /mcp at all -- it does not verify that a given
-# slack_user_id in a request's arguments really is who it claims to be (every
-# tool still trusts slack_user_id at face value; see docs/TODO.md). It stops
+# player_token in a request's arguments really is who it claims to be (every
+# tool still trusts player_token at face value; see docs/TODO.md). It stops
 # an anonymous internet stranger from calling tools; it does not stop
 # whoever holds the secret from impersonating any player in the roster.
 # Fails closed: if MCP_SHARED_SECRET isn't set, every request is rejected

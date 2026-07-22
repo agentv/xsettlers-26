@@ -1,7 +1,7 @@
 """
 There's no separate xsettlers_mcp/gateway.py module. select_scenario() is the one
 explicit gate, and every gameplay tool already checks player existence
-internally (SELECT id FROM players WHERE slack_user_id=?) -- before a
+internally (SELECT id FROM players WHERE player_token=?) -- before a
 scenario is selected, players is empty, so those checks reject on their own.
 These tests verify that combination actually gates access end-to-end, which
 is what a dedicated gateway module's tests would otherwise cover.
@@ -17,18 +17,18 @@ def _clear_active_game():
 
 def test_gameplay_blocked_before_any_scenario_selected():
     _clear_active_game()
-    result = show_game_status("U0BF2CE53GA")
+    result = show_game_status("REPLACE_WITH_GENERATED_TOKEN_1")
     assert "error" in result
 
 def test_gameplay_blocked_for_unrecognized_player_even_after_selection():
     _clear_active_game()
-    select_scenario("U0BF2CE53GA", "game0")
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
     result = show_game_status("U_TOTAL_STRANGER")
     assert "error" in result
 
 def test_gameplay_works_for_roster_player_after_selection():
     _clear_active_game()
-    select_scenario("U0BF2CE53GA", "game0")
-    result = show_game_status("U0BF2CE53GA")
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
+    result = show_game_status("REPLACE_WITH_GENERATED_TOKEN_1")
     assert "error" not in result
     assert result["turn"] == 0

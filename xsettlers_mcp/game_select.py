@@ -8,14 +8,14 @@ from xsettlers_mcp.auth import authenticate
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _SCENARIO_GLOB = os.path.join(_REPO_ROOT, "config", "game*.yaml")
 
-def list_scenarios(slack_user_id: str = None) -> list:
+def list_scenarios(player_token: str = None) -> list:
     """
     Enumerate available game scenarios by scanning config/game*.yaml
     (excluding game_config.yaml itself, which is the shared game settings +
     player roster file, not a scenario). Each scenario file is a starting
     configuration and must declare its own name/description.
 
-    slack_user_id is accepted but unused -- kept for call-signature
+    player_token is accepted but unused -- kept for call-signature
     consistency with every other tool function, since the MCP dispatch
     layer calls every tool with the same arguments dict.
     """
@@ -42,7 +42,7 @@ def get_active_game() -> dict:
     row = cur.fetchone(); conn.close()
     return dict(row) if row else None
 
-def select_scenario(slack_user_id: str, scenario_name: str) -> dict:
+def select_scenario(player_token: str, scenario_name: str) -> dict:
     """
     The one real gate a player must pass before anything else works: must be
     on the roster (authenticate) and must name a real scenario. Bootstraps
@@ -50,7 +50,7 @@ def select_scenario(slack_user_id: str, scenario_name: str) -> dict:
 
     Once this succeeds, bootstrap_game() has populated the players table
     from the roster -- every other tool's existing internal
-    "SELECT id FROM players WHERE slack_user_id=?" check now finds a row.
+    "SELECT id FROM players WHERE player_token=?" check now finds a row.
     Before this succeeds, players is empty and every other tool naturally
     rejects with "Player not found", so no separate per-call gate is needed
     elsewhere.
@@ -59,7 +59,7 @@ def select_scenario(slack_user_id: str, scenario_name: str) -> dict:
     rejected -- the MVP runs one shared game per deployed instance;
     switching scenarios mid-game isn't supported.
     """
-    auth = authenticate(slack_user_id)
+    auth = authenticate(player_token)
     if not auth["ok"]:
         return auth
     scenarios = {s["scenario_name"]: s for s in list_scenarios()}
@@ -73,5 +73,5 @@ def select_scenario(slack_user_id: str, scenario_name: str) -> dict:
                           f"'{active['scenario_name']}' — cannot switch mid-game"}
     scenario = scenarios[scenario_name]
     bootstrap_game(scenario_file=scenario["file"], scenario_name=scenario_name,
-                   selected_by=slack_user_id)
+                   selected_by=player_token)
     return {"ok": True, "already_active": False, "scenario": get_active_game()}

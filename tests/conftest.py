@@ -22,13 +22,13 @@ def seed_active_game(scenario_name="test-scenario"):
         VALUES (1,?,?,?)""", (scenario_name, f"config/{scenario_name}.yaml", None))
     conn.commit(); conn.close()
 
-def seed_player(email="player@test.com", slack_id="U_P1", display_name="Player One"):
+def seed_player(email="player@test.com", player_token="U_P1", display_name="Player One"):
     conn = get_connection()
-    conn.execute("INSERT INTO players (email,display_name,slack_user_id) VALUES (?,?,?)",
-                 (email,display_name,slack_id))
+    conn.execute("INSERT INTO players (email,display_name,player_token) VALUES (?,?,?)",
+                 (email,display_name,player_token))
     conn.commit()
-    pid = conn.execute("SELECT id FROM players WHERE slack_user_id=?",
-                       (slack_id,)).fetchone()["id"]
+    pid = conn.execute("SELECT id FROM players WHERE player_token=?",
+                       (player_token,)).fetchone()["id"]
     conn.close(); return pid
 
 def seed_sector(x=0, y=0, z=0, energy=50.0, food=50.0, goods=50.0):

@@ -15,10 +15,10 @@ def get_scan_range(org_id: int) -> int:
 # valid target. See `engine/turn.py` for scan resolution logic.
 
 
-def get_sector(slack_user_id: str, sector_id: int) -> dict:
+def get_sector(player_token: str, sector_id: int) -> dict:
     """Return sector info — only if the player has visibility (confidence > 0)."""
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
@@ -29,10 +29,10 @@ def get_sector(slack_user_id: str, sector_id: int) -> dict:
     if not sector: return {"error": "Sector not visible or does not exist"}
     return dict(sector)
 
-def get_sector_map(slack_user_id: str) -> list:
+def get_sector_map(player_token: str) -> list:
     """Return all sectors visible to this player, ordered by confidence."""
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
@@ -45,7 +45,7 @@ def get_sector_map(slack_user_id: str) -> list:
 
 
 def show_sector_neighborhood(
-        slack_user_id: str,
+        player_token: str,
         org_id: int = None,
         center_x: int = None, center_y: int = None, center_z: int = None,
         radius: int = 2) -> list:
@@ -58,7 +58,7 @@ def show_sector_neighborhood(
     POC default radius: 2.
     """
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}

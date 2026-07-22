@@ -72,6 +72,8 @@ The server-side clock fires on a fixed interval as the fallback. If all active p
 
 # Player Identity & Partial View Scoping
 
+> **Note:** this section's `slack_user_id` naming is superseded (2026-07-22) by the client-agnostic `player_token` — same role (identity argument on every tool call), renamed so any MCP client, not just Slack, can authenticate. See `CLAUDE.md` and `docs/TODO.md` for what changed; this canvas is retained verbatim otherwise.
+
 Every tool call carries the calling player's `slack_user_id`. The MCP server:
 
 1. Resolves `slack_user_id` → `player_id` via the Players table

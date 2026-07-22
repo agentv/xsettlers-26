@@ -1,7 +1,7 @@
 from xsettlers_mcp.auth import authenticate
 
 def test_authenticate_known_player():
-    result = authenticate("U0BF2CE53GA")
+    result = authenticate("REPLACE_WITH_GENERATED_TOKEN_1")
     assert result["ok"] is True
     assert result["display_name"] == "Vincent"
 

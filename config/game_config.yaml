@@ -37,6 +37,16 @@ sectors:
     goods_capacity: 100.0
   # ... full 256 sectors seeded procedurally in bootstrap_game
 
+# player_token is each player's actual credential -- opaque, generated (e.g.
+# `python3 -c "import secrets; print(secrets.token_urlsafe(24))"`), not a
+# public-looking platform ID. Whatever client a player uses (Slack, curl,
+# another LLM agent) passes this token as the player_token argument on every
+# tool call; xsettlers_mcp/auth.py compares it against this roster.
+#
+# SECURITY: this file is committed to git. The placeholder values below are
+# NOT real secrets -- generate fresh tokens before any real deployment, and
+# treat this file as sensitive from that point on (consider gitignoring a
+# real deployment's copy, same as .env, rather than committing live tokens).
 players:
-  - {email: "vincent@example.com", display_name: "Vincent", slack_user_id: "U0BF2CE53GA"}
-  - {email: "player2@example.com", display_name: "Player Two", slack_user_id: "U_PLAYER2"}
+  - {email: "vincent@example.com", display_name: "Vincent", player_token: "REPLACE_WITH_GENERATED_TOKEN_1"}
+  - {email: "player2@example.com", display_name: "Player Two", player_token: "REPLACE_WITH_GENERATED_TOKEN_2"}

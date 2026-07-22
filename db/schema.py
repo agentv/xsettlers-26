@@ -7,12 +7,21 @@ def init_schema():
     cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='spatial_ref_sys'")
     if cur.fetchone()[0] == 0:
         cur.execute("SELECT InitSpatialMetaData(1)")
+    # One-time migration: players.slack_user_id -> player_token (2026-07-22,
+    # client-agnostic auth generalization). CREATE TABLE IF NOT EXISTS below
+    # is a no-op against an existing table regardless of column names, so a
+    # deployed DB that already has the old column needs an explicit rename.
+    cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='players'")
+    if cur.fetchone()[0] > 0:
+        cols = {row[1] for row in cur.execute("PRAGMA table_info(players)").fetchall()}
+        if "slack_user_id" in cols and "player_token" not in cols:
+            cur.execute("ALTER TABLE players RENAME COLUMN slack_user_id TO player_token")
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS players (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
             email             TEXT NOT NULL UNIQUE,
             display_name      TEXT NOT NULL,
-            slack_user_id     TEXT UNIQUE,
+            player_token      TEXT UNIQUE,
             end_turn_declared INTEGER DEFAULT 0,
             is_npc            INTEGER DEFAULT 0
         );

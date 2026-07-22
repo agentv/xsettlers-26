@@ -25,12 +25,12 @@ def test_select_scenario_unknown_player():
 
 def test_select_scenario_unknown_scenario_name():
     _clear_active_game()
-    result = select_scenario("U0BF2CE53GA", "does_not_exist")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "does_not_exist")
     assert "error" in result
 
 def test_select_scenario_bootstraps_and_activates():
     _clear_active_game()
-    result = select_scenario("U0BF2CE53GA", "game0")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
     assert result["ok"] is True
     assert result["already_active"] is False
     active = get_active_game()
@@ -43,8 +43,8 @@ def test_select_scenario_bootstraps_and_activates():
 
 def test_select_scenario_idempotent_same_scenario():
     _clear_active_game()
-    select_scenario("U0BF2CE53GA", "game0")
-    result = select_scenario("U0BF2CE53GA", "game0")
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
     assert result["ok"] is True
     assert result["already_active"] is True
 

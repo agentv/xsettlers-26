@@ -85,6 +85,8 @@ CREATE TABLE players (
 
 The `slack_user_id` column is the key integration point: when a player queries via Slack, their Slack identity resolves directly to their player record, and every query is automatically filtered to their partial view.
 
+> **Note:** this canvas's `slack_user_id` naming is superseded (2026-07-22) by the client-agnostic `player_token` — the column, the auth check, and every tool's identity argument were renamed so any MCP client (Slack, curl, another LLM agent) can authenticate the same way, not just Slack. See `CLAUDE.md` and `docs/TODO.md` for what changed. This canvas is retained verbatim for its schema/rationale content otherwise.
+
 > **Object Graph Summary:** Pods belong to Organizations (Ships or Colonies). Organizations are subclasses of a master `Organization` class. An Organization is located in a Sector and is owned by a Player. **Sectors are not owned by players** — they are neutral game-board cells that any player's ships or colonies may occupy.
 
 ## Sectors

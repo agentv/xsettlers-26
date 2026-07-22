@@ -19,7 +19,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
     Initialize a fresh game. Safe to call repeatedly — guards against double-init.
 
     roster_override, if given, is a list of dicts (email, display_name,
-    slack_user_id, optional is_npc) used instead of reading players from
+    player_token, optional is_npc) used instead of reading players from
     config_path's players: list. Escape hatch for a future lobby that
     assembles a roster dynamically (real players + NPC fill-in) rather
     than reading a fixed YAML list. Not currently called by anything --
@@ -57,15 +57,15 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
                 f"max_players={cfg.game.max_players}")
         for p in roster_override:
             cur.execute("""INSERT INTO players
-                (email,display_name,slack_user_id,is_npc) VALUES (?,?,?,?)""",
-                (p["email"], p["display_name"], p["slack_user_id"],
+                (email,display_name,player_token,is_npc) VALUES (?,?,?,?)""",
+                (p["email"], p["display_name"], p["player_token"],
                  int(bool(p.get("is_npc", False)))))
             player_id_list.append(cur.lastrowid)
             print(f"  Created player: {p['display_name']}")
     else:
         for p in cfg.players:
-            cur.execute("INSERT INTO players (email,display_name,slack_user_id) VALUES (?,?,?)",
-                        (p.email, p.display_name, p.slack_user_id))
+            cur.execute("INSERT INTO players (email,display_name,player_token) VALUES (?,?,?)",
+                        (p.email, p.display_name, p.player_token))
             player_id_list.append(cur.lastrowid)
             print(f"  Created player: {p.display_name}")
 

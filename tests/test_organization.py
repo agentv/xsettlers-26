@@ -58,8 +58,8 @@ def test_set_mission_colony_cannot_move():
     assert "error" in set_mission("U_P1", oid, "move")
 
 def test_set_mission_unowned_org():
-    p1 = seed_player(email="p1@t.com", slack_id="U_P1")
-    p2 = seed_player(email="p2@t.com", slack_id="U_P2")
+    p1 = seed_player(email="p1@t.com", player_token="U_P1")
+    p2 = seed_player(email="p2@t.com", player_token="U_P2")
     sid = seed_sector(); oid = seed_ship(p2, sid, name="Enemy")
     assert "error" in set_mission("U_P1", oid, "idle")
 
@@ -118,7 +118,7 @@ def test_set_pod_mission_invalid_type():
     assert "error" in set_pod_mission("U_P1", pod, "explode")
 
 def test_set_pod_mission_unowned_pod():
-    p1 = seed_player(email="p1@t.com", slack_id="U_P1")
-    p2 = seed_player(email="p2@t.com", slack_id="U_P2")
+    p1 = seed_player(email="p1@t.com", player_token="U_P1")
+    p2 = seed_player(email="p2@t.com", player_token="U_P2")
     sid = seed_sector(); oid = seed_ship(p2, sid); pod = seed_pod(oid)
     assert "error" in set_pod_mission("U_P1", pod, "produce_energy")

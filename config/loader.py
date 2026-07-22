@@ -44,7 +44,7 @@ class StartingConfiguration:
 class PlayerDef:
     email: str
     display_name: str
-    slack_user_id: str
+    player_token: str
 
 @dataclass
 class GameConfig:
@@ -114,7 +114,7 @@ def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameC
     players = [PlayerDef(
         email=_require(p, "email", "players[].email"),
         display_name=_require(p, "display_name", "players[].display_name"),
-        slack_user_id=_require(p, "slack_user_id", "players[].slack_user_id"),
+        player_token=_require(p, "player_token", "players[].player_token"),
     ) for p in raw.get("players", [])]
     if len(players) > game.max_players:
         raise ValueError(

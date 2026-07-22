@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-XSettlers is a multiplayer space strategy game played entirely through Slack. This repo is the Python MCP (Model Context Protocol) server: Slackbot calls MCP tools with a player's Slack identity attached, tools query/mutate a SpatiaLite database, and a background clock resolves turns on a fixed interval. There is no separate web/API layer — `xsettlers_mcp/server.py` *is* the server, serving MCP's **streamable HTTP** transport (Starlette + uvicorn, `POST /mcp`, `GET /health`) so a network-hosted deployment (Fly.io) can actually be reached remotely by Slackbot. (Switched from `stdio_server()` on 2026-07-22 — stdio only works for a client that spawns the process locally, which doesn't fit a cloud deployment.)
+XSettlers is a multiplayer space strategy game, originally designed to be played entirely through Slack but now client-agnostic (see below). This repo is the Python MCP (Model Context Protocol) server: any MCP-speaking client calls MCP tools with a player's token attached, tools query/mutate a SpatiaLite database, and a background clock resolves turns on a fixed interval. There is no separate web/API layer — `xsettlers_mcp/server.py` *is* the server, serving MCP's **streamable HTTP** transport (Starlette + uvicorn, `POST /mcp`, `GET /health`) so a network-hosted deployment (Fly.io) can actually be reached remotely. (Switched from `stdio_server()` on 2026-07-22 — stdio only works for a client that spawns the process locally, which doesn't fit a cloud deployment.)
+
+**Identity is client-agnostic, not Slack-specific.** Every tool's first argument is `player_token` (renamed from `slack_user_id` on 2026-07-22) — an opaque per-player secret compared with `hmac.compare_digest` in `xsettlers_mcp/auth.py`, not a Slack-platform credential. Slack, curl, another LLM agent, or anything else that knows a valid token authenticates identically; nothing in the auth path is Slack-specific anymore. Separately, `MCP_SHARED_SECRET` (an `Authorization: Bearer` header, checked in `xsettlers_mcp/server.py`) gates *reaching* `/mcp` at all — the two are independent layers: the shared secret says "you're allowed to talk to this server," `player_token` says "you're acting as this specific player." Neither is full authentication in a hardened sense — see `docs/TODO.md`'s "Still open: per-player identity is not verified" note.
 
 **The local package is `xsettlers_mcp/`, not `mcp/`.** It was renamed from `mcp/` (2026-07-22) because that name collided with the third-party `mcp` SDK package (`pip install mcp`) that `xsettlers_mcp/server.py` itself imports (`from mcp.server import Server`, `from mcp import types`) — whichever `mcp` Python resolves first wins process-wide, and the local package always won, causing `xsettlers_mcp/server.py` to circularly self-import instead of reaching the SDK. Never rename it back to `mcp/`.
 
@@ -39,7 +41,7 @@ Deploy target is Fly.io (`fly.toml`, `Dockerfile`) — persistent volume mounted
 ### Request flow
 
 ```
-Slack → Slackbot → MCP tool call (carries slack_user_id)
+Any MCP client (Slack, curl, an LLM agent) → POST /mcp (carries player_token)
                           │
                     xsettlers_mcp/server.py  (list_tools / call_tool dispatch)
                           │
@@ -48,14 +50,14 @@ Slack → Slackbot → MCP tool call (carries slack_user_id)
                     db/connection.py → SpatiaLite (.db file)
 ```
 
-There is **no separate `gateway.py`** despite what `docs/mcp_server_layer_design.md` originally sketched. Instead, every gameplay tool does its own `SELECT id FROM players WHERE slack_user_id=?` ownership check inline. Before a scenario is selected, `players` is empty, so every tool naturally rejects with "Player not found" — that's the actual gate, no central pre-flight wrapper needed. `xsettlers_mcp/game_select.select_scenario()` (backed by `xsettlers_mcp/auth.authenticate()`) is the one real gatekeeping call. See `tests/test_gateway.py` for the end-to-end proof of this behavior.
+There is **no separate `gateway.py`** despite what `docs/mcp_server_layer_design.md` originally sketched. Instead, every gameplay tool does its own `SELECT id FROM players WHERE player_token=?` ownership check inline. Before a scenario is selected, `players` is empty, so every tool naturally rejects with "Player not found" — that's the actual gate, no central pre-flight wrapper needed. `xsettlers_mcp/game_select.select_scenario()` (backed by `xsettlers_mcp/auth.authenticate()`) is the one real gatekeeping call. See `tests/test_gateway.py` for the end-to-end proof of this behavior.
 
 ### Scenario selection & bootstrap
 
 The MVP runs **one shared game per deployed instance** (the `games` table is a `CHECK (id = 1)` singleton). Flow:
 
 1. `list_scenarios()` (`xsettlers_mcp/game_select.py`) discovers scenarios by globbing `config/game*.yaml` (excluding `game_config.yaml`, which holds shared game settings + the fixed player roster, not a scenario).
-2. `select_scenario(slack_user_id, scenario_name)` authenticates against the roster (`xsettlers_mcp/auth.py`, trusts Slack identity for now), then calls `db/bootstrap.bootstrap_game()` on first selection for that scenario. Switching scenarios once a game is active is rejected.
+2. `select_scenario(player_token, scenario_name)` authenticates against the roster (`xsettlers_mcp/auth.py` — trusts the token's roster match at face value, no deeper identity verification), then calls `db/bootstrap.bootstrap_game()` on first selection for that scenario. Switching scenarios once a game is active is rejected.
 3. `bootstrap_game()` seeds sectors, players (from `game_config.yaml`'s roster, unless `roster_override` is passed — an unused escape hatch for a future dynamic lobby), starting ships + pods (from the scenario file's `pods_per_ship` templates), and stamps home sectors visible at confidence 100.
 
 `engine/clock.run_clock()` starts ticking immediately at server startup regardless of whether a scenario has been picked; `engine/turn.end_of_turn()` no-ops if the `games` table is empty so no turns are silently burned pre-selection.
@@ -93,6 +95,8 @@ The clock (`engine/clock.py`) calls `end_of_turn()` on a fixed interval (`GAME_T
 ### Config
 
 `config/game_config.yaml` holds shared game settings (tick interval, confidence decay, max players, turn limit, feature flags, score weights) and the **fixed player roster** — there is no runtime player-join path; changing the roster means bootstrapping a new database. It points to a `starting_configuration_file` (e.g. `config/game0.yaml`), which is loaded separately via `load_starting_configuration()` and declares its own `name`/`description` (shown to players choosing a scenario), home sectors per player, ship count, and pod loadout templates. Adding a new playable scenario is just adding a new `config/game<N>.yaml` — no code change, no touching `game_config.yaml`.
+
+**Committed file, real credentials tension**: each roster entry's `player_token` is that player's actual auth credential (see above), but `game_config.yaml` is tracked in git and baked into the Docker image at build time. The committed values are intentionally obvious placeholders (`REPLACE_WITH_GENERATED_TOKEN_*`), not real secrets — this hasn't been resolved for a real multi-player deployment yet (no mechanism exists to keep real tokens out of git while still letting `xsettlers_mcp/auth.py` read them at runtime). Don't commit real generated tokens into this file.
 
 ### Testing conventions
 

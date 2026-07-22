@@ -3,10 +3,10 @@ from db.events import record_event
 from engine.turn import get_current_turn
 import math
 
-def get_organizations_in_range(slack_user_id: str, ship_id: int, jump_range: int) -> list:
+def get_organizations_in_range(player_token: str, ship_id: int, jump_range: int) -> list:
     """Return all sectors within Euclidean jump range of the given ship."""
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
@@ -29,14 +29,14 @@ def get_organizations_in_range(slack_user_id: str, ship_id: int, jump_range: int
     sectors = [dict(r) for r in cur.fetchall()]; conn.close()
     return sectors
 
-def preview_move(slack_user_id: str, ship_id: int,
+def preview_move(player_token: str, ship_id: int,
                  dest_sector_id: int, jump_range_per_turn: int = 1) -> dict:
     """
     Pure read — calculates travel time WITHOUT committing anything.
     Returns turns_needed and arrival_turn. No DB writes, no event logged.
     """
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
@@ -63,7 +63,7 @@ def preview_move(slack_user_id: str, ship_id: int,
             "dest_sector_id": dest_sector_id, "turns_needed": turns_needed,
             "arrival_turn": current_turn + turns_needed}
 
-def confirm_move(slack_user_id: str, ship_id: int,
+def confirm_move(player_token: str, ship_id: int,
                  dest_sector_id: int, jump_range_per_turn: int = 1) -> dict:
     """
     Commit a previewed move:
@@ -72,7 +72,7 @@ def confirm_move(slack_user_id: str, ship_id: int,
     3. Insert arrival_queue row with origin_sector_id for rubber-band cancel support
     """
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
@@ -115,13 +115,13 @@ def confirm_move(slack_user_id: str, ship_id: int,
             "dest_sector_id": dest_sector_id, "arrival_turn": arrival_turn,
             "turns_needed": turns_needed}
 
-def cancel_move(slack_user_id: str, ship_id: int) -> dict:
+def cancel_move(player_token: str, ship_id: int) -> dict:
     """
     Cancel a move in progress. Rubber-bands the ship to its origin_sector_id.
     Logs ship.move_cancelled (write-ahead) before mutating state.
     """
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE slack_user_id=?", (slack_user_id,))
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}

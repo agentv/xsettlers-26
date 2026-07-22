@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-XSettlers is a multiplayer space strategy game played entirely through Slack. This repo is the Python MCP (Model Context Protocol) server: Slackbot calls MCP tools with a player's Slack identity attached, tools query/mutate a SpatiaLite database, and a background clock resolves turns on a fixed interval. There is no separate web/API layer — `xsettlers_mcp/server.py` *is* the server, run over stdio via the `mcp` SDK.
+XSettlers is a multiplayer space strategy game played entirely through Slack. This repo is the Python MCP (Model Context Protocol) server: Slackbot calls MCP tools with a player's Slack identity attached, tools query/mutate a SpatiaLite database, and a background clock resolves turns on a fixed interval. There is no separate web/API layer — `xsettlers_mcp/server.py` *is* the server, serving MCP's **streamable HTTP** transport (Starlette + uvicorn, `POST /mcp`, `GET /health`) so a network-hosted deployment (Fly.io) can actually be reached remotely by Slackbot. (Switched from `stdio_server()` on 2026-07-22 — stdio only works for a client that spawns the process locally, which doesn't fit a cloud deployment.)
 
 **The local package is `xsettlers_mcp/`, not `mcp/`.** It was renamed from `mcp/` (2026-07-22) because that name collided with the third-party `mcp` SDK package (`pip install mcp`) that `xsettlers_mcp/server.py` itself imports (`from mcp.server import Server`, `from mcp import types`) — whichever `mcp` Python resolves first wins process-wide, and the local package always won, causing `xsettlers_mcp/server.py` to circularly self-import instead of reaching the SDK. Never rename it back to `mcp/`.
 
@@ -16,7 +16,8 @@ Documentation lives in `docs/` and is the source of truth for design (migrated f
 # Install deps
 pip install -r requirements.txt
 
-# Run the server (stdio MCP server + background clock, run together via asyncio.gather)
+# Run the server (streamable HTTP MCP server + background clock, run together via asyncio.gather)
+# Listens on :8080 (PORT env var override) -- POST /mcp, GET /health
 python -m xsettlers_mcp.server
 
 # Run all tests

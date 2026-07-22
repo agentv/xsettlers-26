@@ -1,6 +1,12 @@
 import asyncio
+import contextlib
+import os
+import uvicorn
+from starlette.applications import Starlette
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
 from mcp.server import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp import types
 from xsettlers_mcp.game_select import list_scenarios, select_scenario
 from xsettlers_mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
@@ -146,16 +152,55 @@ async def call_tool(name: str, arguments: dict):
         return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
     return [types.TextContent(type="text", text=str(fn(**arguments)))]
 
+# Streamable HTTP transport -- deployed on Fly.io (see fly.toml), which routes
+# network traffic to internal_port 8080; stdio (piped stdin/stdout) only works
+# for a client that spawns this process locally, which Slackbot calling a
+# remote Fly.io deployment cannot do.
+#
+# stateless=True: each HTTP request gets its own throwaway transport/session,
+# matching how every tool function already re-opens its own DB connection per
+# call with no session state carried between requests.
+session_manager = StreamableHTTPSessionManager(app=app, stateless=True)
+
+async def health(request):
+    return PlainTextResponse("ok")
+
+class _MCPASGIApp:
+    """
+    Wraps session_manager.handle_request as a plain-class ASGI callable.
+    Route() only passes an endpoint through unwrapped when it's neither a
+    function nor a method (inspect.isfunction/ismethod) -- a bound method or
+    bare async function gets wrapped in request_response(), which calls
+    endpoint(request) instead of (scope, receive, send) and breaks at request
+    time. A class instance sidesteps that check. Using Route (not Mount) also
+    avoids Mount's trailing-slash subpath matching, which would 307-redirect
+    POST /mcp to /mcp/.
+    """
+    async def __call__(self, scope, receive, send):
+        await session_manager.handle_request(scope, receive, send)
+
+@contextlib.asynccontextmanager
+async def lifespan(_app):
+    async with session_manager.run():
+        yield
+
+starlette_app = Starlette(
+    routes=[
+        Route("/health", health),
+        Route("/mcp", _MCPASGIApp()),
+    ],
+    lifespan=lifespan,
+)
+
 async def main():
     # Tables only -- no seeding. bootstrap_game() now runs lazily, triggered
     # by the first successful select_scenario() call. Until then, players is
     # empty and every gameplay tool naturally rejects with "Player not found".
     init_schema()
-    async with stdio_server() as (read_stream, write_stream):
-        await asyncio.gather(
-            app.run(read_stream, write_stream, app.create_initialization_options()),
-            run_clock()
-        )
+    port = int(os.getenv("PORT", 8080))
+    config = uvicorn.Config(starlette_app, host="0.0.0.0", port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await asyncio.gather(server.serve(), run_clock())
 
 if __name__ == "__main__":
     asyncio.run(main())

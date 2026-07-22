@@ -1,4 +1,3 @@
-# TODO: Fill in app name and region before deploying
 app = "xsettlers"
 primary_region = "sea"
 
@@ -9,6 +8,7 @@ primary_region = "sea"
   DB_PATH = "/data/xsettlers.db"
   GAME_CONFIG_PATH = "config/game_config.yaml"
 
+# Volume must be created once before first deploy: fly volumes create xsettlers_data --size 1
 [mounts]
   source = "xsettlers_data"
   destination = "/data"
@@ -24,3 +24,9 @@ primary_region = "sea"
   [[services.ports]]
     port = 80
     handlers = ["http"]
+
+  [[services.http_checks]]
+    path = "/health"
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"

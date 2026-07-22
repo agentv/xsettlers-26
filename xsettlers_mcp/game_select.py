@@ -3,7 +3,7 @@ import os
 from db.connection import get_connection
 from config.loader import load_starting_configuration
 from db.bootstrap import bootstrap_game
-from mcp.auth import authenticate
+from xsettlers_mcp.auth import authenticate
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _SCENARIO_GLOB = os.path.join(_REPO_ROOT, "config", "game*.yaml")

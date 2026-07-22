@@ -1,5 +1,5 @@
 """
-There's no separate mcp/gateway.py module. select_scenario() is the one
+There's no separate xsettlers_mcp/gateway.py module. select_scenario() is the one
 explicit gate, and every gameplay tool already checks player existence
 internally (SELECT id FROM players WHERE slack_user_id=?) -- before a
 scenario is selected, players is empty, so those checks reject on their own.
@@ -7,8 +7,8 @@ These tests verify that combination actually gates access end-to-end, which
 is what a dedicated gateway module's tests would otherwise cover.
 """
 from db.connection import get_connection
-from mcp.game_select import select_scenario
-from mcp.tools.organization_tools import show_game_status
+from xsettlers_mcp.game_select import select_scenario
+from xsettlers_mcp.tools.organization_tools import show_game_status
 
 def _clear_active_game():
     conn = get_connection()

@@ -1,5 +1,5 @@
 from db.connection import get_connection
-from mcp.game_select import list_scenarios, get_active_game, select_scenario
+from xsettlers_mcp.game_select import list_scenarios, get_active_game, select_scenario
 
 def _clear_active_game():
     conn = get_connection()

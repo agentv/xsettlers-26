@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-XSettlers is a multiplayer space strategy game played entirely through Slack. This repo is the Python MCP (Model Context Protocol) server: Slackbot calls MCP tools with a player's Slack identity attached, tools query/mutate a SpatiaLite database, and a background clock resolves turns on a fixed interval. There is no separate web/API layer — `mcp/server.py` *is* the server, run over stdio via the `mcp` SDK.
+XSettlers is a multiplayer space strategy game played entirely through Slack. This repo is the Python MCP (Model Context Protocol) server: Slackbot calls MCP tools with a player's Slack identity attached, tools query/mutate a SpatiaLite database, and a background clock resolves turns on a fixed interval. There is no separate web/API layer — `xsettlers_mcp/server.py` *is* the server, run over stdio via the `mcp` SDK.
+
+**The local package is `xsettlers_mcp/`, not `mcp/`.** It was renamed from `mcp/` (2026-07-22) because that name collided with the third-party `mcp` SDK package (`pip install mcp`) that `xsettlers_mcp/server.py` itself imports (`from mcp.server import Server`, `from mcp import types`) — whichever `mcp` Python resolves first wins process-wide, and the local package always won, causing `xsettlers_mcp/server.py` to circularly self-import instead of reaching the SDK. Never rename it back to `mcp/`.
 
 Documentation lives in `docs/` and is the source of truth for design (migrated from Slack canvases on 2026-07-18). Read `docs/TODO.md` first when picking up work — it tracks not just outstanding TODOs but *reconciled discrepancies* between the design docs and what's actually implemented (e.g. `queue_move` vs. the implemented `preview_move`/`confirm_move`/`cancel_move`, and the "gateway" design vs. what got built instead).
 
@@ -15,7 +17,7 @@ Documentation lives in `docs/` and is the source of truth for design (migrated f
 pip install -r requirements.txt
 
 # Run the server (stdio MCP server + background clock, run together via asyncio.gather)
-python -m mcp.server
+python -m xsettlers_mcp.server
 
 # Run all tests
 pytest
@@ -38,26 +40,26 @@ Deploy target is Fly.io (`fly.toml`, `Dockerfile`) — persistent volume mounted
 ```
 Slack → Slackbot → MCP tool call (carries slack_user_id)
                           │
-                    mcp/server.py  (list_tools / call_tool dispatch)
+                    xsettlers_mcp/server.py  (list_tools / call_tool dispatch)
                           │
-                    mcp/tools/*.py  (player_tools, sector_tools, navigation_tools, organization_tools)
+                    xsettlers_mcp/tools/*.py  (player_tools, sector_tools, navigation_tools, organization_tools)
                           │
                     db/connection.py → SpatiaLite (.db file)
 ```
 
-There is **no separate `gateway.py`** despite what `docs/mcp_server_layer_design.md` originally sketched. Instead, every gameplay tool does its own `SELECT id FROM players WHERE slack_user_id=?` ownership check inline. Before a scenario is selected, `players` is empty, so every tool naturally rejects with "Player not found" — that's the actual gate, no central pre-flight wrapper needed. `mcp/game_select.select_scenario()` (backed by `mcp/auth.authenticate()`) is the one real gatekeeping call. See `tests/test_gateway.py` for the end-to-end proof of this behavior.
+There is **no separate `gateway.py`** despite what `docs/mcp_server_layer_design.md` originally sketched. Instead, every gameplay tool does its own `SELECT id FROM players WHERE slack_user_id=?` ownership check inline. Before a scenario is selected, `players` is empty, so every tool naturally rejects with "Player not found" — that's the actual gate, no central pre-flight wrapper needed. `xsettlers_mcp/game_select.select_scenario()` (backed by `xsettlers_mcp/auth.authenticate()`) is the one real gatekeeping call. See `tests/test_gateway.py` for the end-to-end proof of this behavior.
 
 ### Scenario selection & bootstrap
 
 The MVP runs **one shared game per deployed instance** (the `games` table is a `CHECK (id = 1)` singleton). Flow:
 
-1. `list_scenarios()` (`mcp/game_select.py`) discovers scenarios by globbing `config/game*.yaml` (excluding `game_config.yaml`, which holds shared game settings + the fixed player roster, not a scenario).
-2. `select_scenario(slack_user_id, scenario_name)` authenticates against the roster (`mcp/auth.py`, trusts Slack identity for now), then calls `db/bootstrap.bootstrap_game()` on first selection for that scenario. Switching scenarios once a game is active is rejected.
+1. `list_scenarios()` (`xsettlers_mcp/game_select.py`) discovers scenarios by globbing `config/game*.yaml` (excluding `game_config.yaml`, which holds shared game settings + the fixed player roster, not a scenario).
+2. `select_scenario(slack_user_id, scenario_name)` authenticates against the roster (`xsettlers_mcp/auth.py`, trusts Slack identity for now), then calls `db/bootstrap.bootstrap_game()` on first selection for that scenario. Switching scenarios once a game is active is rejected.
 3. `bootstrap_game()` seeds sectors, players (from `game_config.yaml`'s roster, unless `roster_override` is passed — an unused escape hatch for a future dynamic lobby), starting ships + pods (from the scenario file's `pods_per_ship` templates), and stamps home sectors visible at confidence 100.
 
 `engine/clock.run_clock()` starts ticking immediately at server startup regardless of whether a scenario has been picked; `engine/turn.end_of_turn()` no-ops if the `games` table is empty so no turns are silently burned pre-selection.
 
-**Design decision for future multi-game support**: one SQLite DB file per game instance, not a shared DB with a `game_id` column threaded through every table. A future lobby would just route a player to the right DB file rather than requiring changes to `organizations`/`pods`/`events`/etc. or any query in `engine/*` or `mcp/tools/*`.
+**Design decision for future multi-game support**: one SQLite DB file per game instance, not a shared DB with a `game_id` column threaded through every table. A future lobby would just route a player to the right DB file rather than requiring changes to `organizations`/`pods`/`events`/etc. or any query in `engine/*` or `xsettlers_mcp/tools/*`.
 
 ### Data model
 
@@ -65,12 +67,12 @@ Object graph: **Players → Organizations (Ships or Colonies) → Pods**, with *
 
 Key fields and their split responsibilities:
 - `organizations.is_mobile` vs `org_type` — `is_mobile` is a *behavioral* flag (can this org's mission be reassigned right now?); `org_type` is a *semantic* label (ship vs colony). They're intentionally decoupled: a ship mid-colonization has `org_type='ship'` but `is_mobile=0`.
-- **Three org-lock states**, all keyed off `is_mobile`/`sector_id`, enforced in `set_mission` (`mcp/tools/organization_tools.py`): in-transit (`sector_id == -1`, locked entirely — must `cancel_move` first), colony (locked against `move` only), mid-colonization (locked entirely for the 3-turn window).
+- **Three org-lock states**, all keyed off `is_mobile`/`sector_id`, enforced in `set_mission` (`xsettlers_mcp/tools/organization_tools.py`): in-transit (`sector_id == -1`, locked entirely — must `cancel_move` first), colony (locked against `move` only), mid-colonization (locked entirely for the 3-turn window).
 - **Mission vs task terminology**: pods use `mission` (`idle`/`produce_energy`/`produce_food`/`produce_goods`/`scan`), *not* the older `task`/`set_pod_task` vocabulary from `docs/mcp_server_layer_design.md` — that doc is retained for its hosting/gateway content but is superseded on this point by `docs/product_requirements.md` and `docs/data_model_and_storage_design.md`.
 - Sectors use a sparse/lazy model — only instantiated on interaction — plus a `POINTZ` geometry column (`sectors.location`) for spatial queries. A sentinel sector `(-1,-1,-1)` represents "in transit" and is created by `db/schema.init_schema()`.
 - `player_sectors` is the fog-of-war table: sparse, confidence-scored (100 on discovery/presence, decays ~10%/tick via `CONFIDENCE_DECAY` when unoccupied, never deleted at confidence 0 — becomes a stale "ghost memory" row).
 - `events` is a write-ahead log with a **hybrid payload strategy**: player-action events store deltas, engine `turn.snapshot` events store full state (for replay/disaster recovery). `events.resolve_at_turn` drives deferred resolution (e.g. `colonize_complete` fires 3 turns after `set_mission('colonize', ...)`).
-- `models/` is currently an empty stub package — CRUD logic lives directly in `mcp/tools/*.py` for now; a refactor to pull it out is tracked in `docs/TODO.md` but not yet done. Don't expect model classes to exist there.
+- `models/` is currently an empty stub package — CRUD logic lives directly in `xsettlers_mcp/tools/*.py` for now; a refactor to pull it out is tracked in `docs/TODO.md` but not yet done. Don't expect model classes to exist there.
 
 ### Turn resolution (`engine/turn.py`)
 

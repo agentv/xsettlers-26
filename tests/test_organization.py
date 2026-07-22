@@ -1,6 +1,6 @@
 from db.connection import get_connection
 from engine.turn import end_of_turn
-from mcp.tools.organization_tools import set_mission, set_pod_mission
+from xsettlers_mcp.tools.organization_tools import set_mission, set_pod_mission
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
 
 # --- set_mission happy path ---
@@ -97,7 +97,7 @@ def test_pods_in_transit_produce():
     """Pods produce regardless of whether their parent ship is in transit.
     Canonical rule: production runs on all pods every turn, transit state does not suppress it.
     """
-    from mcp.tools.navigation_tools import confirm_move
+    from xsettlers_mcp.tools.navigation_tools import confirm_move
     pid = seed_player(); oid = seed_sector(0,0,0); did = seed_sector(3,0,0)
     ship = seed_ship(pid, oid)
     pod  = seed_pod(ship, storage_capacity=100.0, storage_current=0.0)

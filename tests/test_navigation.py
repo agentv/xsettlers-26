@@ -1,6 +1,6 @@
 from db.connection import get_connection
 from engine.turn import get_current_turn
-from mcp.tools.navigation_tools import (
+from xsettlers_mcp.tools.navigation_tools import (
     preview_move, confirm_move, cancel_move, get_organizations_in_range
 )
 from tests.conftest import seed_player, seed_sector, seed_ship

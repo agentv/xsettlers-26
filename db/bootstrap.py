@@ -6,7 +6,7 @@
 # of reading the YAML list; nothing calls it yet.
 #
 # Which scenario gets bootstrapped is chosen at runtime via
-# mcp/game_select.py's select_scenario() -- see scenario_file/scenario_name/
+# xsettlers_mcp/game_select.py's select_scenario() -- see scenario_file/scenario_name/
 # selected_by below. The games table records that choice.
 
 from db.connection import get_connection
@@ -23,7 +23,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
     config_path's players: list. Escape hatch for a future lobby that
     assembles a roster dynamically (real players + NPC fill-in) rather
     than reading a fixed YAML list. Not currently called by anything --
-    mcp/game_select.py's select_scenario() still always uses the config
+    xsettlers_mcp/game_select.py's select_scenario() still always uses the config
     file's roster.
     """
     cfg  = load_config(config_path, scenario_override=scenario_file) if config_path \

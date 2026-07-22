@@ -19,7 +19,7 @@ def end_of_turn():
     conn = get_connection(); cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM games WHERE id=1")
     if cur.fetchone()[0] == 0:
-        # No scenario selected yet (mcp/game_select.py's select_scenario populates
+        # No scenario selected yet (xsettlers_mcp/game_select.py's select_scenario populates
         # this on bootstrap). Nothing to process -- don't burn turns on an empty game.
         conn.close(); return
 

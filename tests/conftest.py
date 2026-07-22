@@ -12,7 +12,7 @@ def seed_active_game(scenario_name="test-scenario"):
     """
     Most tests are about gameplay already in progress, not the
     scenario-selection flow itself -- engine/turn.py's end_of_turn() no-ops
-    if the games table is empty (see mcp/game_select.select_scenario), so
+    if the games table is empty (see xsettlers_mcp/game_select.select_scenario), so
     fresh_db seeds a default active-game row automatically. Tests that
     specifically exercise "no scenario chosen yet" (see test_game_select.py)
     should DELETE FROM games to opt back out.

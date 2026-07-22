@@ -1,5 +1,5 @@
 from db.connection import get_connection
-from mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
+from xsettlers_mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
 from tests.conftest import seed_player
 
 def setup_function():

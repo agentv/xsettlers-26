@@ -2,13 +2,13 @@ import asyncio
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
-from mcp.game_select import list_scenarios, select_scenario
-from mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
-from mcp.tools.sector_tools import get_sector, get_sector_map, show_sector_neighborhood
-from mcp.tools.navigation_tools import (
+from xsettlers_mcp.game_select import list_scenarios, select_scenario
+from xsettlers_mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
+from xsettlers_mcp.tools.sector_tools import get_sector, get_sector_map, show_sector_neighborhood
+from xsettlers_mcp.tools.navigation_tools import (
     get_organizations_in_range, preview_move, confirm_move, cancel_move
 )
-from mcp.tools.organization_tools import (
+from xsettlers_mcp.tools.organization_tools import (
     set_mission, set_pod_mission, set_pod_scan_target, show_organization, show_game_status
 )
 from db.schema import init_schema

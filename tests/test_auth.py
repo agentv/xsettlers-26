@@ -1,4 +1,4 @@
-from mcp.auth import authenticate
+from xsettlers_mcp.auth import authenticate
 
 def test_authenticate_known_player():
     result = authenticate("U0BF2CE53GA")

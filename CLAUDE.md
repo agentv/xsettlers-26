@@ -10,7 +10,7 @@ XSettlers is a multiplayer space strategy game, originally designed to be played
 
 **The local package is `xsettlers_mcp/`, not `mcp/`.** It was renamed from `mcp/` (2026-07-22) because that name collided with the third-party `mcp` SDK package (`pip install mcp`) that `xsettlers_mcp/server.py` itself imports (`from mcp.server import Server`, `from mcp import types`) — whichever `mcp` Python resolves first wins process-wide, and the local package always won, causing `xsettlers_mcp/server.py` to circularly self-import instead of reaching the SDK. Never rename it back to `mcp/`.
 
-Documentation lives in `docs/` and is the source of truth for design (migrated from Slack canvases on 2026-07-18). Read `docs/TODO.md` first when picking up work — it tracks not just outstanding TODOs but *reconciled discrepancies* between the design docs and what's actually implemented (e.g. `queue_move` vs. the implemented `preview_move`/`confirm_move`/`cancel_move`, and the "gateway" design vs. what got built instead).
+Documentation lives in `docs/` and is the source of truth for design (migrated from Slack canvases on 2026-07-18). Read `docs/TODO.md` first when picking up work — it tracks not just outstanding TODOs but *reconciled discrepancies* between the design docs and what's actually implemented (e.g. the "gateway" design vs. what got built instead).
 
 ## Commands
 

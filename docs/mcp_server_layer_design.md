@@ -46,7 +46,9 @@ Tools are organized by concern — focused, composable, and named after what a p
 | Tool | Description |
 |---|---|
 | `get_organizations_in_range` | Sectors within jump range of a given ship |
-| `queue_move` | Queue a ship to travel to a destination; ship enters transit (invisible at sentinel sector) until arrival turn |
+| `preview_move` | Preview travel distance/turns to a destination without committing |
+| `confirm_move` | Commit a ship to travel to a destination; ship enters transit (parked at sentinel sector) until arrival turn |
+| `cancel_move` | Cancel an in-progress move, rubber-banding the ship back to its origin sector |
 
 **Organization & Pod command tools**
 
@@ -64,7 +66,7 @@ Tools are organized by concern — focused, composable, and named after what a p
 
 A ship on a `move` mission still has farm pods ticking away producing food during the journey. The two concerns are genuinely independent.
 
-`queue_move` is the player-facing tool for movement — it sets the org mission to `move`, parks the ship at the sentinel sector (-1,-1,-1), and inserts a row into the `arrival_queue`. End-of-turn resolves arrivals and reveals the destination sector at confidence 100.
+`confirm_move` is the player-facing tool that actually commits movement — it sets the org mission to `move`, parks the ship at the sentinel sector (-1,-1,-1), and inserts a row into the `arrival_queue`. `preview_move` runs the same distance/turn-count calculation without committing, and `cancel_move` reverses an in-progress move. End-of-turn resolves arrivals and reveals the destination sector at confidence 100.
 
 The server-side clock fires on a fixed interval as the fallback. If all active players call `declare_end_turn`, the clock accelerates immediately.
 

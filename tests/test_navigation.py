@@ -1,26 +1,24 @@
 from db.connection import get_connection
 from engine.turn import get_current_turn
-from xsettlers_mcp.tools.navigation_tools import (
-    preview_move, confirm_move, cancel_move, get_organizations_in_range
-)
+from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
 from tests.conftest import seed_player, seed_sector, seed_ship
 
 # --- preview_move ---
 
 def test_preview_move_returns_travel_time():
     """Distance 3 at jump_range_per_turn=1 should take 3 turns."""
-    pid = seed_player(); oid = seed_sector(0,0,0); did = seed_sector(3,0,0)
+    pid = seed_player(); oid = seed_sector(0,0,0)
     sid = seed_ship(pid, oid)
-    result = preview_move("U_P1", sid, did, jump_range_per_turn=1)
+    result = preview_move("U_P1", sid, 3, 0, 0, jump_range_per_turn=1)
     assert result["preview"] is True
     assert result["turns_needed"] == 3
     assert result["arrival_turn"] == get_current_turn() + 3
 
 def test_preview_move_no_db_write():
     """preview_move must not park the ship or create an arrival_queue row."""
-    pid = seed_player(); oid = seed_sector(0,0,0); did = seed_sector(2,0,0)
+    pid = seed_player(); oid = seed_sector(0,0,0)
     sid = seed_ship(pid, oid)
-    preview_move("U_P1", sid, did)
+    preview_move("U_P1", sid, 2, 0, 0)
     conn = get_connection()
     org = conn.execute("SELECT sector_id FROM organizations WHERE id=?", (sid,)).fetchone()
     aq  = conn.execute("SELECT * FROM arrival_queue WHERE org_id=?", (sid,)).fetchone()
@@ -31,9 +29,9 @@ def test_preview_move_no_db_write():
 # --- confirm_move ---
 
 def test_confirm_move_parks_ship_at_sentinel():
-    pid = seed_player(); oid = seed_sector(0,0,0); did = seed_sector(3,0,0)
+    pid = seed_player(); oid = seed_sector(0,0,0)
     sid = seed_ship(pid, oid)
-    result = confirm_move("U_P1", sid, did)
+    result = confirm_move("U_P1", sid, 3, 0, 0)
     assert result["confirmed"] is True
     conn = get_connection()
     org = conn.execute("SELECT sector_id,mission FROM organizations WHERE id=?", (sid,)).fetchone()
@@ -42,16 +40,31 @@ def test_confirm_move_parks_ship_at_sentinel():
     assert org["mission"] == "move"
 
 def test_confirm_move_inserts_arrival_queue_with_origin():
-    pid = seed_player(); oid = seed_sector(0,0,0); did = seed_sector(1,0,0)
+    pid = seed_player(); oid = seed_sector(0,0,0)
     sid = seed_ship(pid, oid)
-    result = confirm_move("U_P1", sid, did)
+    result = confirm_move("U_P1", sid, 1, 0, 0)
     conn = get_connection()
     row = conn.execute("SELECT * FROM arrival_queue WHERE org_id=?", (sid,)).fetchone()
     conn.close()
     assert row is not None
-    assert row["dest_sector_id"] == did
+    assert row["dest_x"] == 1 and row["dest_y"] == 0 and row["dest_z"] == 0
     assert row["origin_sector_id"] == oid
     assert row["arrival_turn"] == result["arrival_turn"]
+
+def test_confirm_move_rejects_negative_coordinates():
+    """Space has no negative indices -- a ship can't be sent there."""
+    pid = seed_player(); oid = seed_sector(0,0,0)
+    sid = seed_ship(pid, oid)
+    assert "error" in confirm_move("U_P1", sid, -1, 0, 0)
+    conn = get_connection()
+    org = conn.execute("SELECT sector_id FROM organizations WHERE id=?", (sid,)).fetchone()
+    conn.close()
+    assert org["sector_id"] == oid  # unchanged -- still docked, not parked at sentinel
+
+def test_preview_move_rejects_negative_coordinates():
+    pid = seed_player(); oid = seed_sector(0,0,0)
+    sid = seed_ship(pid, oid)
+    assert "error" in preview_move("U_P1", sid, 0, 0, -2)
 
 def test_confirm_move_colony_rejected():
     pid = seed_player(); sid = seed_sector()
@@ -61,14 +74,14 @@ def test_confirm_move_colony_rejected():
     conn.commit()
     cid = conn.execute("SELECT id FROM organizations WHERE name='Base'").fetchone()["id"]
     conn.close()
-    assert "error" in confirm_move("U_P1", cid, seed_sector(1,0,0))
+    assert "error" in confirm_move("U_P1", cid, 1, 0, 0)
 
 # --- cancel_move ---
 
 def test_cancel_move_rubber_bands_to_origin():
-    pid = seed_player(); oid = seed_sector(0,0,0); did = seed_sector(3,0,0)
+    pid = seed_player(); oid = seed_sector(0,0,0)
     sid = seed_ship(pid, oid)
-    confirm_move("U_P1", sid, did)
+    confirm_move("U_P1", sid, 3, 0, 0)
     result = cancel_move("U_P1", sid)
     assert result["cancelled"] is True
     assert result["rubber_banded_to_sector_id"] == oid
@@ -83,19 +96,3 @@ def test_cancel_move_rubber_bands_to_origin():
 def test_cancel_move_not_in_transit():
     pid = seed_player(); oid = seed_sector(); sid = seed_ship(pid, oid)
     assert "error" in cancel_move("U_P1", sid)
-
-# --- get_organizations_in_range ---
-
-def test_range_returns_nearby_excludes_far():
-    pid = seed_player(); oid = seed_sector(0,0,0)
-    near = seed_sector(1,0,0); far = seed_sector(5,0,0)
-    sid  = seed_ship(pid, oid)
-    ids = [r["id"] for r in get_organizations_in_range("U_P1", sid, jump_range=2)]
-    assert near in ids
-    assert far not in ids
-
-def test_range_rejects_transit_ship():
-    pid = seed_player(); oid = seed_sector(0,0,0); did = seed_sector(2,0,0)
-    sid = seed_ship(pid, oid)
-    confirm_move("U_P1", sid, did)
-    assert "error" in get_organizations_in_range("U_P1", sid, jump_range=3)

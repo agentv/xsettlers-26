@@ -3,37 +3,13 @@ from db.events import record_event
 from engine.turn import get_current_turn
 import math
 
-def get_organizations_in_range(player_token: str, ship_id: int, jump_range: int) -> list:
-    """Return all sectors within Euclidean jump range of the given ship."""
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
-    player = cur.fetchone()
-    if not player:
-        conn.close(); return {"error": "Player not found"}
-    cur.execute("""SELECT s1.coord_x,s1.coord_y,s1.coord_z FROM organizations o
-        JOIN sectors s1 ON s1.id=o.sector_id
-        WHERE o.id=? AND o.player_id=? AND o.sector_id!=-1""", (ship_id, player["id"]))
-    origin = cur.fetchone()
-    if not origin:
-        conn.close(); return {"error": "Ship not found, not owned by player, or currently in transit"}
-    r2 = jump_range ** 2
-    cur.execute("""SELECT s2.id,s2.coord_x,s2.coord_y,s2.coord_z FROM sectors s2
-        WHERE s2.id!=-1 AND (
-            (s2.coord_x-?)*(s2.coord_x-?) +
-            (s2.coord_y-?)*(s2.coord_y-?) +
-            (s2.coord_z-?)*(s2.coord_z-?)
-        ) <= ?""", (
-        origin["coord_x"], origin["coord_x"],
-        origin["coord_y"], origin["coord_y"],
-        origin["coord_z"], origin["coord_z"], r2))
-    sectors = [dict(r) for r in cur.fetchall()]; conn.close()
-    return sectors
-
 def preview_move(player_token: str, ship_id: int,
-                 dest_sector_id: int, jump_range_per_turn: int = 1) -> dict:
+                 dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
     """
     Pure read — calculates travel time WITHOUT committing anything.
     Returns turns_needed and arrival_turn. No DB writes, no event logged.
+    Destination is any coordinate triple -- sectors are lazily instantiated
+    (see db/sectors.py), so the destination need not exist yet.
     """
     conn = get_connection(); cur = conn.cursor()
     cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
@@ -48,28 +24,28 @@ def preview_move(player_token: str, ship_id: int,
         conn.close(); return {"error": "Ship not found, not owned by player, or already in transit"}
     if not ship["is_mobile"]:
         conn.close(); return {"error": "This organization is locked (colony or mid-colonization) and cannot move"}
-    cur.execute("SELECT coord_x,coord_y,coord_z FROM sectors WHERE id=?", (dest_sector_id,))
-    dest = cur.fetchone()
-    if not dest:
-        conn.close(); return {"error": "Destination sector not found"}
+    if dest_x < 0 or dest_y < 0 or dest_z < 0:
+        conn.close(); return {"error": "Destination coordinates cannot be negative -- space has no negative indices"}
     distance = math.sqrt(
-        (dest["coord_x"]-ship["coord_x"])**2 +
-        (dest["coord_y"]-ship["coord_y"])**2 +
-        (dest["coord_z"]-ship["coord_z"])**2)
+        (dest_x-ship["coord_x"])**2 +
+        (dest_y-ship["coord_y"])**2 +
+        (dest_z-ship["coord_z"])**2)
     turns_needed = max(1, math.ceil(distance / jump_range_per_turn))
     current_turn = get_current_turn()
     conn.close()
     return {"preview": True, "ship_id": ship_id, "from_sector_id": ship["sector_id"],
-            "dest_sector_id": dest_sector_id, "turns_needed": turns_needed,
+            "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z, "turns_needed": turns_needed,
             "arrival_turn": current_turn + turns_needed}
 
 def confirm_move(player_token: str, ship_id: int,
-                 dest_sector_id: int, jump_range_per_turn: int = 1) -> dict:
+                 dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
     """
     Commit a previewed move:
     1. Write-ahead: log ship.move_confirmed BEFORE mutating state
     2. Park ship at sentinel sector (-1)
     3. Insert arrival_queue row with origin_sector_id for rubber-band cancel support
+    Destination is any coordinate triple -- it's only revealed (get-or-created
+    as a real sectors row, see db/sectors.py) once the ship actually arrives.
     """
     conn = get_connection(); cur = conn.cursor()
     cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
@@ -84,15 +60,13 @@ def confirm_move(player_token: str, ship_id: int,
         conn.close(); return {"error": "Ship not found, not owned by player, or already in transit"}
     if not ship["is_mobile"]:
         conn.close(); return {"error": "This organization is locked (colony or mid-colonization) and cannot move"}
-    cur.execute("SELECT coord_x,coord_y,coord_z FROM sectors WHERE id=?", (dest_sector_id,))
-    dest = cur.fetchone()
-    if not dest:
-        conn.close(); return {"error": "Destination sector not found"}
+    if dest_x < 0 or dest_y < 0 or dest_z < 0:
+        conn.close(); return {"error": "Destination coordinates cannot be negative -- space has no negative indices"}
     origin_sector_id = ship["sector_id"]
     distance = math.sqrt(
-        (dest["coord_x"]-ship["coord_x"])**2 +
-        (dest["coord_y"]-ship["coord_y"])**2 +
-        (dest["coord_z"]-ship["coord_z"])**2)
+        (dest_x-ship["coord_x"])**2 +
+        (dest_y-ship["coord_y"])**2 +
+        (dest_z-ship["coord_z"])**2)
     turns_needed = max(1, math.ceil(distance / jump_range_per_turn))
     current_turn = get_current_turn()
     arrival_turn = current_turn + turns_needed
@@ -100,19 +74,19 @@ def confirm_move(player_token: str, ship_id: int,
     record_event(
         event_type="ship.move_confirmed",
         payload={"org_id": ship_id, "from_sector_id": origin_sector_id,
-                 "to_sector_id": dest_sector_id, "arrival_turn": arrival_turn},
+                 "to_x": dest_x, "to_y": dest_y, "to_z": dest_z, "arrival_turn": arrival_turn},
         actor_id=player["id"], subject_id=ship_id, subject_type="organization")
     # Park at sentinel, locking the org against reassignment until arrival/cancel
     cur.execute("""UPDATE organizations SET sector_id=-1, mission='move', mission_params=?,
         is_mobile=0 WHERE id=?""",
-        (f'{{"dest_sector_id":{dest_sector_id},"arrival_turn":{arrival_turn}}}', ship_id))
+        (f'{{"dest_x":{dest_x},"dest_y":{dest_y},"dest_z":{dest_z},"arrival_turn":{arrival_turn}}}', ship_id))
     # Queue arrival
     cur.execute("""INSERT OR REPLACE INTO arrival_queue
-        (arrival_turn,org_id,dest_sector_id,origin_sector_id) VALUES (?,?,?,?)""",
-        (arrival_turn, ship_id, dest_sector_id, origin_sector_id))
+        (arrival_turn,org_id,dest_x,dest_y,dest_z,origin_sector_id) VALUES (?,?,?,?,?,?)""",
+        (arrival_turn, ship_id, dest_x, dest_y, dest_z, origin_sector_id))
     conn.commit(); conn.close()
     return {"confirmed": True, "ship_id": ship_id, "from_sector_id": origin_sector_id,
-            "dest_sector_id": dest_sector_id, "arrival_turn": arrival_turn,
+            "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z, "arrival_turn": arrival_turn,
             "turns_needed": turns_needed}
 
 def cancel_move(player_token: str, ship_id: int) -> dict:

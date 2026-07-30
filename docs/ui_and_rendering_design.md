@@ -116,6 +116,17 @@ Each `build_*_view()` function returns a plain dict. The renderer decides how to
 }
 ```
 
+> **Implemented starting point, ahead of the view-model layer below:** the
+> `build_ship_view`/renderer architecture on this page is still design, not
+> code — `views/` doesn't exist yet. In the meantime, `show_organization`
+> (`xsettlers_mcp/tools/organization_tools.py`) already returns a locked,
+> ready-to-render cargo table via its `display` block: one row per task
+> (not per pod) with columns `Task, Count, Energy, Food, Goods, Capacity`,
+> Capacity shown as `current/total` (e.g. `"200/200"`), plus a header line
+> (`"<name> — at (x,y,z), <mission>"`). This is a deliberate MVP baseline,
+> not a final design — expect it to be superseded once the card/renderer
+> architecture below is actually built.
+
 ## Colony View — `build_colony_view(org_id, player_id=None)`
 
 ```python

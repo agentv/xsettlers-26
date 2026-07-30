@@ -176,8 +176,8 @@ One foothold, and a fleet to expand from it.
 - **Starting fleet:** 8 ships per player, all identical, all spawned
   alongside the home colony on turn 1.
 - **Pods:** every organization — each ship and the home colony alike —
-  carries the same 18-pod loadout: 6 producing energy, 6 producing goods,
-  6 producing food, all active and producing from turn 1. No setup needed
+  carries the same 6-pod loadout: 2 producing energy, 2 producing goods,
+  2 producing food, all active and producing from turn 1. No setup needed
   to get started.
 - **Starting positions:** home sectors are set well apart (12.7 sectors,
   Euclidean, in the current layout) — far enough for a real exploration

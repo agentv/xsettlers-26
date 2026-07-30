@@ -45,7 +45,6 @@ Tools are organized by concern — focused, composable, and named after what a p
 
 | Tool | Description |
 |---|---|
-| `get_organizations_in_range` | Sectors within jump range of a given ship |
 | `preview_move` | Preview travel distance/turns to a destination without committing |
 | `confirm_move` | Commit a ship to travel to a destination; ship enters transit (parked at sentinel sector) until arrival turn |
 | `cancel_move` | Cancel an in-progress move, rubber-banding the ship back to its origin sector |

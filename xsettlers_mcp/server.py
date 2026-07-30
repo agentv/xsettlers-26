@@ -12,11 +12,10 @@ from mcp import types
 from xsettlers_mcp.game_select import list_scenarios, select_scenario
 from xsettlers_mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
 from xsettlers_mcp.tools.sector_tools import get_sector, get_sector_map, show_sector_neighborhood
-from xsettlers_mcp.tools.navigation_tools import (
-    get_organizations_in_range, preview_move, confirm_move, cancel_move
-)
+from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
 from xsettlers_mcp.tools.organization_tools import (
-    set_mission, set_pod_mission, set_pod_scan_target, show_organization, show_game_status
+    set_mission, set_pod_mission, set_pod_scan_target, show_organization,
+    show_civilization_status, show_game_status
 )
 from db.schema import init_schema
 from engine.clock import run_clock
@@ -73,58 +72,58 @@ async def list_tools():
                 "radius":{"type":"integer"}},
                 "required":["player_token"]}),
         types.Tool(name="show_organization",
-            description="Complete properties of one of the player's own organizations, including all pods.",
+            description="Complete properties of one of the player's own organizations, including all pods. "
+                        "Includes a display block with a ready-to-render header and the locked MVP cargo-table "
+                        "column order (Task, Count, Energy, Food, Goods, Capacity as current/total).",
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},"org_id":{"type":"integer"}},
                 "required":["player_token","org_id"]}),
-        types.Tool(name="show_game_status",
-            description="Player-scoped game summary: turn context, all organizations (in-transit marked), and aggregate asset totals.",
+        types.Tool(name="show_civilization_status",
+            description="Player-scoped fleet report (aka fleet status / my status): turn context, all organizations (in-transit marked, with per-org tasking breakdown), and fleet-wide aggregate assets (including capacity and percent_full).",
             inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
                          "required":["player_token"]}),
-        types.Tool(name="get_organizations_in_range",
-            description="Sectors within jump range of a player's ship",
-            inputSchema={"type":"object","properties":{
-                "player_token":{"type":"string"},"ship_id":{"type":"integer"},
-                "jump_range":{"type":"integer"}},
-                "required":["player_token","ship_id","jump_range"]}),
+        types.Tool(name="show_game_status",
+            description="Public scoreboard: turn context plus every player's aggregate resource totals (energy/food/goods/total/percent_full), ranked highest-first. Does not reveal other players' fleet composition or position -- only aggregate totals are public.",
+            inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
+                         "required":["player_token"]}),
         types.Tool(name="preview_move",
             description="Preview a move: calculate travel time without committing",
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},"ship_id":{"type":"integer"},
-                "dest_sector_id":{"type":"integer"},
+                "dest_x":{"type":"integer"},"dest_y":{"type":"integer"},"dest_z":{"type":"integer"},
                 "jump_range_per_turn":{"type":"integer"}},
-                "required":["player_token","ship_id","dest_sector_id"]}),
+                "required":["player_token","ship_id","dest_x","dest_y","dest_z"]}),
         types.Tool(name="confirm_move",
             description="Commit a previewed move. Ship enters transit until arrival turn.",
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},"ship_id":{"type":"integer"},
-                "dest_sector_id":{"type":"integer"},
+                "dest_x":{"type":"integer"},"dest_y":{"type":"integer"},"dest_z":{"type":"integer"},
                 "jump_range_per_turn":{"type":"integer"}},
-                "required":["player_token","ship_id","dest_sector_id"]}),
+                "required":["player_token","ship_id","dest_x","dest_y","dest_z"]}),
         types.Tool(name="cancel_move",
             description="Cancel a move in progress. Rubber-bands ship to origin sector.",
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},"ship_id":{"type":"integer"}},
                 "required":["player_token","ship_id"]}),
         types.Tool(name="set_mission",
-            description="Set an organization's mission (idle/move/colonize/defend/attack)",
+            description="Set an organization's mission (idle/move/colonize/defend/attack). For mission='move', params must include dest_x/dest_y/dest_z (optionally jump_range_per_turn) -- delegates to the same confirm_move flow as the dedicated tool, so prefer preview_move first to check travel time.",
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},"org_id":{"type":"integer"},
                 "mission":{"type":"string"},"params":{"type":"object"}},
                 "required":["player_token","org_id","mission"]}),
         types.Tool(name="set_pod_mission",
-            description="Set a pod's mission (idle/produce_energy/produce_food/produce_goods/scan). For scan, optionally include target_sector_id.",
+            description="Set a pod's mission (idle/produce_energy/produce_food/produce_goods/scan). For scan, optionally include target_x/target_y/target_z (all three, or none) -- response includes in_range so you know immediately if the target is out of scan range (fix it before end of turn or it'll cost food with no reveal).",
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},"pod_id":{"type":"integer"},
                 "mission":{"type":"string"},
-                "target_sector_id":{"type":"integer"}},
+                "target_x":{"type":"integer"},"target_y":{"type":"integer"},"target_z":{"type":"integer"}},
                 "required":["player_token","pod_id","mission"]}),
         types.Tool(name="set_pod_scan_target",
-            description="Set or update the scan target sector for a pod in scan mission.",
+            description="Set or update the scan target coordinate for a pod in scan mission -- response includes in_range so you know immediately if the target is out of scan range.",
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},"pod_id":{"type":"integer"},
-                "target_sector_id":{"type":"integer"}},
-                "required":["player_token","pod_id","target_sector_id"]}),
+                "target_x":{"type":"integer"},"target_y":{"type":"integer"},"target_z":{"type":"integer"}},
+                "required":["player_token","pod_id","target_x","target_y","target_z"]}),
     ]
 
 @app.call_tool()
@@ -139,8 +138,8 @@ async def call_tool(name: str, arguments: dict):
         "get_sector_map":             get_sector_map,
         "show_sector_neighborhood":   show_sector_neighborhood,
         "show_organization":          show_organization,
+        "show_civilization_status":   show_civilization_status,
         "show_game_status":           show_game_status,
-        "get_organizations_in_range": get_organizations_in_range,
         "preview_move":               preview_move,
         "confirm_move":               confirm_move,
         "cancel_move":                cancel_move,

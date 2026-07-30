@@ -36,13 +36,13 @@ This canvas defines the first playable MVP instance of XSettlers. It is a self-c
 
 ## Starting Loadout (per ship)
 
-Each ship carries **18 pods**:
+Each ship carries **6 pods**:
 
 | Pod Type | Count | Default Task | Produces |
 |---|---|---|---|
-| `energy` | 6 | `produce` | Energy |
-| `factory` | 6 | `produce` | Goods |
-| `farm` | 6 | `produce` | Food |
+| `energy` | 2 | `produce` | Energy |
+| `factory` | 2 | `produce` | Goods |
+| `farm` | 2 | `produce` | Food |
 
 * All pods are **active from turn 1** with default tasks assigned at bootstrap. No setup action required.
 * Players may reassign any pod's task at any time using `set_pod_task`. Valid tasks: `produce`, `mine`, `idle`.

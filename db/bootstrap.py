@@ -11,6 +11,24 @@
 
 from db.connection import get_connection
 from config.loader import load_config
+from db.sectors import reveal_sector
+from engine.production import RESOURCE_STORAGE_COLUMN, RESOURCE_PRODUCING_MISSION
+
+def _full_cargo_for_mission(mission: str, capacity: float) -> dict:
+    """
+    A freshly bootstrapped pod starts full -- see engine/production.py's
+    POD_CONSUMPTION_RECIPE: production costs other resources to run (e.g.
+    produce_goods costs energy), so starting empty would deadlock the
+    economy at bootstrap. "Full" means full of whatever resource matches the
+    pod's mission at creation time (energy_stored/food_stored/goods_stored
+    are independent of current mission from then on -- see engine/turn.py).
+    Non-producing missions (idle, scan) start with nothing stored.
+    """
+    stored = {"energy_stored": 0.0, "food_stored": 0.0, "goods_stored": 0.0}
+    for resource, producing_mission in RESOURCE_PRODUCING_MISSION.items():
+        if producing_mission == mission:
+            stored[RESOURCE_STORAGE_COLUMN[resource]] = capacity
+    return stored
 
 def bootstrap_game(config_path: str = None, scenario_file: str = None,
                    scenario_name: str = None, selected_by: str = None,
@@ -34,21 +52,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
         print("Game already bootstrapped — skipping."); conn.close(); return
     print(f"Bootstrapping game: {cfg.game.name} (scenario: {cfg.starting_configuration.name})")
 
-    # 1. Seed sectors
-    sector_id_map = {}
-    for s in cfg.sectors:
-        x, y, z = s.coords
-        cur.execute("""INSERT OR IGNORE INTO sectors
-            (coord_x,coord_y,coord_z,energy_capacity,food_capacity,goods_capacity)
-            VALUES (?,?,?,?,?,?)""", (x,y,z,s.energy_capacity,s.food_capacity,s.goods_capacity))
-        cur.execute("""UPDATE sectors SET location=MakePointZ(?,?,?,-1)
-            WHERE coord_x=? AND coord_y=? AND coord_z=?""", (x,y,z,x,y,z))
-        sector_id_map[(x,y,z)] = cur.execute(
-            "SELECT id FROM sectors WHERE coord_x=? AND coord_y=? AND coord_z=?",
-            (x,y,z)).fetchone()["id"]
-    print(f"  Created {len(cfg.sectors)} sectors.")
-
-    # 2. Seed players
+    # 1. Seed players
     player_id_list = []
     if roster_override is not None:
         if len(roster_override) > cfg.game.max_players:
@@ -69,13 +73,11 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
             player_id_list.append(cur.lastrowid)
             print(f"  Created player: {p.display_name}")
 
-    # 3. Create starting ships for each player
+    # 2. Create starting ships for each player
     sc = cfg.starting_configuration
     for idx, player_id in enumerate(player_id_list):
         home_coords = tuple(sc.home_sector_by_player[idx])
-        home_sector_id = sector_id_map.get(home_coords)
-        if not home_sector_id:
-            raise ValueError(f"Home sector {home_coords} for player {idx+1} not found in sectors")
+        home_sector_id = reveal_sector(cur, player_id, *home_coords)
         for ship_num in range(sc.ships_per_player):
             ship_name = f"Ship-P{idx+1}-{ship_num+1:02d}"
             cur.execute("""INSERT INTO organizations
@@ -86,24 +88,21 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
             # Expand pod templates: each template has a count
             for pod_tmpl in sc.pods_per_ship:
                 for _ in range(pod_tmpl.count):
+                    cargo = _full_cargo_for_mission(pod_tmpl.mission, pod_tmpl.storage_capacity)
                     cur.execute("""INSERT INTO pods
-                        (mission,org_id,storage_capacity,storage_current,
-                         energy_consumption,food_consumption)
-                        VALUES (?,?,?,0.0,?,?)""",
+                        (mission,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
+                        VALUES (?,?,?,?,?,?)""",
                         (pod_tmpl.mission, org_id, pod_tmpl.storage_capacity,
-                         pod_tmpl.energy_consumption, pod_tmpl.food_consumption))
-        # Stamp home sector as visible at confidence=100
-        cur.execute("""INSERT OR REPLACE INTO player_sectors (player_id,sector_id,confidence)
-            VALUES (?,?,100)""", (player_id, home_sector_id))
+                         cargo["energy_stored"], cargo["food_stored"], cargo["goods_stored"]))
         print(f"  Created {sc.ships_per_player} ships for player {player_id}.")
 
-    # 4. Optionally create a home colony -- same pod loadout as a ship (see
+    # 3. Optionally create a home colony -- same pod loadout as a ship (see
     #    docs/player_guide.md's Outbreak section: "every organization -- each
-    #    ship and the home colony alike -- carries the same 18-pod loadout").
+    #    ship and the home colony alike -- carries the same 6-pod loadout").
     if sc.home_colony:
         for idx, player_id in enumerate(player_id_list):
             home_coords = tuple(sc.home_sector_by_player[idx])
-            home_sector_id = sector_id_map[home_coords]
+            home_sector_id = reveal_sector(cur, player_id, *home_coords)
             cur.execute("""INSERT INTO organizations
                 (org_type,name,player_id,sector_id,is_mobile,mission)
                 VALUES ('colony',?,?,?,0,'idle')""",
@@ -111,12 +110,12 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
             colony_org_id = cur.lastrowid
             for pod_tmpl in sc.pods_per_ship:
                 for _ in range(pod_tmpl.count):
+                    cargo = _full_cargo_for_mission(pod_tmpl.mission, pod_tmpl.storage_capacity)
                     cur.execute("""INSERT INTO pods
-                        (mission,org_id,storage_capacity,storage_current,
-                         energy_consumption,food_consumption)
-                        VALUES (?,?,?,0.0,?,?)""",
+                        (mission,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
+                        VALUES (?,?,?,?,?,?)""",
                         (pod_tmpl.mission, colony_org_id, pod_tmpl.storage_capacity,
-                         pod_tmpl.energy_consumption, pod_tmpl.food_consumption))
+                         cargo["energy_stored"], cargo["food_stored"], cargo["goods_stored"]))
 
     cur.execute("INSERT OR IGNORE INTO game_state (id,current_turn) VALUES (1,0)")
     cur.execute("""INSERT OR IGNORE INTO games (id,scenario_name,scenario_file,selected_by)

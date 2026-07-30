@@ -17,12 +17,12 @@ home_sector_by_player:
 
 ships_per_player: 8
 
-# Same 18-pod loadout as game0's Diaspora, applied to every ship AND
+# Same 6-pod loadout as game0's Diaspora, applied to every ship AND
 # to the home colony (see home_colony below and db/bootstrap.py).
 pods_per_ship:
-  - {mission: produce_energy, count: 6, storage_capacity: 100.0, energy_consumption: 0.0, food_consumption: 1.0}
-  - {mission: produce_goods,  count: 6, storage_capacity: 100.0, energy_consumption: 2.0, food_consumption: 1.0}
-  - {mission: produce_food,   count: 6, storage_capacity: 100.0, energy_consumption: 2.0, food_consumption: 0.0}
+  - {mission: produce_energy, count: 2, storage_capacity: 100.0}
+  - {mission: produce_goods,  count: 2, storage_capacity: 100.0}
+  - {mission: produce_food,   count: 2, storage_capacity: 100.0}
 
 # Unlike game0's Diaspora, Outbreak starts each player with an established
 # colony at their home sector -- a fixed foothold from turn 1.

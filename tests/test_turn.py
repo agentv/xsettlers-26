@@ -1,6 +1,66 @@
+import json
 from db.connection import get_connection
-from engine.turn import end_of_turn, check_consensus_acceleration
-from tests.conftest import seed_player
+from db.sectors import DEFAULT_SECTOR_RESOURCE_UNITS
+from engine.turn import (end_of_turn, check_consensus_acceleration,
+                         _calculate_final_scores, get_next_tick_at)
+from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
+
+def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
+    """turn.snapshot events (one per player per turn) persist what was
+    previously print-only: after-state holdings, this turn's weighted score
+    (same formula as show_game_status/_calculate_final_scores), and derived
+    per-resource waste (produced - consumed - actual delta). Hand-verified
+    scenario: a saturated 2-pod org where the food pod's own production is
+    blocked (no goods input available anywhere in the org), so only the
+    energy pod's overflow contributes any waste this turn."""
+    pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
+    seed_pod(oid, mission="produce_energy", storage_capacity=10.0, storage_current=10.0)
+    seed_pod(oid, mission="produce_food", storage_capacity=10.0, storage_current=10.0)
+    end_of_turn()
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT payload FROM events WHERE event_type='turn.snapshot' AND turn=0 AND subject_id=?",
+        (pid,)).fetchone()
+    conn.close()
+    payload = json.loads(row["payload"])
+    assert payload["energy"] == 16.0
+    assert payload["food"] == 4.0
+    assert payload["goods"] == 0.0
+    assert payload["energy_wasted"] == 3.0
+    assert payload["food_wasted"] == 0.0
+    assert payload["goods_wasted"] == 0.0
+    assert payload["score"] == 4.0  # 16*0 (energy) + 4*1 (food) + 0*2 (goods)
+
+def test_get_next_tick_at_none_until_clock_has_run():
+    """None means "clock has never ticked yet" -- distinct from a stale
+    value, which a caller can't tell apart from a paused clock without also
+    checking the server is actually alive (see scripts/status.py)."""
+    assert get_next_tick_at() is None
+    conn = get_connection()
+    conn.execute("UPDATE game_state SET next_tick_at=? WHERE id=1", ("2026-01-01T00:00:00.000Z",))
+    conn.commit(); conn.close()
+    assert get_next_tick_at() == "2026-01-01T00:00:00.000Z"
+
+def test_calculate_final_scores_applies_score_weights():
+    """The actual game-over win condition, previously untested: score is a
+    weighted sum (config/game_config.yaml's score_weights, as of 2026-07-30
+    energy=0/food=1/goods=2), not a flat energy+food+goods total -- must
+    match what show_civilization_status/show_game_status compute mid-game
+    via the same weights, or the displayed standing and the real winner
+    could disagree."""
+    p1 = seed_player(email="p1@t.com", player_token="U_P1")
+    p2 = seed_player(email="p2@t.com", player_token="U_P2")
+    sid = seed_sector()
+    o1 = seed_ship(p1, sid, name="P1 Ship")
+    o2 = seed_ship(p2, sid, name="P2 Ship")
+    seed_pod(o1, mission="produce_energy", storage_capacity=100.0, storage_current=80.0)  # weighted 0
+    seed_pod(o2, mission="produce_food", storage_capacity=100.0, storage_current=10.0)
+    seed_pod(o2, mission="produce_goods", storage_capacity=100.0, storage_current=10.0)
+    standings = _calculate_final_scores()
+    by_player = {s["player_id"]: s["score"] for s in standings}
+    assert by_player[p1] == 0
+    assert by_player[p2] == 30  # 10*1 (food) + 10*2 (goods)
+    assert standings[0]["player_id"] == p2  # higher score wins despite lower raw total
 
 def test_turn_resets_end_turn_declared():
     seed_player()
@@ -20,3 +80,62 @@ def test_consensus_fires_when_all_declared():
 def test_consensus_does_not_fire_when_undeclared():
     seed_player()
     assert check_consensus_acceleration() is False
+
+# --- lazy sector reveal (see db/sectors.py) ---
+
+def test_arrival_reveals_destination_and_stamps_visibility():
+    from xsettlers_mcp.tools.navigation_tools import confirm_move
+    pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
+    confirm_move("U_P1", sid, 1, 0, 0, jump_range_per_turn=1)  # turns_needed == 1
+    end_of_turn()  # arrival not yet due
+    end_of_turn()  # arrival resolves
+    conn = get_connection()
+    sector = conn.execute("SELECT id,energy_capacity FROM sectors "
+                          "WHERE coord_x=1 AND coord_y=0 AND coord_z=0").fetchone()
+    assert sector is not None and sector["energy_capacity"] == DEFAULT_SECTOR_RESOURCE_UNITS
+    org = conn.execute("SELECT sector_id FROM organizations WHERE id=?", (sid,)).fetchone()
+    assert org["sector_id"] == sector["id"]
+    ps = conn.execute("SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",
+                      (pid, sector["id"])).fetchone()
+    assert ps["confidence"] == 100
+    conn.close()
+
+# --- org upkeep (see engine/production.py's ORG_UPKEEP_COST) ---
+
+def test_org_upkeep_drains_pooled_food_and_energy():
+    """Every org costs 5 food + 1 energy per turn just to exist, drawn from
+    its own pooled stock -- on top of whatever its individual pods cost.
+    Sector energy is seeded at 0 so the energy pod can't refill itself via
+    its own production this same turn -- isolates the upkeep drain, since
+    otherwise production would immediately mask it back up to capacity."""
+    pid = seed_player(); sid = seed_sector(energy=0.0); oid = seed_ship(pid, sid)
+    seed_pod(oid, mission="produce_food", storage_current=100.0)
+    seed_pod(oid, mission="produce_energy", storage_current=100.0)
+    end_of_turn()
+    conn = get_connection()
+    food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
+    energy = conn.execute("SELECT SUM(energy_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
+    conn.close()
+    assert food == 95.0    # 100 - 5 upkeep (no producing pod there to add any back)
+    assert energy == 99.0  # 100 - 1 upkeep
+
+def test_org_upkeep_prorated_when_insufficient():
+    """Only 2 food and 0 energy on hand against a 5-food/1-energy cost --
+    upkeep should prorate to the most restrictive resource (energy, at 0),
+    draining nothing rather than going negative or draining food anyway."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, mission="produce_food", storage_current=2.0)
+    end_of_turn()
+    conn = get_connection()
+    food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
+    conn.close()
+    assert food == 2.0  # ratio floored at 0 (no energy at all) -- no partial drain either
+
+def test_idle_pod_costs_nothing():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    pod = seed_pod(oid, mission="idle", storage_current=42.0)
+    end_of_turn()
+    conn = get_connection()
+    assert conn.execute("SELECT energy_stored FROM pods WHERE id=?",
+                        (pod,)).fetchone()["energy_stored"] == 42.0
+    conn.close()

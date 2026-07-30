@@ -11,18 +11,21 @@ description: >
   everyone begins mobile and picks their own moment to colonize.
 
 home_sector_by_player:
-  - [3, 3, 0]    # Player 1
-  - [12, 12, 0]  # Player 2
+  - [25, 25, 0]  # Player 1
+  - [25, 50, 0]  # Player 2
 
 ships_per_player: 8
 
 # Each ship receives one pod per entry below, repeated `count` times.
 # Mission values are the canonical pod missions (see Product Requirements /
 # Data Model & Storage Design): idle | produce_energy | produce_food | produce_goods | scan.
+# Input costs to run each mission live in engine/production.py's
+# POD_CONSUMPTION_RECIPE, not here -- they're fixed per mission type, not
+# configurable per scenario.
 pods_per_ship:
-  - {mission: produce_energy, count: 6, storage_capacity: 100.0, energy_consumption: 0.0, food_consumption: 1.0}
-  - {mission: produce_goods,  count: 6, storage_capacity: 100.0, energy_consumption: 2.0, food_consumption: 1.0}
-  - {mission: produce_food,   count: 6, storage_capacity: 100.0, energy_consumption: 2.0, food_consumption: 0.0}
+  - {mission: produce_energy, count: 2, storage_capacity: 100.0}
+  - {mission: produce_goods,  count: 2, storage_capacity: 100.0}
+  - {mission: produce_food,   count: 2, storage_capacity: 100.0}
 
 # Set to true to spawn a starting colony at each player's home sector.
 home_colony: false

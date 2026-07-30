@@ -1,5 +1,6 @@
 from db.connection import get_connection
 from db.bootstrap import bootstrap_game
+from db.sectors import DEFAULT_SECTOR_RESOURCE_UNITS
 
 def _bootstrap(scenario_file="config/game0.yaml", scenario_name="game0"):
     bootstrap_game(scenario_file=scenario_file, scenario_name=scenario_name,
@@ -23,7 +24,7 @@ def test_bootstrap_home_colony_gets_same_pod_loadout_as_ship():
     Regression test: db/bootstrap.py's home_colony step used to create the
     colony organization but never attach any pods to it (see
     docs/player_guide.md's Outbreak section, "Implementation note"). Colonies
-    must get the same 18-pod loadout as ships, not zero pods.
+    must get the same 6-pod loadout as ships, not zero pods.
     """
     _bootstrap(scenario_file="config/game1.yaml", scenario_name="game1")
     conn = get_connection()
@@ -35,11 +36,11 @@ def test_bootstrap_home_colony_gets_same_pod_loadout_as_ship():
         pods = conn.execute(
             "SELECT mission FROM pods WHERE org_id=?", (colony["id"],)
         ).fetchall()
-        assert len(pods) == 18
+        assert len(pods) == 6
         missions = [p["mission"] for p in pods]
-        assert missions.count("produce_energy") == 6
-        assert missions.count("produce_goods") == 6
-        assert missions.count("produce_food") == 6
+        assert missions.count("produce_energy") == 2
+        assert missions.count("produce_goods") == 2
+        assert missions.count("produce_food") == 2
     conn.close()
 
 def test_bootstrap_diaspora_ships_alongside_colony():
@@ -76,15 +77,24 @@ def test_bootstrap_idempotent():
     conn.close()
     assert before == after
 
-def test_bootstrap_sentinel_sector_exists():
-    conn = get_connection()
-    sentinel = conn.execute("SELECT id FROM sectors WHERE id=-1").fetchone()
-    assert sentinel is not None
-    conn.close()
-
 def test_bootstrap_game_state_starts_at_turn_zero():
     _bootstrap()
     conn = get_connection()
     row = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()
     assert row["current_turn"] == 0
     conn.close()
+
+def test_bootstrap_seeds_only_home_sectors_not_full_grid():
+    """Sectors are lazily instantiated (see db/sectors.py's reveal_sector) --
+    bootstrap should only reveal the two players' home sectors, not a
+    pre-seeded grid, and each should get the flat default resource units."""
+    _bootstrap()
+    conn = get_connection()
+    sectors = conn.execute("""SELECT coord_x,coord_y,coord_z,energy_capacity,
+        food_capacity,goods_capacity FROM sectors WHERE id != -1""").fetchall()
+    conn.close()
+    assert len(sectors) == 2
+    for s in sectors:
+        assert s["energy_capacity"] == DEFAULT_SECTOR_RESOURCE_UNITS
+        assert s["food_capacity"] == DEFAULT_SECTOR_RESOURCE_UNITS
+        assert s["goods_capacity"] == DEFAULT_SECTOR_RESOURCE_UNITS

@@ -8,7 +8,7 @@ is what a dedicated gateway module's tests would otherwise cover.
 """
 from db.connection import get_connection
 from xsettlers_mcp.game_select import select_scenario
-from xsettlers_mcp.tools.organization_tools import show_game_status
+from xsettlers_mcp.tools.organization_tools import show_civilization_status
 
 def _clear_active_game():
     conn = get_connection()
@@ -17,18 +17,18 @@ def _clear_active_game():
 
 def test_gameplay_blocked_before_any_scenario_selected():
     _clear_active_game()
-    result = show_game_status("REPLACE_WITH_GENERATED_TOKEN_1")
+    result = show_civilization_status("REPLACE_WITH_GENERATED_TOKEN_1")
     assert "error" in result
 
 def test_gameplay_blocked_for_unrecognized_player_even_after_selection():
     _clear_active_game()
     select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
-    result = show_game_status("U_TOTAL_STRANGER")
+    result = show_civilization_status("U_TOTAL_STRANGER")
     assert "error" in result
 
 def test_gameplay_works_for_roster_player_after_selection():
     _clear_active_game()
     select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
-    result = show_game_status("REPLACE_WITH_GENERATED_TOKEN_1")
+    result = show_civilization_status("REPLACE_WITH_GENERATED_TOKEN_1")
     assert "error" not in result
     assert result["turn"] == 0

@@ -1,6 +1,10 @@
-import os, json
+import collections, os, json, math
+from config.loader import load_config
 from db.connection import get_connection
-from engine.production import get_production, get_consumption
+from db.sectors import reveal_sector
+from engine.production import (get_production, get_consumption_recipe, ORG_UPKEEP_COST,
+                               RESOURCE_CAPACITY_COLUMN, RESOURCE_STORAGE_COLUMN)
+from xsettlers_mcp.tools.sector_tools import get_scan_range
 
 CONFIDENCE_DECAY = float(os.getenv("CONFIDENCE_DECAY", 0.9))
 TURN_LIMIT = int(os.getenv("TURN_LIMIT", 20))
@@ -13,6 +17,145 @@ def get_current_turn() -> int:
 def is_game_over() -> bool:
     return get_current_turn() >= TURN_LIMIT
 
+def get_next_tick_at() -> str | None:
+    """
+    ISO8601 timestamp of when the clock will next tick, as last written by
+    engine/clock.py's run_clock() -- None if the clock has never run (no
+    scenario selected yet) or is currently paused (server process stopped,
+    so nothing is refreshing this value; a caller comparing it against the
+    current time would see it drift into the past). Whether the clock is
+    actually running right now is a process-liveness question this function
+    can't answer on its own -- see scripts/status.py for how a caller
+    reconciles this timestamp with a live health check.
+    """
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("SELECT next_tick_at FROM game_state WHERE id=1")
+    row = cur.fetchone(); conn.close()
+    return row["next_tick_at"] if row else None
+
+def _player_holdings(cur) -> dict:
+    """
+    Per-player {"energy":..,"food":..,"goods":..,"total":..}, summed across
+    all of that player's pods. Used both for the printed holdings line and
+    as the before/after reference points end_of_turn() uses to derive this
+    turn's resource waste for the turn.snapshot ledger (see _snapshot_holdings).
+    """
+    rows = cur.execute("""
+        SELECT o.player_id,
+               SUM(p.energy_stored) AS energy,
+               SUM(p.food_stored) AS food,
+               SUM(p.goods_stored) AS goods,
+               SUM(p.energy_stored+p.food_stored+p.goods_stored) AS total
+        FROM pods p JOIN organizations o ON o.id = p.org_id
+        GROUP BY o.player_id
+    """).fetchall()
+    return {r["player_id"]: {"energy": r["energy"] or 0.0, "food": r["food"] or 0.0,
+                             "goods": r["goods"] or 0.0, "total": r["total"] or 0.0}
+            for r in rows}
+
+def _available_org_resource(cur, org_id: int, resource: str) -> float:
+    """
+    An org's pooled stock of a resource: summed across ALL of that org's
+    pods' <resource>_stored column, regardless of each pod's current mission
+    -- storage is generic per pod, so retasking a pod never hides whatever
+    it already has stored (see RESOURCE_STORAGE_COLUMN).
+    """
+    col = RESOURCE_STORAGE_COLUMN[resource]
+    return cur.execute(
+        f"SELECT COALESCE(SUM({col}),0) AS total FROM pods WHERE org_id=?",
+        (org_id,)).fetchone()["total"]
+
+def _drain_org_resource(cur, org_id: int, resource: str, amount: float):
+    """Drain amount of a resource from an org's pooled stock, sequentially
+    (by pod id) across whichever of its pods currently hold that resource --
+    regardless of their current mission."""
+    if amount <= 0:
+        return
+    col = RESOURCE_STORAGE_COLUMN[resource]
+    remaining = amount
+    source_pods = cur.execute(
+        f"SELECT id, {col} AS have FROM pods WHERE org_id=? AND {col}>0 ORDER BY id",
+        (org_id,)).fetchall()
+    for sp in source_pods:
+        if remaining <= 0:
+            break
+        draw = min(sp["have"], remaining)
+        if draw > 0:
+            cur.execute(f"UPDATE pods SET {col}={col}-? WHERE id=?", (draw, sp["id"]))
+            remaining -= draw
+
+def _store_org_resource(cur, org_id: int, producing_pod_id: int, resource: str, amount: float):
+    """
+    Add amount of a resource to storage: fills the producing pod's own free
+    space first, then spills into other pods in the same org that still
+    have free space (by pod id), then is lost if no pod in the org has room
+    left. Free space on a pod = storage_capacity minus everything currently
+    stored there (energy+food+goods combined) -- storage is one shared
+    container per pod, not resource-specific, so a pod already full of one
+    resource has no room for another regardless of type.
+    """
+    if amount <= 0:
+        return
+    col = RESOURCE_STORAGE_COLUMN[resource]
+    remaining = amount
+    # Producing pod first (id != producing_pod_id sorts to 0/False first), then by id.
+    pods = cur.execute(
+        """SELECT id, storage_capacity, energy_stored, food_stored, goods_stored
+           FROM pods WHERE org_id=? ORDER BY (id != ?), id""",
+        (org_id, producing_pod_id)).fetchall()
+    for p in pods:
+        if remaining <= 0:
+            break
+        free = p["storage_capacity"] - (p["energy_stored"] + p["food_stored"] + p["goods_stored"])
+        add = min(free, remaining)
+        if add > 0:
+            cur.execute(f"UPDATE pods SET {col}={col}+? WHERE id=?", (add, p["id"]))
+            remaining -= add
+    # Anything still remaining here means the whole org is full -- lost.
+
+def _record_event_direct(cur, turn: int, event_type: str, actor_id=None,
+                         subject_id=None, subject_type=None, payload=None):
+    """
+    Write an event directly via SQL rather than db.events.record_event --
+    db/events.py imports get_current_turn from this module, so calling it
+    from here would create a circular import (see _handle_colonize).
+    """
+    cur.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM events WHERE turn=?", (turn,))
+    seq = cur.fetchone()[0]
+    cur.execute("""
+        INSERT INTO events (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,payload)
+        VALUES (NULL,?,?,?,?,?,?,?)
+    """, (turn, seq, event_type, actor_id, subject_id, subject_type, json.dumps(payload or {})))
+
+def _apply_org_upkeep(cur, consumption: dict):
+    """
+    Per-organization upkeep, once per turn (not per pod) -- every ship/colony
+    costs ORG_UPKEEP_COST (5 food + 1 energy) to keep running at all, on top
+    of whatever its individual pods cost. Applies regardless of transit state.
+    Prorated the same way as pod recipes: not enough on hand means a partial
+    (not all-or-nothing) draw of whatever's actually available.
+    Runs before the per-pod production pass, so upkeep gets first claim on
+    an org's stock for the turn.
+    `consumption` is a {player_id: {resource: amount}} accumulator (see
+    end_of_turn()'s turn.snapshot ledger) -- upkeep drains are tallied into
+    it alongside pod recipe costs, so the ledger's derived waste figure
+    accounts for every resource sink in the turn, not just production inputs.
+    """
+    for org in cur.execute("SELECT id, player_id FROM organizations").fetchall():
+        org_id = org["id"]
+        ratio = 1.0
+        for resource, required in ORG_UPKEEP_COST.items():
+            if required <= 0:
+                continue
+            available = _available_org_resource(cur, org_id, resource)
+            ratio = min(ratio, available / required)
+        ratio = max(0.0, min(1.0, ratio))
+        if ratio > 0:
+            for resource, required in ORG_UPKEEP_COST.items():
+                amount = required * ratio
+                _drain_org_resource(cur, org_id, resource, amount)
+                consumption[org["player_id"]][resource] += amount
+
 def end_of_turn():
     if is_game_over():
         print("Turn limit reached — game over."); return
@@ -22,6 +165,22 @@ def end_of_turn():
         # No scenario selected yet (xsettlers_mcp/game_select.py's select_scenario populates
         # this on bootstrap). Nothing to process -- don't burn turns on an empty game.
         conn.close(); return
+    conn.close()
+
+    # 0. NPC decisions -- each is_npc=1 player with a profile acts before
+    #    this turn resolves, by calling the same confirm_move/set_pod_mission/
+    #    set_mission tool functions a human player would (see engine/npc.py).
+    #    Each of those calls opens and commits its own connection, so this
+    #    runs to completion with nothing left open before the turn's own
+    #    conn/cur (below) starts -- no shared transaction, no lock contention.
+    #    Imported here rather than at module level to avoid a circular import:
+    #    engine/npc.py's use of navigation_tools.confirm_move needs
+    #    get_current_turn from this module, which isn't defined yet while
+    #    this module is still executing its own top-level imports.
+    from engine.npc import run_npc_decisions
+    run_npc_decisions()
+
+    conn = get_connection(); cur = conn.cursor()
 
     # 1. Reset declarations
     cur.execute("UPDATE players SET end_turn_declared=0")
@@ -29,57 +188,140 @@ def end_of_turn():
     # 2. Resolve arrivals
     cur.execute("SELECT current_turn FROM game_state WHERE id=1")
     current_turn = cur.fetchone()[0]
-    cur.execute("SELECT org_id,dest_sector_id FROM arrival_queue WHERE arrival_turn<=?",
+    cur.execute("SELECT org_id,dest_x,dest_y,dest_z FROM arrival_queue WHERE arrival_turn<=?",
                 (current_turn,))
     for arrival in cur.fetchall():
-        cur.execute("""UPDATE organizations SET sector_id=?,mission='idle',mission_params=NULL,
-                       is_mobile=1 WHERE id=?""", (arrival["dest_sector_id"],arrival["org_id"]))
         org = cur.execute("SELECT player_id FROM organizations WHERE id=?",
                           (arrival["org_id"],)).fetchone()
         if org:
-            cur.execute("""INSERT INTO player_sectors (player_id,sector_id,confidence) VALUES (?,?,100)
-                ON CONFLICT(player_id,sector_id) DO UPDATE SET confidence=100""",
-                (org["player_id"],arrival["dest_sector_id"]))
+            dest_sector_id = reveal_sector(cur, org["player_id"],
+                arrival["dest_x"], arrival["dest_y"], arrival["dest_z"])
+            cur.execute("""UPDATE organizations SET sector_id=?,mission='idle',mission_params=NULL,
+                           is_mobile=1 WHERE id=?""", (dest_sector_id,arrival["org_id"]))
     cur.execute("DELETE FROM arrival_queue WHERE arrival_turn<=?", (current_turn,))
 
-    # 3. Pod consumption then production.
-    #    Order matters: consume first, then produce.
-    #    Produce missions run for all pods regardless of transit state.
-    #    Scan resolution runs only for stationary orgs (transit suppresses scan).
-    cur.execute("SELECT p.id,p.mission,p.mission_params,"
-                "p.storage_capacity,p.storage_current,p.org_id,"
-                "p.energy_consumption,p.food_consumption FROM pods p")
+    # 3. Org upkeep, then pod production (input-costed, see engine/production.py's
+    #    POD_CONSUMPTION_RECIPE), then scan resolution.
+    #    Produce missions run for all pods regardless of transit state, but
+    #    produce_energy specifically can't harvest anything while in transit
+    #    (see below). Scan resolution runs only for stationary orgs (transit
+    #    suppresses scan).
+    #
+    #    before_holdings/production/consumption feed the turn.snapshot ledger
+    #    (see _snapshot_holdings, step 6 below) -- captured/accumulated here,
+    #    inline with work this pass is already doing, so the ledger costs no
+    #    extra queries beyond the one before/after holdings snapshot each.
+    before_holdings = _player_holdings(cur)
+    production = collections.defaultdict(lambda: collections.defaultdict(float))
+    consumption = collections.defaultdict(lambda: collections.defaultdict(float))
+    _apply_org_upkeep(cur, consumption)
+
+    cur.execute("""SELECT p.id,p.mission,p.mission_params,p.org_id,
+                o.sector_id AS org_sector_id, o.player_id
+        FROM pods p JOIN organizations o ON o.id = p.org_id
+        ORDER BY p.id""")
     for pod in cur.fetchall():
         mission = pod["mission"]
+        player_id = pod["player_id"]
 
-        # 3a. Consumption — deduct energy and food before any production
-        # TODO: deduct from org-level resource pool once pool is implemented
-        consumption = get_consumption(pod)
-        # placeholder: consumption logged but not yet deducted (deferred — see Known TODOs)
-
-        # 3b. Production
+        # 3a/b. Production, gated by input cost.
+        #    Each producing mission (plus scan) costs some other resource(s)
+        #    to run (e.g. produce_goods costs 2 energy + 1 food) -- drawn
+        #    from the org's own pooled stock of that resource (see
+        #    _available_org_resource/_drain_org_resource above). idle costs
+        #    nothing. Output is prorated to whatever fraction of the required
+        #    input is actually available: e.g. only half the energy needed on
+        #    hand gives half the normal output, rather than an all-or-nothing
+        #    gate. produce_energy is additionally capped by the sector's own
+        #    remaining pool (depleted as it's drawn from, floored at 0, no
+        #    regeneration yet) -- a ship in transit is parked at the sentinel
+        #    sector (id=-1, permanently 0 capacity), so this alone drives
+        #    energy production to 0 while traveling, with no special-case
+        #    branch needed. Other resources aren't sector-sourced at all.
+        #    Known gap, deferred: when multiple players' pods share one
+        #    sector, whoever's pod processes first (by pod id) gets first
+        #    claim on what's left that turn -- no fair-split model yet.
         if mission in ("produce_energy", "produce_food", "produce_goods"):
-            for resource, amount in get_production(mission).items():
-                new_level = min(pod["storage_capacity"], pod["storage_current"] + amount)
-                cur.execute("UPDATE pods SET storage_current=? WHERE id=?",
-                            (new_level, pod["id"]))
+            base_production = get_production(mission)
+            recipe = get_consumption_recipe(mission)
+            org_id = pod["org_id"]
 
-        # 3c. Scan resolution (stationary orgs only)
+            ratio = 1.0
+            for resource, required in recipe.items():
+                if required <= 0:
+                    continue
+                ratio = min(ratio, _available_org_resource(cur, org_id, resource) / required)
+
+            for resource, base_amount in base_production.items():
+                if resource not in RESOURCE_CAPACITY_COLUMN or base_amount <= 0:
+                    continue
+                col = RESOURCE_CAPACITY_COLUMN[resource]
+                sector = cur.execute(
+                    f"SELECT {col} AS remaining FROM sectors WHERE id=?",
+                    (pod["org_sector_id"],)).fetchone()
+                available_sector = sector["remaining"] if sector else 0.0
+                ratio = min(ratio, available_sector / base_amount)
+
+            ratio = max(0.0, min(1.0, ratio))
+
+            if ratio > 0:
+                for resource, required in recipe.items():
+                    amount = required * ratio
+                    _drain_org_resource(cur, org_id, resource, amount)
+                    consumption[player_id][resource] += amount
+
+                for resource, base_amount in base_production.items():
+                    amount = base_amount * ratio
+                    if resource in RESOURCE_CAPACITY_COLUMN and amount > 0:
+                        col = RESOURCE_CAPACITY_COLUMN[resource]
+                        cur.execute(f"UPDATE sectors SET {col}=MAX(0,{col}-?) WHERE id=?",
+                                    (amount, pod["org_sector_id"]))
+                    # Fills this pod's own free space first, then spills into
+                    # other org pods with room, then is lost if the whole org
+                    # is full (see _store_org_resource) -- production tallied
+                    # here regardless of whether it actually fit; the gap
+                    # between this and what _player_holdings later shows
+                    # stored is exactly the turn.snapshot ledger's waste figure.
+                    _store_org_resource(cur, org_id, pod["id"], resource, amount)
+                    if amount > 0:
+                        production[player_id][resource] += amount
+
+        # 3c. Scan: costs food (see POD_CONSUMPTION_RECIPE) but produces no
+        #     output -- stationary orgs only (transit suppresses scan).
         elif mission == "scan":
+            recipe = get_consumption_recipe(mission)
+            org_id = pod["org_id"]
+            ratio = 1.0
+            for resource, required in recipe.items():
+                if required <= 0:
+                    continue
+                ratio = min(ratio, _available_org_resource(cur, org_id, resource) / required)
+            ratio = max(0.0, min(1.0, ratio))
+            if ratio > 0:
+                for resource, required in recipe.items():
+                    amount = required * ratio
+                    _drain_org_resource(cur, org_id, resource, amount)
+                    consumption[player_id][resource] += amount
+
             org = cur.execute(
-                "SELECT sector_id,player_id FROM organizations WHERE id=?",
-                (pod["org_id"],)).fetchone()
-            if org and org["sector_id"] != -1:
+                "SELECT o.sector_id,o.player_id,s.coord_x,s.coord_y,s.coord_z FROM organizations o "
+                "JOIN sectors s ON s.id=o.sector_id WHERE o.id=?", (pod["org_id"],)).fetchone()
+            if ratio > 0 and org and org["sector_id"] != -1:
                 params = json.loads(pod["mission_params"] or "{}")
-                target_id = params.get("target_sector_id")
-                if target_id:
-                    # TODO: validate Euclidean range via get_scan_range()
-                    cur.execute("""
-                        INSERT INTO player_sectors (player_id,sector_id,confidence)
-                        VALUES (?,?,100)
-                        ON CONFLICT(player_id,sector_id) DO UPDATE SET confidence=100""",
-                        (org["player_id"], target_id))
-                    # TODO: emit pod.scanned event; detect rivals
+                tx, ty, tz = params.get("target_x"), params.get("target_y"), params.get("target_z")
+                if tx is not None and ty is not None and tz is not None:
+                    distance = math.sqrt((tx-org["coord_x"])**2 + (ty-org["coord_y"])**2 +
+                                         (tz-org["coord_z"])**2)
+                    scan_range = get_scan_range(pod["org_id"])
+                    if distance <= scan_range:
+                        reveal_sector(cur, org["player_id"], tx, ty, tz)
+                        # TODO: emit pod.scanned event; detect rivals
+                    else:
+                        _record_event_direct(cur, current_turn, "alert.scan_out_of_range",
+                            actor_id=org["player_id"], subject_id=pod["id"], subject_type="pod",
+                            payload={"pod_id": pod["id"], "org_id": pod["org_id"],
+                                     "target_x": tx, "target_y": ty, "target_z": tz,
+                                     "distance": distance, "range": scan_range})
 
     # 4. Colonization resolution — only orgs whose 3-turn colonize_complete event has matured.
     #    Scheduled by set_mission() via record_event(resolve_at_turn=...). Idempotent via the
@@ -120,7 +362,7 @@ def end_of_turn():
     # 6. Holdings snapshot — calculated AFTER all processing is complete
     #    This is the canonical end-state: production, arrivals, missions, fog all resolved.
     conn.commit()  # flush all mutations before snapshotting
-    _snapshot_holdings(cur, current_turn)
+    _snapshot_holdings(cur, current_turn, before_holdings, production, consumption)
 
     # 7. Increment turn
     cur.execute("UPDATE game_state SET current_turn=current_turn+1 WHERE id=1")
@@ -132,58 +374,95 @@ def end_of_turn():
         print(f"Turn limit {TURN_LIMIT} reached — game over. Calculating final scores...")
         _calculate_final_scores()
 
-def _snapshot_holdings(cur, turn: int):
+def _snapshot_holdings(cur, turn: int, before_holdings: dict, production: dict, consumption: dict):
     """
-    Record per-player resource totals at the end of the turn,
-    after all pod execution, arrivals, and mission dispatch have resolved.
-    Called as step 6 of end_of_turn() — never before processing is complete.
-    """
-    cur.execute("""
-        SELECT o.player_id,
-               SUM(CASE WHEN p.mission='produce_energy' THEN p.storage_current ELSE 0 END) AS energy,
-               SUM(CASE WHEN p.mission='produce_food'   THEN p.storage_current ELSE 0 END) AS food,
-               SUM(CASE WHEN p.mission='produce_goods'  THEN p.storage_current ELSE 0 END) AS goods,
-               SUM(p.storage_current) AS total
-        FROM pods p
-        JOIN organizations o ON o.id = p.org_id
-        GROUP BY o.player_id
-    """)
-    for row in cur.fetchall():
-        print(f"  Holdings (turn {turn}) — player {row['player_id']}: "
-              f"energy={row['energy']:.1f} food={row['food']:.1f} "
-              f"goods={row['goods']:.1f} total={row['total']:.1f}")
-    # TODO: emit turn.snapshot event here via record_event()
+    Record per-player resource totals at the end of the turn, after all pod
+    execution, arrivals, and mission dispatch have resolved. Called as step 6
+    of end_of_turn() -- never before processing is complete.
 
-def _calculate_final_scores():
-    """Sum storage_current across all pods per player. Highest score wins."""
+    Completes this function's own long-standing TODO (2026-07-30): a
+    turn.snapshot event is now written per player per turn -- previously
+    holdings were only ever printed, never persisted, so reconstructing a
+    game's history (e.g. "how much did each player waste, turn by turn")
+    meant replaying the whole game from bootstrap in a scratch DB. Payload
+    carries the after-state holdings, this turn's score (same score_weights
+    formula as show_game_status/_calculate_final_scores), and derived waste.
+
+    Waste is derived, not directly measured -- for each resource:
+        wasted = produced - consumed - (after - before)
+    i.e. whatever was produced and consumed this turn but doesn't show up in
+    the actual before/after delta was lost to a full pod with nowhere to
+    spill (see _store_org_resource). `production`/`consumption` are
+    {player_id: {resource: amount}} accumulators built inline during this
+    same end_of_turn() pass (_apply_org_upkeep and the pod loop above) --
+    this function costs exactly one extra query (the after-holdings read,
+    via _player_holdings) beyond what it already did; before_holdings was
+    likewise one query taken at the top of step 3, before any mutation.
+    """
+    after_holdings = _player_holdings(cur)
+    weights = load_config().game.score_weights
+    empty = {"energy": 0.0, "food": 0.0, "goods": 0.0, "total": 0.0}
+    for player in cur.execute("SELECT id, display_name FROM players").fetchall():
+        pid = player["id"]
+        after = after_holdings.get(pid, empty)
+        before = before_holdings.get(pid, empty)
+        produced, consumed = production.get(pid, {}), consumption.get(pid, {})
+        print(f"  Holdings (turn {turn}) — player {pid}: "
+              f"energy={after['energy']:.1f} food={after['food']:.1f} "
+              f"goods={after['goods']:.1f} total={after['total']:.1f}")
+        wasted = {r: max(0.0, produced.get(r, 0.0) - consumed.get(r, 0.0)
+                         - (after[r] - before[r])) for r in ("energy", "food", "goods")}
+        score = (after["energy"] * weights.get("energy", 0) + after["food"] * weights.get("food", 0)
+                 + after["goods"] * weights.get("goods", 0))
+        _record_event_direct(cur, turn, "turn.snapshot", actor_id=pid, subject_id=pid,
+            subject_type="player", payload={
+                "player_id": pid, "display_name": player["display_name"],
+                "energy": after["energy"], "food": after["food"], "goods": after["goods"],
+                "total": after["total"], "score": round(score, 2),
+                "energy_wasted": round(wasted["energy"], 2),
+                "food_wasted": round(wasted["food"], 2),
+                "goods_wasted": round(wasted["goods"], 2),
+            })
+
+def _calculate_final_scores() -> list:
+    """
+    Weighted game score per player: config/game_config.yaml's score_weights
+    applied to each player's total stored energy/food/goods, highest wins --
+    same formula xsettlers_mcp/tools/organization_tools.py's show_game_status
+    uses, so the winner here always matches what was checkable mid-game via
+    that tool. Returns the ranked standings (also printed, for the server log).
+    """
+    weights = load_config().game.score_weights
     conn = get_connection(); cur = conn.cursor()
     cur.execute("""
-        SELECT o.player_id, p.display_name, SUM(pods.storage_current) AS score
+        SELECT o.player_id, p.display_name,
+               SUM(pods.energy_stored) AS energy,
+               SUM(pods.food_stored) AS food,
+               SUM(pods.goods_stored) AS goods
         FROM pods
         JOIN organizations o ON o.id = pods.org_id
         JOIN players p ON p.id = o.player_id
         GROUP BY o.player_id
-        ORDER BY score DESC
     """)
+    standings = []
     for row in cur.fetchall():
-        print(f"  {row['display_name']}: {row['score']:.1f} pts")
+        energy, food, goods = row["energy"] or 0, row["food"] or 0, row["goods"] or 0
+        score = (energy * weights.get("energy", 0) + food * weights.get("food", 0)
+                 + goods * weights.get("goods", 0))
+        standings.append({"player_id": row["player_id"], "display_name": row["display_name"],
+                          "score": score})
     conn.close()
+    standings.sort(key=lambda s: s["score"], reverse=True)
+    for s in standings:
+        print(f"  {s['display_name']}: {s['score']:.1f} pts")
+    return standings
 
 def _handle_colonize(cur, org, current_turn):
-    """
-    Resolve a matured colonize_complete event: flip org_type to 'colony' and log
-    ship.colonized. Written directly (not via db.events.record_event) to avoid a
-    circular import — db/events.py imports get_current_turn from this module.
-    """
+    """Resolve a matured colonize_complete event: flip org_type to 'colony' and log ship.colonized."""
     if org["org_type"] != "ship":
         return
-    cur.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM events WHERE turn=?", (current_turn,))
-    seq = cur.fetchone()[0]
-    cur.execute("""
-        INSERT INTO events (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,payload)
-        VALUES (NULL,?,?,'ship.colonized',NULL,?,'organization',?)
-    """, (current_turn, seq, org["id"],
-          json.dumps({"org_id": org["id"], "sector_id": org["sector_id"]})))
+    _record_event_direct(cur, current_turn, "ship.colonized", subject_id=org["id"],
+        subject_type="organization", payload={"org_id": org["id"], "sector_id": org["sector_id"]})
     cur.execute("""UPDATE organizations
         SET org_type='colony',is_mobile=0,mission='idle',mission_params=NULL WHERE id=?""",
         (org["id"],))

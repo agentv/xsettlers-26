@@ -17,19 +17,10 @@ class GameSettings:
     score_weights: dict
 
 @dataclass
-class SectorDef:
-    coords: List[int]
-    energy_capacity: float
-    food_capacity: float
-    goods_capacity: float
-
-@dataclass
 class PodTemplateDef:
     mission: str
     count: int
     storage_capacity: float = 100.0
-    energy_consumption: float = 0.0
-    food_consumption: float = 0.0
 
 @dataclass
 class StartingConfiguration:
@@ -49,7 +40,6 @@ class PlayerDef:
 @dataclass
 class GameConfig:
     game: GameSettings
-    sectors: List[SectorDef]
     starting_configuration: StartingConfiguration
     players: List[PlayerDef]
 
@@ -64,8 +54,6 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
         mission=_require(p, "mission", "pods_per_ship[].mission"),
         count=int(_require(p, "count", "pods_per_ship[].count")),
         storage_capacity=float(p.get("storage_capacity", 100.0)),
-        energy_consumption=float(p.get("energy_consumption", 0.0)),
-        food_consumption=float(p.get("food_consumption", 0.0)),
     ) for p in sc_raw.get("pods_per_ship", [])]
     return StartingConfiguration(
         name=_require(sc_raw, "name", "name"),
@@ -98,12 +86,6 @@ def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameC
         feature_flags=g.get("feature_flags", {}),
         score_weights=g.get("score_weights", {"energy": 1, "goods": 1, "food": 1}),
     )
-    sectors = [SectorDef(
-        coords=_require(s, "coords", "sectors[].coords"),
-        energy_capacity=float(s.get("energy_capacity", 0.0)),
-        food_capacity=float(s.get("food_capacity", 0.0)),
-        goods_capacity=float(s.get("goods_capacity", 0.0)),
-    ) for s in raw.get("sectors", [])]
     # Load starting configuration from its own file
     sc_file = scenario_override or _require(raw, "starting_configuration_file",
                                             "starting_configuration_file")
@@ -119,7 +101,7 @@ def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameC
     if len(players) > game.max_players:
         raise ValueError(
             f"Config defines {len(players)} players but max_players={game.max_players}")
-    return GameConfig(game=game, sectors=sectors,
+    return GameConfig(game=game,
                       starting_configuration=starting_configuration,
                       players=players)
 

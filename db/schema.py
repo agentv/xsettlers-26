@@ -62,6 +62,55 @@ def init_schema():
             cur.execute("ALTER TABLE pods RENAME COLUMN mission TO task")
         if "mission_params" in cols and "task_params" not in cols:
             cur.execute("ALTER TABLE pods RENAME COLUMN mission_params TO task_params")
+    # One-time migration: organizations gain innate scan aiming (2026-07-31).
+    # Nullable ADD COLUMNs -- organizations holds live game state that must
+    # never be dropped, unlike the empty-table drops above.
+    cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='organizations'")
+    if cur.fetchone()[0] > 0:
+        cols = {row[1] for row in cur.execute("PRAGMA table_info(organizations)").fetchall()}
+        for col in ("scan_offset_x", "scan_offset_y", "scan_offset_z"):
+            if col not in cols:
+                cur.execute(f"ALTER TABLE organizations ADD COLUMN {col} INTEGER")
+        # Absolute scan_target_* -> relative scan_offset_* (same day, 2026-07-31).
+        # Converted rather than renamed: the numbers mean something different
+        # now. offset = target - the org's current position, which is exactly
+        # what the old absolute target was aiming at from where the org stands.
+        # An org in transit has no position to subtract from, so its aim is
+        # cleared rather than guessed at.
+        if "scan_target_x" in cols:
+            cur.execute("""
+                UPDATE organizations SET
+                    scan_offset_x = scan_target_x - (SELECT s.coord_x FROM sectors s WHERE s.id = organizations.sector_id),
+                    scan_offset_y = scan_target_y - (SELECT s.coord_y FROM sectors s WHERE s.id = organizations.sector_id),
+                    scan_offset_z = scan_target_z - (SELECT s.coord_z FROM sectors s WHERE s.id = organizations.sector_id)
+                WHERE scan_target_x IS NOT NULL AND sector_id != -1""")
+            for col in ("scan_target_x", "scan_target_y", "scan_target_z"):
+                cur.execute(f"ALTER TABLE organizations DROP COLUMN {col}")
+    # One-time migration: pod scan targets were absolute coordinates in
+    # task_params JSON; they are offsets now (2026-07-31). Same conversion,
+    # done in Python because it is JSON rather than columns.
+    cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='pods'")
+    if cur.fetchone()[0] > 0:
+        import json as _json
+        rows = cur.execute("""SELECT p.id, p.task_params, s.coord_x, s.coord_y, s.coord_z
+            FROM pods p JOIN organizations o ON o.id = p.org_id
+            LEFT JOIN sectors s ON s.id = o.sector_id
+            WHERE p.task_params IS NOT NULL""").fetchall()
+        for row in rows:
+            try:
+                params = _json.loads(row["task_params"] or "{}")
+            except ValueError:
+                continue
+            if "target_x" not in params:
+                continue
+            if row["coord_x"] is None:
+                cur.execute("UPDATE pods SET task_params=NULL WHERE id=?", (row["id"],))
+                continue
+            cur.execute("UPDATE pods SET task_params=? WHERE id=?", (_json.dumps({
+                "offset_x": params["target_x"] - row["coord_x"],
+                "offset_y": params["target_y"] - row["coord_y"],
+                "offset_z": params["target_z"] - row["coord_z"],
+            }), row["id"]))
     # One-time migration: game_state gains next_tick_at (2026-07-30) -- lets
     # a status report show "time until next tick" without needing to ask the
     # live server process directly. Nullable, ADD COLUMN is safe on an
@@ -115,7 +164,18 @@ def init_schema():
             is_mobile      INTEGER DEFAULT 1,
             mission        TEXT DEFAULT 'idle'
                            CHECK(mission IN ('idle','move','colonize','defend','attack')),
-            mission_params TEXT
+            mission_params TEXT,
+            -- Innate scan: every organization can scan one sector per turn on
+            -- its own account -- a ship's bridge, a colony's headquarters --
+            -- without spending a pod on it (added 2026-07-31). Aimed by an
+            -- OFFSET from the org's own sector, not absolute coordinates, so
+            -- the aim survives a move (see sector_tools.SCAN_BEARINGS).
+            -- Persistent across turns until changed or cleared. Costs the same
+            -- food as a scan pod and is suppressed in transit, exactly as if
+            -- the org carried one scan pod already.
+            scan_offset_x  INTEGER,
+            scan_offset_y  INTEGER,
+            scan_offset_z  INTEGER
         );
         CREATE TABLE IF NOT EXISTS pods (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -33,9 +33,11 @@ These are the four authoritative rules governing what a player can see. All view
 
 **Location:** `xsettlers_mcp/tools/sector_tools.py`
 
-**Scan range:** Fixed at 1 sector (Euclidean distance ≤ 1) for the POC. Range is derived from `get_scan_range(org_id)`, which currently returns the constant `1`.
+**Scan range:** Fixed at 2 sectors (Euclidean distance ≤ 2), derived from `get_scan_range(org_id)`. Raised from 1 on 2026-07-31 — at range 1 a Euclidean radius reaches only the 4 orthogonal neighbours (a diagonal is √2 ≈ 1.41 > 1), which reads as broken. Range 2 reaches 12 sectors.
 
-> **Future hook — sensor pods:** Scan range will eventually be derived from the org's pod manifest. A future `sensor` pod type will contribute range increments, and `get_scan_range(org_id)` will query the pod table instead of returning a constant. Do NOT hard-code `1` at the call site — always call `get_scan_range()`.
+**A scan reveals only its target sector.** No halo, no ring — range governs reach, not breadth (decided 2026-07-31; a radius-5 halo was considered and rejected as making scanning too cheap for the value it returns).
+
+> **Future hook — sensor pods:** Scan range will eventually be derived from the org's pod manifest. A future `sensor` pod type will contribute range increments, and `get_scan_range(org_id)` will query the pod table instead of returning a constant. Do NOT hard-code the number at the call site — always call `get_scan_range()`.
 
 **Flow:**
 

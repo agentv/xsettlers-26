@@ -306,11 +306,17 @@ def end_of_turn():
                 "SELECT o.sector_id,o.player_id,s.coord_x,s.coord_y,s.coord_z FROM organizations o "
                 "JOIN sectors s ON s.id=o.sector_id WHERE o.id=?", (pod["org_id"],)).fetchone()
             if ratio > 0 and org and org["sector_id"] != -1:
+                # Aim is an OFFSET from wherever the org currently is, so it
+                # survives the ship moving (see sector_tools.SCAN_BEARINGS).
+                # Range was validated when the aim was set and cannot drift,
+                # but it is re-checked here because get_scan_range() will
+                # eventually vary per org (sensor pods).
                 params = json.loads(pod["task_params"] or "{}")
-                tx, ty, tz = params.get("target_x"), params.get("target_y"), params.get("target_z")
-                if tx is not None and ty is not None and tz is not None:
-                    distance = math.sqrt((tx-org["coord_x"])**2 + (ty-org["coord_y"])**2 +
-                                         (tz-org["coord_z"])**2)
+                dx, dy, dz = (params.get("offset_x"), params.get("offset_y"),
+                              params.get("offset_z"))
+                if dx is not None and dy is not None and dz is not None:
+                    tx, ty, tz = (org["coord_x"] + dx, org["coord_y"] + dy, org["coord_z"] + dz)
+                    distance = math.sqrt(dx*dx + dy*dy + dz*dz)
                     scan_range = get_scan_range(pod["org_id"])
                     if distance <= scan_range:
                         reveal_sector(cur, org["player_id"], tx, ty, tz)
@@ -321,6 +327,52 @@ def end_of_turn():
                             payload={"pod_id": pod["id"], "org_id": pod["org_id"],
                                      "target_x": tx, "target_y": ty, "target_z": tz,
                                      "distance": distance, "range": scan_range})
+
+    # 3d. Innate organization scan — every org can scan one sector per turn on
+    #     its own account (a ship's bridge, a colony's headquarters), without
+    #     dedicating a pod to it. Deliberately identical in cost and rules to
+    #     carrying one scan pod: same food recipe, same range, same suppression
+    #     while in transit, same out-of-range alert. An org that ALSO has scan
+    #     pods simply gets both, each paying its own way.
+    #
+    #     Runs after pod scans so both are resolved against the same
+    #     pre-existing state, and the aim persists across turns -- re-scanning
+    #     is idempotent (reveal_sector doesn't re-randomize) and refreshes
+    #     confidence, so holding a target is a legitimate way to keep a sector
+    #     from blinking out.
+    scan_recipe = get_consumption_recipe("scan")
+    cur.execute("""SELECT o.id, o.player_id, o.sector_id,
+                          o.scan_offset_x AS dx, o.scan_offset_y AS dy, o.scan_offset_z AS dz,
+                          s.coord_x, s.coord_y, s.coord_z
+        FROM organizations o LEFT JOIN sectors s ON s.id = o.sector_id
+        WHERE o.scan_offset_x IS NOT NULL
+          AND o.scan_offset_y IS NOT NULL
+          AND o.scan_offset_z IS NOT NULL""")
+    for org in cur.fetchall():
+        ratio = 1.0
+        for resource, required in scan_recipe.items():
+            if required <= 0:
+                continue
+            ratio = min(ratio, _available_org_resource(cur, org["id"], resource) / required)
+        ratio = max(0.0, min(1.0, ratio))
+        if ratio > 0:
+            for resource, required in scan_recipe.items():
+                amount = required * ratio
+                _drain_org_resource(cur, org["id"], resource, amount)
+                consumption[org["player_id"]][resource] += amount
+        if ratio <= 0 or org["sector_id"] == -1:
+            continue          # starved, or in transit: cost paid, no reveal
+        tx, ty, tz = (org["coord_x"] + org["dx"], org["coord_y"] + org["dy"],
+                      org["coord_z"] + org["dz"])
+        distance = math.sqrt(org["dx"]**2 + org["dy"]**2 + org["dz"]**2)
+        scan_range = get_scan_range(org["id"])
+        if distance <= scan_range:
+            reveal_sector(cur, org["player_id"], tx, ty, tz)
+        else:
+            _record_event_direct(cur, current_turn, "alert.scan_out_of_range",
+                actor_id=org["player_id"], subject_id=org["id"], subject_type="organization",
+                payload={"org_id": org["id"], "target_x": tx, "target_y": ty,
+                         "target_z": tz, "distance": distance, "range": scan_range})
 
     # 4. Colonization resolution — only orgs whose 3-turn colonize_complete event has matured.
     #    Scheduled by set_mission() via record_event(resolve_at_turn=...). Idempotent via the

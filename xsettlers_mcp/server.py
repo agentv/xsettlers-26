@@ -14,8 +14,8 @@ from xsettlers_mcp.tools.player_tools import get_player_state, declare_end_turn,
 from xsettlers_mcp.tools.sector_tools import get_sector, get_sector_map, show_sector_neighborhood
 from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
 from xsettlers_mcp.tools.organization_tools import (
-    set_mission, set_pod_task, set_pod_scan_target, show_organization,
-    rename_organization,
+    set_mission, set_pod_task, set_pod_scan_bearing, show_organization,
+    rename_organization, set_org_scan_bearing,
     show_civilization_status, show_game_status
 )
 from db.schema import init_schema
@@ -119,11 +119,11 @@ async def list_tools():
                 "mission":{"type":"string"},"params":{"type":"object"}},
                 "required":["player_token","org_id","mission"]}),
         types.Tool(name="set_pod_task",
-            description="Set a pod's task -- what its crew does, as distinct from the parent organization's mission, which is what the vehicle does (idle/produce_energy/produce_food/produce_goods/scan). For scan, optionally include target_x/target_y/target_z (all three, or none) -- response includes in_range so you know immediately if the target is out of scan range (fix it before end of turn or it'll cost food with no reveal).",
+            description="Set a pod's task -- what its crew does, as distinct from the parent organization's mission, which is what the vehicle does (idle/produce_energy/produce_food/produce_goods/scan). For scan, optionally aim it in the same call with a compass bearing (N/NE/E/SE/S/SW/W/NW/N2/E2/S2/W2) or explicit offset_x/y/z -- aim is relative to the pod's organization and survives a move.",
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},"pod_id":{"type":"integer"},
-                "task":{"type":"string"},
-                "target_x":{"type":"integer"},"target_y":{"type":"integer"},"target_z":{"type":"integer"}},
+                "task":{"type":"string"},"bearing":{"type":"string"},
+                "offset_x":{"type":"integer"},"offset_y":{"type":"integer"},"offset_z":{"type":"integer"}},
                 "required":["player_token","pod_id","task"]}),
         types.Tool(name="rename_organization",
             description="Give one of your own ships or colonies a name of your choosing (max 24 chars). "
@@ -132,12 +132,26 @@ async def list_tools():
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},"org_id":{"type":"integer"},"name":{"type":"string"}},
                 "required":["player_token","org_id","name"]}),
-        types.Tool(name="set_pod_scan_target",
-            description="Set or update the scan target coordinate for a pod in scan mission -- response includes in_range so you know immediately if the target is out of scan range.",
+        types.Tool(name="set_org_scan_bearing",
+            description="Aim an organization's own sensors. Every ship and colony can scan one sector per turn "
+                        "on its own account -- a ship's bridge, a colony's headquarters -- without dedicating a "
+                        "pod to it. Scanning is scanning: identical rules to a scan pod (same food cost, range, "
+                        "transit suppression). Aim by compass bearing (N/NE/E/SE/S/SW/W/NW, or N2/E2/S2/W2 for "
+                        "two sectors out) or by explicit offset_x/y/z. The aim is RELATIVE to the org's own "
+                        "sector and persists across turns, so it survives a move with no re-aiming. Out-of-range "
+                        "aims are rejected outright. Pass neither bearing nor offset to clear it.",
             inputSchema={"type":"object","properties":{
-                "player_token":{"type":"string"},"pod_id":{"type":"integer"},
-                "target_x":{"type":"integer"},"target_y":{"type":"integer"},"target_z":{"type":"integer"}},
-                "required":["player_token","pod_id","target_x","target_y","target_z"]}),
+                "player_token":{"type":"string"},"org_id":{"type":"integer"},"bearing":{"type":"string"},
+                "offset_x":{"type":"integer"},"offset_y":{"type":"integer"},"offset_z":{"type":"integer"}},
+                "required":["player_token","org_id"]}),
+        types.Tool(name="set_pod_scan_bearing",
+            description="Aim a pod already on the scan task. Same rules and same bearing vocabulary as "
+                        "set_org_scan_bearing -- scanning is scanning, whoever carries the equipment. Relative "
+                        "aim, persists across turns, out-of-range rejected. Pass neither bearing nor offset to clear.",
+            inputSchema={"type":"object","properties":{
+                "player_token":{"type":"string"},"pod_id":{"type":"integer"},"bearing":{"type":"string"},
+                "offset_x":{"type":"integer"},"offset_y":{"type":"integer"},"offset_z":{"type":"integer"}},
+                "required":["player_token","pod_id"]}),
     ]
 
 @app.call_tool()
@@ -159,8 +173,9 @@ async def call_tool(name: str, arguments: dict):
         "cancel_move":                cancel_move,
         "set_mission":                set_mission,
         "set_pod_task":               set_pod_task,
-        "set_pod_scan_target":        set_pod_scan_target,
+        "set_pod_scan_bearing":       set_pod_scan_bearing,
         "rename_organization":        rename_organization,
+        "set_org_scan_bearing":       set_org_scan_bearing,
     }
     fn = dispatch.get(name)
     if not fn:

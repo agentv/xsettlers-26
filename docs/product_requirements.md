@@ -103,11 +103,14 @@ The following pod missions are defined in the game model. Only a subset are acti
 
 * Scanning is performed by pods assigned the `scan` mission — it is not a discrete player action.
 * A scan pod must have a **scan target** set via `set_pod_scan_target(pod_id, sector_id)` before end of turn for the scan to execute.
-* Scan range is **fixed at 1 sector** (Euclidean distance ≤ 1) for the POC. The target sector must be adjacent.
-* Range is always derived from `get_scan_range(org_id)`, which currently returns the constant `1`.
-* If the designated target sector is **out of range** at end-of-turn resolution, the scan does not execute and the player receives an alert.
-* Ships in transit cannot scan — scan pod missions are suppressed for the duration of transit.
-* **Future:** scan range will expand (target: 12 sectors). The `get_scan_range()` hook is already in place.
+* Scan range is **fixed at 2 sectors** (Euclidean distance ≤ 2), derived from `get_scan_range(org_id)` — always call it, never hard-code the number. Raised from 1 on 2026-07-31: under a Euclidean metric, range 1 reaches only the four orthogonal neighbours, because a diagonal is √2 ≈ 1.41. Being refused a scan of the sector diagonally adjacent reads as broken. Range 2 reaches **12 sectors** — 4 orthogonal, 4 diagonal, 4 two-out orthogonal — the smallest radius at which scanning behaves the way a player expects.
+* **A scan is aimed by a bearing relative to the scanner, not by absolute coordinates** (2026-07-31). Sensors are mounted on the thing that carries them: they look a fixed direction and distance from wherever it currently is, and a ship flying away from a sector does not keep seeing it. Two consequences: a scan pattern survives a move with no re-aiming, and range becomes a permanent property of the aim rather than something that can silently stop being true — so an out-of-range aim is **rejected when set** instead of failing at resolution.
+* **Bearings**: `N NE E SE S SW W NW` (distance 1 or √2) and `N2 E2 S2 W2` (distance 2) — the 12 names map exactly onto the 12 sectors reachable at range 2. Explicit `offset_x/y/z` is always available for anything the table doesn't name (including off-plane targets). **North is −y**, matching the neighborhood map's rendering; arbitrary but fixed.
+* **Scanning is scanning.** An organization's own sensors and a scan pod's follow identical rules — same bearings, same cost, same range, same suppression in transit. The only difference is what carries the equipment.
+* **A scan reveals the targeted sector only — no halo, no surrounding ring.** Decided 2026-07-31, after considering and rejecting a radius-5 halo. If scanning is to be a meaningful activity with a real cost, it must not also be cheap area coverage: one pod-turn plus its food buys one sector of knowledge, and the player chooses which. Range says how far you can *reach*; it does not widen what you *get*.
+* If the designated target sector is **out of range** at end-of-turn resolution, the scan does not execute and the player receives an alert. The food cost is still paid (see `docs/TODO.md`).
+* Ships in transit cannot scan — the reveal is suppressed for the duration of transit.
+* **Future:** range becomes variable per org once sensor pods exist. The `get_scan_range()` hook is already in place.
 
 ---
 

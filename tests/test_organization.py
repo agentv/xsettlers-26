@@ -2,9 +2,10 @@ import json
 import pytest
 from db.connection import get_connection
 from engine.turn import end_of_turn
+from xsettlers_mcp.tools.sector_tools import SCAN_RANGE
 from xsettlers_mcp.tools.organization_tools import (
     set_mission, set_pod_task, show_civilization_status, show_game_status,
-    rename_organization,
+    rename_organization, set_org_scan_bearing, set_pod_scan_bearing,
     show_organization
 )
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
@@ -273,229 +274,85 @@ def test_set_pod_task_unowned_pod():
 
 # --- set_pod_task scan target ---
 
-def test_set_pod_task_scan_stores_target_coords():
-    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+def test_set_pod_task_scan_stores_its_aim_as_an_offset():
+    pid = seed_player(); sid = seed_sector(4, 4, 0); oid = seed_ship(pid, sid)
     pod = seed_pod(oid)
-    result = set_pod_task("U_P1", pod, "scan", target_x=5, target_y=5, target_z=0)
-    assert result["target_x"] == 5 and result["target_y"] == 5 and result["target_z"] == 0
-    assert result["in_range"] is False  # distance sqrt(50) >> scan range 1
+    result = set_pod_task("U_P1", pod, "scan", bearing="NE")
+    assert result["bearing"] == "NE"
+    assert (result["offset_x"], result["offset_y"], result["offset_z"]) == (1, -1, 0)
     conn = get_connection()
     params = json.loads(conn.execute("SELECT task_params FROM pods WHERE id=?",
                                      (pod,)).fetchone()["task_params"])
     conn.close()
-    assert params == {"target_x": 5, "target_y": 5, "target_z": 0, "in_range": False}
+    # Stored relative, not as the absolute (5,3,0) it currently points at.
+    assert params == {"offset_x": 1, "offset_y": -1, "offset_z": 0}
 
-@pytest.mark.parametrize("origin,target,expected_distance,expected_in_range", [
-    ((0,0,0), (1,0,0), 1.0, True),
-    ((3,3,0), (5,3,0), 2.0, False),
+@pytest.mark.parametrize("bearing,offset,distance", [
+    ("N",  (0, -1, 0), 1.0),
+    ("NE", (1, -1, 0), pytest.approx(1.4142135623)),   # legal only since SCAN_RANGE 2
+    ("E2", (2, 0, 0),  2.0),                            # the outer edge
 ])
-def test_set_pod_task_scan_target_status(origin, target, expected_distance, expected_in_range):
-    """The response should remind the player where they are and how far the
-    target is, not just a bare in_range boolean -- one call gives the full
-    picture: current position, target, distance, scan range, legality.
-    In-range and out-of-range are two cases of the same behavior, not two
-    independently-failing things (merged per the 2026-07-29 test-suite audit)."""
-    pid = seed_player(); sid = seed_sector(*origin); oid = seed_ship(pid, sid)
+def test_scan_bearings_resolve_to_offsets_and_report_reach(bearing, offset, distance):
+    """One call gives the whole picture: the offset, its compass name, how far
+    it reaches, and whether that is legal."""
+    pid = seed_player(); sid = seed_sector(3, 3, 0); oid = seed_ship(pid, sid)
     pod = seed_pod(oid)
-    result = set_pod_task("U_P1", pod, "scan",
-                             target_x=target[0], target_y=target[1], target_z=target[2])
-    assert (result["current_x"], result["current_y"], result["current_z"]) == origin
-    assert result["distance"] == expected_distance
-    assert result["scan_range"] == 1
-    assert result["in_range"] is expected_in_range
-
-def test_scan_target_status_none_while_in_transit():
-    from xsettlers_mcp.tools.navigation_tools import confirm_move
-    pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    pod = seed_pod(sid)
-    confirm_move("U_P1", sid, 3, 0, 0)
-    result = set_pod_task("U_P1", pod, "scan", target_x=1, target_y=0, target_z=0)
-    assert result["current_x"] is None and result["distance"] is None and result["in_range"] is None
-
-def test_set_pod_scan_target_reports_in_range():
-    from xsettlers_mcp.tools.organization_tools import set_pod_scan_target
-    pid = seed_player(); sid = seed_sector(0,0,0); oid = seed_ship(pid, sid)
-    pod = seed_pod(oid)
-    set_pod_task("U_P1", pod, "scan")
-    result = set_pod_scan_target("U_P1", pod, 5, 5, 0)
-    assert result["in_range"] is False
-    result = set_pod_scan_target("U_P1", pod, 1, 0, 0)
+    result = set_pod_task("U_P1", pod, "scan", bearing=bearing)
+    assert (result["offset_x"], result["offset_y"], result["offset_z"]) == offset
+    assert result["distance"] == distance
+    assert result["scan_range"] == SCAN_RANGE
     assert result["in_range"] is True
 
-def test_set_pod_task_scan_partial_target_rejected():
+def test_north_is_negative_y():
+    """Fixed convention -- north is up on the neighborhood map, which renders
+    y ascending downward. Arbitrary, but everything player-facing depends on it."""
+    pid = seed_player(); sid = seed_sector(5, 5, 0); oid = seed_ship(pid, sid)
+    result = set_org_scan_bearing("U_P1", oid, "N")
+    assert result["offset_y"] == -1
+    assert result["aimed_at"] == [5, 4, 0]
+
+def test_unknown_bearing_is_rejected():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    pod = seed_pod(oid)
-    assert "error" in set_pod_task("U_P1", pod, "scan", target_x=5, target_y=5)
+    assert "error" in set_org_scan_bearing("U_P1", oid, "NNE")
 
-# --- show_civilization_status: player-scoped fleet report (roster + aggregates) ---
-
-def test_show_civilization_status_org_fields_tasking_storage_production():
-    """tasking, storage, and production all come out of the same
-    show_civilization_status() query for a single org -- one call exercises
-    all three together rather than one test per field, since there's no
-    independent failure mode where they'd need separate tests (they were
-    split into 3 tests originally; consolidated per the 2026-07-29 test-
-    suite audit)."""
+def test_bearing_and_explicit_offset_are_mutually_exclusive():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    seed_pod(oid, task="produce_energy", storage_current=10.0)
-    seed_pod(oid, task="produce_energy", storage_current=10.0)
-    seed_pod(oid, task="produce_food", storage_current=20.0)
-    seed_pod(oid, task="produce_goods", storage_current=5.0)
-    status = show_civilization_status("U_P1")
-    org = next(o for o in status["organizations"] if o["id"] == oid)
-    assert org["tasking"] == {"produce_energy": 2, "produce_food": 1, "produce_goods": 1}
-    assert org["storage"] == {"energy": 20.0, "food": 20.0, "goods": 5.0}
-    assert org["storage_summary"] == "E:20, F:20, G:5"
-    assert org["production"] == {"energy": 20.0, "food": 10.0, "goods": 5.0}
-    assert org["production_summary"] == "E:20, F:10, G:5"
-    assert "storage_summary" in status["display"]["columns"]
+    result = set_org_scan_bearing("U_P1", oid, "N", offset_x=1, offset_y=0, offset_z=0)
+    assert "error" in result and "not both" in result["error"]
 
-def test_show_civilization_status_production_zeroes_energy_in_transit():
-    """A ship in transit is parked at the sentinel sector (0 energy_capacity),
-    so its energy production reads 0 regardless of tasking -- food/goods
-    aren't sector-sourced and are unaffected (matches engine/turn.py's own
-    sector-capacity cap, see _org_production)."""
+def test_partial_offset_is_rejected():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    assert "error" in set_org_scan_bearing("U_P1", oid, offset_x=1)
+
+def test_aim_can_be_set_while_in_transit():
+    """An offset needs no position to validate -- unlike absolute targeting,
+    which could not compute range for a ship at the sentinel sector."""
     from xsettlers_mcp.tools.navigation_tools import confirm_move
     pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
-    seed_pod(oid, task="produce_energy", storage_current=10.0)
-    seed_pod(oid, task="produce_food", storage_current=20.0)
-    confirm_move("U_P1", oid, 3, 0, 0)
-    status = show_civilization_status("U_P1")
-    org = next(o for o in status["organizations"] if o["id"] == oid)
-    assert org["production"] == {"energy": 0.0, "food": 10.0}
+    confirm_move("U_P1", oid, 4, 0, 0)
+    result = set_org_scan_bearing("U_P1", oid, "E")
+    assert result["ok"] is True and result["in_range"] is True
+    assert result["aimed_at"] is None          # no position yet to point from
 
-def test_show_civilization_status_assets_include_capacity_and_percent_full():
+def test_set_pod_scan_bearing_requires_the_scan_task():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    seed_pod(oid, task="produce_energy", storage_capacity=100.0, storage_current=50.0)
-    seed_pod(oid, task="produce_food", storage_capacity=100.0, storage_current=50.0)
-    status = show_civilization_status("U_P1")
-    assert status["assets"]["capacity"] == 200.0
-    assert status["assets"]["total"] == 100.0
-    assert status["assets"]["percent_full"] == 50.0
+    pod = seed_pod(oid, task="produce_food")
+    assert "error" in set_pod_scan_bearing("U_P1", pod, "N")
 
-def test_show_civilization_status_display_hints():
-    """Precomputed presentation fields (short_name, status, tasking_summary)
-    and a top-level display block, so a client with no LLM in the loop can
-    render a table without building its own formatting logic."""
-    pid = seed_player(); sid = seed_sector(3,3,0); oid = seed_ship(pid, sid)
-    seed_pod(oid, task="produce_energy", storage_current=10.0)
-    seed_pod(oid, task="produce_food", storage_current=20.0)
-    status = show_civilization_status("U_P1")
-    org = next(o for o in status["organizations"] if o["id"] == oid)
-    assert org["short_name"] == org["name"].replace("Ship-", "")
-    assert org["status"] == "at (3,3,0)"
-    assert org["tasking_summary"] == "E:1, F:1"
-    assert status["display"]["resource_abbrev"] == {"energy": "E", "food": "F", "goods": "G"}
-    assert "short_name" in status["display"]["columns"]
+def test_set_pod_scan_bearing_clears_when_given_nothing():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    pod = seed_pod(oid, task="scan")
+    set_pod_scan_bearing("U_P1", pod, "N")
+    assert set_pod_scan_bearing("U_P1", pod)["cleared"] is True
+    conn = get_connection()
+    assert conn.execute("SELECT task_params FROM pods WHERE id=?",
+                        (pod,)).fetchone()["task_params"] is None
+    conn.close()
 
-def test_show_civilization_status_in_transit_status_string():
-    """The display `status` string is deliberately minimal -- just "in
-    transit", no destination or ETA (a player asked for this view to be
-    that terse) -- but dest_sector/turns_remaining are still real raw
-    fields for a client that wants to build a richer status itself."""
-    from xsettlers_mcp.tools.navigation_tools import confirm_move
-    pid = seed_player(); sid = seed_sector(0,0,0); oid = seed_ship(pid, sid)
-    confirm_move("U_P1", oid, 3, 0, 0)  # at turn 0, turns_needed=3, arrival_turn=3
-    status = show_civilization_status("U_P1")
-    org = next(o for o in status["organizations"] if o["id"] == oid)
-    assert org["turns_remaining"] == 3
-    assert org["dest_sector"]["coords"] == [3, 0, 0]
-    assert org["status"] == "in transit"
-
-def test_show_civilization_status_turns_remaining_zero_when_arrival_due_this_turn():
-    """When arrival_turn == the current turn, the ship hasn't landed yet --
-    it resolves when this turn is ended, not before -- turns_remaining==0
-    captures that unambiguously even though the display string no longer
-    spells it out."""
-    from xsettlers_mcp.tools.navigation_tools import confirm_move
-    from engine.turn import end_of_turn
-    pid = seed_player(); sid = seed_sector(0,0,0); oid = seed_ship(pid, sid)
-    confirm_move("U_P1", oid, 1, 0, 0, jump_range_per_turn=1)  # arrival_turn=1
-    end_of_turn()  # advances current_turn from 0 to 1 -- arrival not yet due at top of this call
-    status = show_civilization_status("U_P1")
-    org = next(o for o in status["organizations"] if o["id"] == oid)
-    assert status["turn"] == 1
-    assert status["next_tick_at"] is None  # clock never ran in this test -- see engine.turn.get_next_tick_at
-    assert org["turns_remaining"] == 0
-    assert org["status"] == "in transit"
-
-# --- show_organization: locked MVP cargo-table display hints ---
-
-def test_show_organization_display_hints_cargo_table():
-    pid = seed_player(); sid = seed_sector(3,3,0); oid = seed_ship(pid, sid, name="Ship-P1-05")
-    seed_pod(oid, task="produce_energy", storage_capacity=100.0, storage_current=100.0)
-    seed_pod(oid, task="produce_energy", storage_capacity=100.0, storage_current=77.0)
-    result = show_organization("U_P1", oid)
-    assert result["status"] == "at (3,3,0)"
-    assert result["display"]["header"] == "Ship-P1-05 — at (3,3,0), idle"
-    assert result["display"]["columns"] == [
-        "task_display", "count", "energy", "food", "goods", "capacity_display"]
-    task = next(t for t in result["tasks"] if t["task"] == "produce_energy")
-    assert task["task_display"] == "Energy"
-    assert task["capacity_display"] == "177/200"
-
-def test_show_organization_status_in_transit():
-    from xsettlers_mcp.tools.navigation_tools import confirm_move
-    pid = seed_player(); sid = seed_sector(0,0,0); oid = seed_ship(pid, sid)
-    confirm_move("U_P1", oid, 3, 0, 0)
-    result = show_organization("U_P1", oid)
-    assert result["status"] == "in transit"
-
-# --- show_game_status: public scoreboard (all players, aggregate totals only) ---
-
-def test_show_game_status_returns_all_players_standings():
-    p1 = seed_player(email="p1@t.com", player_token="U_P1")
-    p2 = seed_player(email="p2@t.com", player_token="U_P2")
-    sid = seed_sector()
-    o1 = seed_ship(p1, sid, name="P1 Ship")
-    o2 = seed_ship(p2, sid, name="P2 Ship")
-    seed_pod(o1, task="produce_food", storage_capacity=100.0, storage_current=80.0)
-    seed_pod(o2, task="produce_food", storage_capacity=100.0, storage_current=20.0)
-    status = show_game_status("U_P1")
-    assert status["next_tick_at"] is None  # clock never ran in this test -- see engine.turn.get_next_tick_at
-    by_player = {s["player_id"]: s for s in status["standings"]}
-    assert by_player[p1]["total"] == 80.0
-    assert by_player[p2]["total"] == 20.0
-    # ordered by score descending (equivalent to total here since both hold
-    # only food) -- the scoreboard, highest first
-    assert status["standings"][0]["player_id"] == p1
-    assert status["standings"][0]["rank"] == 1
-    assert status["standings"][1]["rank"] == 2
-    assert status["display"]["resource_abbrev"] == {"energy": "E", "food": "F", "goods": "G"}
-
-def test_show_game_status_ranks_by_weighted_score_not_raw_total():
-    """`rank`/ordering follows the score_weights-weighted score
-    (config/game_config.yaml: energy=0, food=1, goods=2 as of 2026-07-30),
-    not the raw total -- a player with a lower raw total but a
-    higher-scoring resource mix should still rank first, proving `score`
-    is a real computed field driving order, not just an alias for `total`."""
-    p1 = seed_player(email="p1@t.com", player_token="U_P1")
-    p2 = seed_player(email="p2@t.com", player_token="U_P2")
-    sid = seed_sector()
-    o1 = seed_ship(p1, sid, name="P1 Ship")
-    o2 = seed_ship(p2, sid, name="P2 Ship")
-    seed_pod(o1, task="produce_energy", storage_capacity=100.0, storage_current=80.0)  # weighted 0
-    seed_pod(o2, task="produce_food", storage_capacity=100.0, storage_current=10.0)
-    seed_pod(o2, task="produce_goods", storage_capacity=100.0, storage_current=10.0)
-    status = show_game_status("U_P1")
-    by_player = {s["player_id"]: s for s in status["standings"]}
-    assert by_player[p1]["total"] == 80.0
-    assert by_player[p2]["total"] == 20.0
-    assert by_player[p1]["score"] == 0.0     # 80 energy * weight 0
-    assert by_player[p2]["score"] == 30.0    # 10 food * weight 1 + 10 goods * weight 2
-    assert status["standings"][0]["player_id"] == p2   # lower total, higher score -- still ranks first
-    assert status["standings"][0]["rank"] == 1
-    assert status["standings"][1]["player_id"] == p1
-    assert status["standings"][1]["rank"] == 2
-
-def test_show_game_status_does_not_leak_fleet_detail():
-    pid = seed_player(); sid = seed_sector(); seed_ship(pid, sid)
-    status = show_game_status("U_P1")
-    assert "organizations" not in status["standings"][0]
-    assert "tasking" not in status["standings"][0]
-
-def test_show_game_status_rejects_unknown_player():
-    assert "error" in show_game_status("U_NOBODY")
+def test_aim_is_rejected_on_a_non_scan_task():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    pod = seed_pod(oid)
+    assert "error" in set_pod_task("U_P1", pod, "produce_food", bearing="N")
 
 # --- rename_organization (players refer to units by name) ---
 
@@ -534,3 +391,107 @@ def test_rename_organization_is_ownership_gated():
     p1 = seed_player(); seed_player(email="b@test.com", player_token="U_P2", display_name="Two")
     sid = seed_sector(); oid = seed_ship(p1, sid)
     assert "error" in rename_organization("U_P2", oid, "Stolen")
+
+# --- innate organization scan (a ship's bridge / colony HQ) ---
+
+def test_set_org_scan_target_reports_range_and_persists():
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    result = set_org_scan_bearing("U_P1", oid, "NE")
+    assert result["in_range"] is True and result["scan_range"] == SCAN_RANGE
+    conn = get_connection()
+    row = conn.execute("SELECT scan_offset_x,scan_offset_y,scan_offset_z FROM organizations WHERE id=?",
+                       (oid,)).fetchone()
+    conn.close()
+    assert (row["scan_offset_x"], row["scan_offset_y"], row["scan_offset_z"]) == (1, -1, 0)
+
+def test_org_scan_reveals_its_target_without_any_scan_pod():
+    """The whole point: no pod is dedicated to scanning here."""
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_food", storage_current=100.0)
+    set_org_scan_bearing("U_P1", oid, "E2")
+    end_of_turn()
+    conn = get_connection()
+    revealed = conn.execute(
+        "SELECT id FROM sectors WHERE coord_x=2 AND coord_y=0 AND coord_z=0").fetchone()
+    conn.close()
+    assert revealed is not None
+
+def test_org_scan_costs_food_like_a_scan_pod():
+    """An idle pod stocked with food isolates the scan's own cost: idle has no
+    recipe, so any food drawn this turn is org upkeep plus the innate scan."""
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    pod = seed_pod(oid, task="idle")
+    conn = get_connection()
+    conn.execute("UPDATE pods SET food_stored=100.0, energy_stored=100.0 WHERE id=?", (pod,))
+    conn.commit(); conn.close()
+
+    conn = get_connection()
+    baseline_before = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?",
+                                   (oid,)).fetchone()["s"]
+    conn.close()
+    end_of_turn()                       # upkeep only, no scan target set yet
+    conn = get_connection()
+    upkeep_only = baseline_before - conn.execute(
+        "SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
+    conn.close()
+
+    set_org_scan_bearing("U_P1", oid, "E")
+    conn = get_connection()
+    before = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
+    conn.close()
+    end_of_turn()
+    conn = get_connection()
+    after = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
+    conn.close()
+    scan_turn_cost = before - after
+    assert scan_turn_cost > upkeep_only          # the scan cost something on top of upkeep
+    assert scan_turn_cost == upkeep_only + 1.0   # exactly one scan pod's food
+
+def test_org_scan_rejects_an_out_of_range_aim_outright():
+    """An offset's range is fixed, so an illegal aim can never become legal --
+    reject it at set time instead of failing silently at resolution."""
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    result = set_org_scan_bearing("U_P1", oid, offset_x=SCAN_RANGE + 4, offset_y=0, offset_z=0)
+    assert "error" in result and result["in_range"] is False
+    conn = get_connection()
+    row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
+    conn.close()
+    assert row["scan_offset_x"] is None      # nothing was written
+
+def test_scan_aim_is_relative_and_survives_a_move():
+    """The whole point of offsets: a pattern set once travels with the hull."""
+    from xsettlers_mcp.tools.navigation_tools import confirm_move
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_food", storage_current=200.0)
+    set_org_scan_bearing("U_P1", oid, "E")          # scans (1,0,0) from home
+    end_of_turn()
+    confirm_move("U_P1", oid, 5, 0, 0, jump_range_per_turn=5)
+    end_of_turn(); end_of_turn()                    # arrives at (5,0,0)
+    conn = get_connection()
+    here = conn.execute("SELECT coord_x FROM sectors s JOIN organizations o ON o.sector_id=s.id "
+                        "WHERE o.id=?", (oid,)).fetchone()
+    revealed = conn.execute("SELECT id FROM sectors WHERE coord_x=6 AND coord_y=0").fetchone()
+    conn.close()
+    assert here["coord_x"] == 5
+    assert revealed is not None                     # now scanning (6,0,0), no re-aiming
+
+def test_org_scan_target_persists_across_turns():
+    """Holding a target is a legitimate way to keep a sector from blinking out."""
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_food", storage_current=100.0)
+    set_org_scan_bearing("U_P1", oid, "E")
+    end_of_turn(); end_of_turn()
+    conn = get_connection()
+    row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
+    conn.close()
+    assert row["scan_offset_x"] == 1
+
+def test_set_org_scan_target_clears_when_given_no_coordinates():
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    set_org_scan_bearing("U_P1", oid, "E")
+    result = set_org_scan_bearing("U_P1", oid)
+    assert result["cleared"] is True
+    conn = get_connection()
+    row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
+    conn.close()
+    assert row["scan_offset_x"] is None

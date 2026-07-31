@@ -4,7 +4,8 @@ from db.events import record_event
 from engine.production import POD_PRODUCTION
 from engine.turn import get_current_turn, get_next_tick_at
 from xsettlers_mcp.tools.navigation_tools import confirm_move
-from xsettlers_mcp.tools.sector_tools import get_scan_range
+from xsettlers_mcp.tools.sector_tools import (
+    get_scan_range, resolve_bearing, bearing_name, SCAN_BEARINGS)
 import json, math
 
 VALID_ORG_MISSIONS = {"idle", "move", "colonize", "defend", "attack"}
@@ -74,31 +75,56 @@ def _org_production(tasking: dict, in_transit: bool) -> dict:
             production[resource] = production.get(resource, 0.0) + amount
     return production
 
-def _scan_target_status(cur, org_id: int, target_x: int, target_y: int, target_z: int) -> dict:
+def _resolve_aim(bearing, offset_x, offset_y, offset_z):
     """
-    Full picture for a scan target the moment it's set: the org's current
-    coordinates (so the player has a reference point without a separate
-    lookup), the distance to the target, the org's scan range, and whether
-    it's in range -- computed immediately, so the player finds out right
-    away rather than only at end-of-turn resolution. This is advisory only:
-    engine/turn.py's actual resolution recomputes in-range fresh against the
-    org's position at that time (which may have changed -- e.g. the org
-    finished a move in the meantime), so it's the authority, not whatever
-    was computed here at set-time.
-    All fields are None if the org is currently in transit (no position to
-    measure from yet).
+    Turn either a compass bearing ("NE") or an explicit offset into
+    (dx, dy, dz), or return an error dict. Exactly one form must be given.
     """
+    named = bearing is not None
+    explicit = any(c is not None for c in (offset_x, offset_y, offset_z))
+    if named and explicit:
+        return None, {"error": "Give either a bearing or offset_x/y/z, not both"}
+    if named:
+        offset = resolve_bearing(bearing)
+        if offset is None:
+            return None, {"error": f"Unknown bearing '{bearing}'. Valid: {sorted(SCAN_BEARINGS)}"}
+        return offset, None
+    if not explicit:
+        return None, {"error": "Give a bearing (e.g. 'NE') or offset_x/offset_y/offset_z"}
+    if any(c is None for c in (offset_x, offset_y, offset_z)):
+        return None, {"error": "offset_x, offset_y, and offset_z must all be provided together"}
+    return (int(offset_x), int(offset_y), int(offset_z)), None
+
+
+def _aim_status(org_id: int, offset) -> dict:
+    """
+    Describe an aim: its offset, its compass name if it has one, the distance
+    it reaches, and whether that is within scan range.
+
+    Unlike the absolute targeting this replaced, range is a permanent property
+    of the offset -- it cannot silently stop being true because the scanner
+    moved -- so callers reject an out-of-range aim outright instead of
+    accepting it and warning.
+    """
+    dx, dy, dz = offset
+    distance = math.sqrt(dx*dx + dy*dy + dz*dz)
+    scan_range = get_scan_range(org_id)
+    return {"offset_x": dx, "offset_y": dy, "offset_z": dz,
+            "bearing": bearing_name(dx, dy, dz),
+            "distance": distance, "scan_range": scan_range,
+            "in_range": distance <= scan_range}
+
+
+def _aimed_sector(cur, org_id: int, offset):
+    """Absolute coordinates an org's aim currently points at, or None if it
+    is in transit (no position to offset from)."""
     org = cur.execute("""SELECT s.coord_x, s.coord_y, s.coord_z FROM organizations o
         JOIN sectors s ON s.id = o.sector_id WHERE o.id=? AND o.sector_id!=-1""",
         (org_id,)).fetchone()
-    scan_range = get_scan_range(org_id)
     if not org:
-        return {"current_x": None, "current_y": None, "current_z": None,
-                "distance": None, "scan_range": scan_range, "in_range": None}
-    distance = math.sqrt((target_x-org["coord_x"])**2 + (target_y-org["coord_y"])**2 +
-                         (target_z-org["coord_z"])**2)
-    return {"current_x": org["coord_x"], "current_y": org["coord_y"], "current_z": org["coord_z"],
-            "distance": distance, "scan_range": scan_range, "in_range": distance <= scan_range}
+        return None
+    return (org["coord_x"] + offset[0], org["coord_y"] + offset[1], org["coord_z"] + offset[2])
+
 
 def set_mission(player_token: str, org_id: int, mission: str, params: dict = None) -> dict:
     """
@@ -166,28 +192,33 @@ def set_mission(player_token: str, org_id: int, mission: str, params: dict = Non
     return {"ok": True, "org_id": org_id, "mission": mission}
 
 def set_pod_task(player_token: str, pod_id: int, task: str,
-                   target_x: int = None, target_y: int = None, target_z: int = None) -> dict:
+                 bearing: str = None,
+                 offset_x: int = None, offset_y: int = None, offset_z: int = None) -> dict:
     """
     Set a pod's task -- what its crew does, as distinct from the parent
     organization's `mission`, which is what the vehicle does. Validates
     ownership and task type.
-    If mission='scan' and target_x/target_y/target_z are all provided, sets the
-    scan target (a coordinate -- sectors are lazily instantiated, see
-    db/sectors.py, so the target need not exist yet) in the same call. The
-    target is accepted even if out of scan range -- see _scan_target_status
-    -- but the response echoes the org's current coordinates plus the
-    distance/scan_range/in_range so the player finds out immediately whether
-    it's legal, and can fix it before end of turn rather than finding out
-    only at resolution.
-    If task='scan' and no target is given, the pod enters the scan task with
-    no target — set_pod_scan_target must be called separately before end of turn.
+
+    For task='scan', optionally aim it in the same call with either a compass
+    `bearing` ("N", "NE", "W2" -- see sector_tools.SCAN_BEARINGS) or an
+    explicit `offset_x/y/z`. Aim is relative to the pod's own organization, not
+    absolute coordinates, so it survives the ship moving. Out-of-range aims are
+    rejected here rather than accepted-and-warned: an offset's range is fixed,
+    so there is nothing that could later make an illegal aim legal.
+
+    A scan pod with no aim costs its food and reveals nothing -- call
+    set_pod_scan_bearing before end of turn, or aim it here.
     """
     if task not in VALID_POD_TASKS:
         return {"error": f"Invalid pod task '{task}'. Valid: {sorted(VALID_POD_TASKS)}"}
-    target_coords = (target_x, target_y, target_z)
-    if task == "scan" and any(c is not None for c in target_coords) and \
-            any(c is None for c in target_coords):
-        return {"error": "target_x, target_y, and target_z must all be provided together"}
+    aiming = bearing is not None or any(c is not None for c in (offset_x, offset_y, offset_z))
+    offset = None
+    if aiming:
+        if task != "scan":
+            return {"error": f"Only the scan task takes an aim; '{task}' does not"}
+        offset, err = _resolve_aim(bearing, offset_x, offset_y, offset_z)
+        if err:
+            return err
     conn = get_connection(); cur = conn.cursor()
     cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
@@ -198,39 +229,45 @@ def set_pod_task(player_token: str, pod_id: int, task: str,
     pod = cur.fetchone()
     if not pod:
         conn.close(); return {"error": "Pod not found or not owned by player"}
-    params = {}
-    status = {"current_x": None, "current_y": None, "current_z": None,
-              "distance": None, "scan_range": None, "in_range": None}
-    if task == "scan" and target_x is not None:
-        params["target_x"], params["target_y"], params["target_z"] = target_x, target_y, target_z
-        status = _scan_target_status(cur, pod["org_id"], target_x, target_y, target_z)
-        params["in_range"] = status["in_range"]
+    status, params = {}, None
+    if offset is not None:
+        status = _aim_status(pod["org_id"], offset)
+        if not status["in_range"]:
+            conn.close()
+            return {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
+                             f"{status['scan_range']}", **status}
+        params = {"offset_x": offset[0], "offset_y": offset[1], "offset_z": offset[2]}
     record_event(
         event_type="pod.task_set",
         payload={"pod_id": pod_id, "task": task, "params": params},
         actor_id=player["id"], subject_id=pod_id, subject_type="pod")
-    cur.execute("UPDATE pods SET task=?, task_params=? WHERE id=?",
-                (task, json.dumps(params) if params else None, pod_id))
+    if offset is not None:
+        cur.execute("UPDATE pods SET task=?, task_params=? WHERE id=?",
+                    (task, json.dumps(params), pod_id))
+    else:
+        cur.execute("UPDATE pods SET task=? WHERE id=?", (task, pod_id))
     conn.commit(); conn.close()
-    return {"ok": True, "pod_id": pod_id, "task": task,
-            "target_x": target_x, "target_y": target_y, "target_z": target_z, **status}
+    return {"ok": True, "pod_id": pod_id, "task": task, **status}
 
-def set_pod_scan_target(player_token: str, pod_id: int,
-                        target_x: int, target_y: int, target_z: int) -> dict:
+
+def set_pod_scan_bearing(player_token: str, pod_id: int, bearing: str = None,
+                         offset_x: int = None, offset_y: int = None,
+                         offset_z: int = None) -> dict:
     """
-    Assign or change the scan target coordinate for a pod already in 'scan'
-    mission. The target need not already exist as a sector (sectors are
-    lazily instantiated, see db/sectors.py) -- re-targeting an already-known
-    sector is fine too (e.g. to refresh a stale/decayed view of it, or check
-    whether it's changed). The target is accepted even if out of scan range
-    -- an out-of-range target still costs the scan's food upkeep at
-    resolution but won't reveal anything (see engine/turn.py and the
-    alert.scan_out_of_range event) -- but the response echoes the org's
-    current coordinates plus the distance/scan_range/in_range so the player
-    finds out immediately whether it's legal, and can fix it before end of
-    turn rather than finding out only at resolution (no harm, no foul, if
-    corrected in time).
+    Aim a pod already on the scan task, by compass bearing or explicit offset.
+    Identical rules to an organization's own sensors (set_org_scan_bearing) --
+    scanning is scanning, whoever carries the equipment.
+
+    The aim is relative and persists across turns, so a ship keeps scanning
+    the same bearing after it moves, with no re-aiming. Pass no bearing and no
+    offset to clear the aim and stop paying for it.
     """
+    clearing = bearing is None and all(c is None for c in (offset_x, offset_y, offset_z))
+    offset = None
+    if not clearing:
+        offset, err = _resolve_aim(bearing, offset_x, offset_y, offset_z)
+        if err:
+            return err
     conn = get_connection(); cur = conn.cursor()
     cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
@@ -243,19 +280,26 @@ def set_pod_scan_target(player_token: str, pod_id: int,
         conn.close(); return {"error": "Pod not found or not owned by player"}
     if pod["task"] != "scan":
         conn.close(); return {"error": "Pod is not on the scan task — set its task to 'scan' first"}
-    status = _scan_target_status(cur, pod["org_id"], target_x, target_y, target_z)
-    params = {"target_x": target_x, "target_y": target_y, "target_z": target_z,
-              "in_range": status["in_range"]}
+    if clearing:
+        cur.execute("UPDATE pods SET task_params=NULL WHERE id=?", (pod_id,))
+        conn.commit(); conn.close()
+        return {"ok": True, "pod_id": pod_id, "cleared": True}
+    status = _aim_status(pod["org_id"], offset)
+    if not status["in_range"]:
+        conn.close()
+        return {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
+                         f"{status['scan_range']}", **status}
+    params = {"offset_x": offset[0], "offset_y": offset[1], "offset_z": offset[2]}
     record_event(
-        event_type="pod.scan_target_set",
-        payload={"pod_id": pod_id, "target_x": target_x, "target_y": target_y, "target_z": target_z,
-                 "in_range": status["in_range"]},
+        event_type="pod.scan_bearing_set",
+        payload={"pod_id": pod_id, **params, "bearing": status["bearing"]},
         actor_id=player["id"], subject_id=pod_id, subject_type="pod")
-    cur.execute("UPDATE pods SET task_params=? WHERE id=?",
-                (json.dumps(params), pod_id))
+    cur.execute("UPDATE pods SET task_params=? WHERE id=?", (json.dumps(params), pod_id))
+    aimed = _aimed_sector(cur, pod["org_id"], offset)
     conn.commit(); conn.close()
-    return {"ok": True, "pod_id": pod_id,
-            "target_x": target_x, "target_y": target_y, "target_z": target_z, **status}
+    return {"ok": True, "pod_id": pod_id, "cleared": False,
+            "aimed_at": list(aimed) if aimed else None, **status}
+
 
 MAX_ORG_NAME_LENGTH = 24
 
@@ -302,6 +346,65 @@ def rename_organization(player_token: str, org_id: int, name: str) -> dict:
     cur.execute("UPDATE organizations SET name=? WHERE id=?", (name, org_id))
     conn.commit(); conn.close()
     return {"ok": True, "org_id": org_id, "previous_name": previous, "name": name}
+
+
+def set_org_scan_bearing(player_token: str, org_id: int, bearing: str = None,
+                         offset_x: int = None, offset_y: int = None,
+                         offset_z: int = None) -> dict:
+    """
+    Aim an organization's own sensors. Every ship and colony can scan one
+    sector per turn on its own account -- a ship's bridge, a colony's
+    headquarters -- without dedicating a pod to it.
+
+    Scanning is scanning: identical in every rule to a scan pod
+    (set_pod_scan_bearing) -- same food cost, same range, same suppression in
+    transit, same relative aiming. An org that also carries scan pods gets
+    both, and each pays its own way.
+
+    Aim by compass `bearing` ("N", "NE", "W2" -- see sector_tools.SCAN_BEARINGS)
+    or by explicit `offset_x/y/z`. The aim is relative to the org's own sector
+    and persists across turns, so a ship keeps scanning the same bearing after
+    it moves -- set a pattern once and it travels with the hull. Pass neither
+    to clear the aim and stop paying for it.
+    """
+    clearing = bearing is None and all(c is None for c in (offset_x, offset_y, offset_z))
+    offset = None
+    if not clearing:
+        offset, err = _resolve_aim(bearing, offset_x, offset_y, offset_z)
+        if err:
+            return err
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
+    player = cur.fetchone()
+    if not player:
+        conn.close(); return {"error": "Player not found"}
+    cur.execute("SELECT id, name FROM organizations WHERE id=? AND player_id=?",
+                (org_id, player["id"]))
+    org = cur.fetchone()
+    if not org:
+        conn.close(); return {"error": "Organization not found or not owned by player"}
+    if clearing:
+        cur.execute("""UPDATE organizations
+            SET scan_offset_x=NULL, scan_offset_y=NULL, scan_offset_z=NULL WHERE id=?""", (org_id,))
+        conn.commit(); conn.close()
+        return {"ok": True, "org_id": org_id, "name": org["name"], "cleared": True}
+    status = _aim_status(org_id, offset)
+    if not status["in_range"]:
+        conn.close()
+        return {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
+                         f"{status['scan_range']}", **status}
+    record_event(
+        event_type="organization.scan_bearing_set",
+        payload={"org_id": org_id, "offset_x": offset[0], "offset_y": offset[1],
+                 "offset_z": offset[2], "bearing": status["bearing"]},
+        actor_id=player["id"], subject_id=org_id, subject_type="organization")
+    cur.execute("""UPDATE organizations
+        SET scan_offset_x=?, scan_offset_y=?, scan_offset_z=? WHERE id=?""",
+        (offset[0], offset[1], offset[2], org_id))
+    aimed = _aimed_sector(cur, org_id, offset)
+    conn.commit(); conn.close()
+    return {"ok": True, "org_id": org_id, "name": org["name"], "cleared": False,
+            "aimed_at": list(aimed) if aimed else None, **status}
 
 
 def show_organization(player_token: str, org_id: int) -> dict:

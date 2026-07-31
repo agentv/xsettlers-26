@@ -23,7 +23,7 @@ def test_scan_within_range_reveals_target():
     pod = seed_pod(sid, task="scan")
     seed_pod(sid, task="produce_food", storage_current=100.0)
     r = get_scan_range(sid)
-    set_pod_task("U_P1", pod, "scan", target_x=r, target_y=0, target_z=0)
+    set_pod_task("U_P1", pod, "scan", offset_x=r, offset_y=0, offset_z=0)
     end_of_turn()
     conn = get_connection()
     sector = conn.execute(
@@ -34,23 +34,23 @@ def test_scan_within_range_reveals_target():
     assert ps["confidence"] == 100 - CONFIDENCE_DECAY_PER_TURN
     conn.close()
 
-def test_scan_out_of_range_does_not_reveal_and_logs_alert():
+def test_scan_out_of_range_aim_is_rejected_at_set_time():
+    """Aim is an offset, so its range is fixed and knowable when set -- an
+    illegal aim can never become legal, so it is refused outright rather than
+    accepted and left to fail silently at resolution."""
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, task="scan")
     seed_pod(sid, task="produce_food", storage_current=100.0)
-    r = get_scan_range(sid)
-    out_of_range_x = r + 5
-    set_pod_task("U_P1", pod, "scan", target_x=out_of_range_x, target_y=0, target_z=0)
+    out_of_range = get_scan_range(sid) + 5
+    result = set_pod_task("U_P1", pod, "scan", offset_x=out_of_range, offset_y=0, offset_z=0)
+    assert "error" in result and result["in_range"] is False
     end_of_turn()
     conn = get_connection()
     sector = conn.execute(
         "SELECT id FROM sectors WHERE coord_x=? AND coord_y=0 AND coord_z=0",
-        (out_of_range_x,)).fetchone()
-    alert = conn.execute(
-        "SELECT payload FROM events WHERE event_type='alert.scan_out_of_range'").fetchone()
+        (out_of_range,)).fetchone()
     conn.close()
     assert sector is None
-    assert alert is not None
 
 def test_rescanning_known_sector_refreshes_confidence_without_altering_resources():
     """Re-scanning an already-revealed sector must not re-randomize its
@@ -60,7 +60,7 @@ def test_rescanning_known_sector_refreshes_confidence_without_altering_resources
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, task="scan")
     seed_pod(sid, task="produce_food", storage_current=100.0)
-    set_pod_task("U_P1", pod, "scan", target_x=1, target_y=0, target_z=0)
+    set_pod_task("U_P1", pod, "scan", bearing="E")
     end_of_turn()  # first scan: reveals the sector, stamps then decays confidence
 
     conn = get_connection()
@@ -72,7 +72,7 @@ def test_rescanning_known_sector_refreshes_confidence_without_altering_resources
                  (pid, sector["id"]))
     conn.commit(); conn.close()
 
-    set_pod_task("U_P1", pod, "scan", target_x=1, target_y=0, target_z=0)  # re-scan same target
+    set_pod_task("U_P1", pod, "scan", bearing="E")  # re-scan same target
     end_of_turn()
 
     conn = get_connection()
@@ -241,16 +241,22 @@ def test_show_sector_neighborhood_rejects_unknown_player():
     assert show_sector_neighborhood("U_NOBODY", center_x=0, center_y=0, center_z=0) == \
         {"error": "Player not found"}
 
-def test_scan_out_of_range_still_costs_food():
-    """The scan attempt still costs its food upkeep even though it fails --
-    only the reveal is gated by range, not the resource cost."""
+def test_scan_in_transit_still_costs_food_but_reveals_nothing():
+    """Now that out-of-range aims are refused at set time, transit is the one
+    remaining case where a scan pays and returns nothing: the reveal is
+    suppressed while the ship has no position, but the food is still drawn.
+    Tracked as a known gap in docs/TODO.md -- pinned here so a fix to the
+    cost side is a deliberate change rather than an accident."""
+    from xsettlers_mcp.tools.navigation_tools import confirm_move
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, task="scan")
     seed_pod(sid, task="produce_food", storage_current=100.0)
-    r = get_scan_range(sid)
-    set_pod_task("U_P1", pod, "scan", target_x=r+5, target_y=0, target_z=0)
+    set_pod_task("U_P1", pod, "scan", bearing="E")
+    confirm_move("U_P1", sid, 4, 0, 0)          # in transit at end of turn
     end_of_turn()
     conn = get_connection()
     food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (sid,)).fetchone()["s"]
+    revealed = conn.execute("SELECT COUNT(*) n FROM sectors WHERE id != -1").fetchone()["n"]
     conn.close()
-    assert food < 100.0
+    assert food < 100.0        # paid for it
+    assert revealed == 1       # only the origin sector -- nothing was scanned

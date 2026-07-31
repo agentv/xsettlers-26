@@ -84,6 +84,42 @@ def test_bootstrap_game_state_starts_at_turn_zero():
     assert row["current_turn"] == 0
     conn.close()
 
+def test_bootstrap_seats_players_at_their_scenario_declared_home_sectors():
+    """Home sectors come from the participant entry that names the player, not
+    from a separate positional list — so the two can't drift out of step."""
+    _bootstrap()
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT p.display_name, s.coord_x, s.coord_y, s.coord_z
+        FROM players p
+        JOIN organizations o ON o.player_id = p.id
+        JOIN sectors s ON s.id = o.sector_id
+        GROUP BY p.id ORDER BY p.id""").fetchall()
+    conn.close()
+    assert [(r["display_name"], r["coord_x"], r["coord_y"], r["coord_z"]) for r in rows] == \
+           [("Vincent", 25, 25, 0), ("Player Two", 25, 50, 0)]
+
+def test_bootstrap_solo_scenario_seeds_exactly_one_player():
+    _bootstrap(scenario_file="config/game_solo.yaml", scenario_name="game_solo")
+    conn = get_connection()
+    players = conn.execute("SELECT id FROM players").fetchall()
+    sectors = conn.execute("SELECT COUNT(*) AS n FROM sectors WHERE id != -1").fetchone()["n"]
+    ships = conn.execute(
+        "SELECT COUNT(*) AS n FROM organizations WHERE org_type='ship'").fetchone()["n"]
+    colonies = conn.execute(
+        "SELECT COUNT(*) AS n FROM organizations WHERE org_type='colony'").fetchone()["n"]
+    conn.close()
+    assert len(players) == 1
+    assert sectors == 1        # one participant, one home sector revealed
+    assert ships == 8
+    assert colonies == 1       # game_solo sets home_colony: true
+
+def test_bootstrap_requires_a_scenario():
+    """There is no default scenario — the service is a library of games."""
+    import pytest
+    with pytest.raises(ValueError, match="no default scenario"):
+        bootstrap_game(scenario_name="nothing", selected_by="test")
+
 def test_bootstrap_seeds_only_home_sectors_not_full_grid():
     """Sectors are lazily instantiated (see db/sectors.py's reveal_sector) --
     bootstrap should only reveal the two players' home sectors, not a

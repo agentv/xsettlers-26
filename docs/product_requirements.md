@@ -10,8 +10,9 @@ XSettlers is a multiplayer, turn-based space strategy game played entirely throu
 
 * A game instance is defined by a single `game_config.yaml` file and a corresponding SQLite/SpatiaLite database.
 * The player roster is **fixed at bootstrap time**. There is no mechanism for joining a game already in session.
+* **The service is a library of games, not one game.** `config/game_config.yaml` holds a service-wide player *directory* (identity and credential, one entry per person); each scenario file declares its own `participants` — which directory players are seated in it, and where each starts. A player's token is an invitation to the specific games they are seated in, not to the whole library. Player count is therefore a property of the scenario: solo, two-player, and five-player games differ only in YAML.
 * Each player is identified by a Slack user ID. Authentication is handled at the MCP layer.
-* For the POC, two players are supported. Multi-game and larger rosters are future scope.
+* Roster size is per-scenario, bounded by the engine-wide `max_players` ceiling (currently 8). The shipped scenarios are two-player (`game0`, `game1`) and one-player (`game_solo`). Concurrent multi-game — several games live at once, rather than one per deployment — is still future scope.
 
 ---
 

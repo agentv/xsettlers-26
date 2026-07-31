@@ -6,7 +6,11 @@ game:
   # it was last seen. Note: the engine currently reads this from the
   # CONFIDENCE_DECAY_PER_TURN env var (see db/sectors.py), not from here.
   confidence_decay_per_turn: 20
-  max_players: 2
+  # Engine-wide ceiling on how many players any one scenario may seat. It is a
+  # ceiling only -- there is no floor, so a 1-participant solo scenario is
+  # equally valid. How many players a *particular* game has is decided by that
+  # scenario's participants list, not here.
+  max_players: 8
   turn_limit: 20
   dimensions: 2
 
@@ -25,20 +29,29 @@ game:
     goods: 2
     food: 1
 
-# Path to the starting configuration file for this game instance.
-# Swap this to use a different starting configuration (e.g. game1.yaml).
-starting_configuration_file: config/game0.yaml
+# (There is deliberately no starting_configuration_file key. This service is a
+# library of games, not one game -- which scenario gets bootstrapped is chosen
+# at runtime by a player via select_scenario(), so a file-level "the scenario
+# is this one" pointer would be a second, weaker declaration of the same thing.
+# Removed 2026-07-30.)
 
 # Sectors are lazily instantiated (see db/sectors.py's reveal_sector()) --
 # no sector exists in the DB until a player reveals it via bootstrap
 # placement, ship arrival, or a resolved scan. There is no pre-seeded grid
 # and nothing to configure here.
 
+# PLAYER DIRECTORY -- who exists on this service. This is NOT a game roster:
+# it says nothing about which games anyone plays. Each scenario file names its
+# own participants, referencing these entries by email (see config/game0.yaml).
+# One person, one entry, one credential -- so a player who appears in five
+# scenarios still has exactly one token, in exactly one place.
+#
 # player_token is each player's actual credential -- opaque, generated (e.g.
 # `python3 -c "import secrets; print(secrets.token_urlsafe(24))"`), not a
 # public-looking platform ID. Whatever client a player uses (Slack, curl,
 # another LLM agent) passes this token as the player_token argument on every
-# tool call; xsettlers_mcp/auth.py compares it against this roster.
+# tool call; xsettlers_mcp/auth.py compares it against this directory. Tokens
+# deliberately never appear in a scenario file.
 #
 # SECURITY: this file is committed to git. The placeholder values below are
 # NOT real secrets -- generate fresh tokens before any real deployment, and

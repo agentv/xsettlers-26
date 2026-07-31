@@ -1,0 +1,28 @@
+# Solo scenario -- the first one-player game, and the proof that the
+# participants model actually supports variable roster sizes. Nothing here is
+# special-cased in code: a solo game is just a scenario whose participants
+# list has one entry.
+#
+# Discovered automatically by xsettlers_mcp/game_select.py's list_scenarios()
+# because the filename matches config/game*.yaml.
+#
+# NOTE: named provisionally. If this becomes the tutorial / "scenario zero",
+# rename the file and the `name` below to match.
+
+name: "Solo"
+description: >
+  A single-player scenario for trying the engine out without waiting on anyone:
+  one fleet, no rivals, and consensus acceleration means declaring end of turn
+  advances the clock immediately instead of waiting for the tick.
+
+participants:
+  - {player: "vincent@example.com", home_sector: [10, 10, 0]}
+
+ships_per_player: 8
+
+pods_per_ship:
+  - {mission: produce_energy, count: 2, storage_capacity: 100.0}
+  - {mission: produce_goods,  count: 2, storage_capacity: 100.0}
+  - {mission: produce_food,   count: 2, storage_capacity: 100.0}
+
+home_colony: true

@@ -10,14 +10,19 @@ _SCENARIO_GLOB = os.path.join(_REPO_ROOT, "config", "game*.yaml")
 
 def list_scenarios(player_token: str = None) -> list:
     """
-    Enumerate available game scenarios by scanning config/game*.yaml
-    (excluding game_config.yaml itself, which is the shared game settings +
-    player roster file, not a scenario). Each scenario file is a starting
-    configuration and must declare its own name/description.
+    Enumerate the game library by scanning config/game*.yaml (excluding
+    game_config.yaml itself, which holds engine settings + the player
+    directory, not a scenario). Each scenario file declares its own
+    name/description and its own participants.
 
-    player_token is accepted but unused -- kept for call-signature
-    consistency with every other tool function, since the MCP dispatch
-    layer calls every tool with the same arguments dict.
+    Given a player_token, this returns only the scenarios that player is a
+    participant in -- a token is an invitation to specific games, not to
+    every game on the service. Called with no token (as select_scenario does
+    internally) it returns the whole library.
+
+    An unrecognized token gets an empty list rather than the full library:
+    someone who isn't in the directory has no games, and enumerating what
+    exists isn't something to hand out for free.
     """
     scenarios = []
     for path in sorted(glob.glob(_SCENARIO_GLOB)):
@@ -31,8 +36,15 @@ def list_scenarios(player_token: str = None) -> list:
             "file": rel_path,
             "name": sc.name,
             "description": sc.description,
+            "player_count": len(sc.participants),
+            "participants": [p.player for p in sc.participants],
         })
-    return scenarios
+    if player_token is None:
+        return scenarios
+    identity = authenticate(player_token)
+    if not identity["ok"]:
+        return []
+    return [s for s in scenarios if identity["email"] in s["participants"]]
 
 def get_active_game() -> dict:
     """The currently bootstrapped scenario, or None if none has been selected yet."""
@@ -45,8 +57,11 @@ def get_active_game() -> dict:
 def select_scenario(player_token: str, scenario_name: str) -> dict:
     """
     The one real gate a player must pass before anything else works: must be
-    on the roster (authenticate) and must name a real scenario. Bootstraps
-    the chosen scenario if no game is active yet.
+    in the player directory, must name a real scenario, and must be a
+    participant in that scenario. Bootstraps it if no game is active yet.
+
+    Identity is checked before the scenario is resolved, so an unrecognized
+    token learns nothing about which scenarios exist.
 
     Once this succeeds, bootstrap_game() has populated the players table
     from the roster -- every other tool's existing internal
@@ -65,6 +80,9 @@ def select_scenario(player_token: str, scenario_name: str) -> dict:
     scenarios = {s["scenario_name"]: s for s in list_scenarios()}
     if scenario_name not in scenarios:
         return {"error": f"Unknown scenario '{scenario_name}'. Available: {sorted(scenarios)}"}
+    seated = authenticate(player_token, scenario_file=scenarios[scenario_name]["file"])
+    if not seated["ok"]:
+        return seated
     active = get_active_game()
     if active:
         if active["scenario_name"] == scenario_name:

@@ -8,6 +8,7 @@ exist.
 ## DB & Engine
 
 * [ ] `engine/turn.py` — `_handle_defend` and `_handle_attack` are stubs; implement combat system later.
+* [ ] `engine/turn.py` — **rival detection is still unbuilt** (`# TODO: emit pod.scanned event; detect rivals` in scan resolution). No `alert.rival_detected` event is ever emitted and the schema has no sighting-history table, so rival positions can only be read live from `organizations`. `show_sector_neighborhood` works around this by reporting rivals *only* in sectors at confidence 100 (ones the player occupies) — anywhere else would leak current intel onto a decayed cell. Building sighting storage would let rivals appear on stale cells honestly, stamped with the turn last seen. See `docs/ui_and_rendering_design.md`'s Cell vocabulary.
 * [ ] `engine/turn.py` — scan pods still pay their food cost while in transit; only the *reveal* is currently suppressed (the `org["sector_id"] != -1` check gates just the reveal/range-check branch, not the recipe-drain above it). Should suppress the whole scan mission, cost included, while in transit — not just the reveal.
 
 ## MCP Tools
@@ -15,6 +16,10 @@ exist.
 * [ ] **Player-settable organization names** — no tool exists to rename an org post-bootstrap (`name` is written once at bootstrap and never touched again by any tool in `organization_tools.py`). Needs a new tool, likely `rename_organization(player_token, org_id, name)` — ownership-gated like everything else in that module, with some not-yet-decided sanity bound on length/characters. First instance of a broader question worth keeping in mind: `mission` is currently the only org characteristic a player can edit post-bootstrap (via `set_mission`/`set_pod_mission`) — if more editable characteristics get added later, worth revisiting whether they each get their own bespoke tool or start warranting a more general "edit organization" entry point.
 * [ ] `organization_tools.py` — `set_pod_mission(mission='scan')`: if the parent ship is currently in transit (`mission == 'move'`), allow the assignment but return a warning that the scan pod will be suppressed until arrival.
 * [ ] Consider a DB-level `CHECK` constraint enforcing `org_type != 'colony' OR is_mobile = 0` on `organizations` — currently only enforced by application code (bootstrap + colonize resolution), not the schema itself.
+
+## Config
+
+* [ ] **`config/game_config.yaml`'s `game:` block is mostly dead, shadowed by env vars.** Only `max_players` and `score_weights` are consumed. `tick_seconds` (vs `GAME_TICK_SECONDS`), `turn_limit` (vs `TURN_LIMIT`), and `confidence_decay_per_turn` (vs `CONFIDENCE_DECAY_PER_TURN`) are each parsed into `GameSettings` by `config/loader.py` and then never read; `dimensions` and `feature_flags` are read by nothing anywhere. This is a live trap — editing a value in the YAML looks like it should work and silently does nothing. Fix is to pick a precedence rule (proposed: YAML supplies the default, env overrides it) and apply it to all of them at once, rather than wiring up one field and leaving the rest inconsistent. Raised 2026-07-30 while changing the fog decay model.
 
 ## Infrastructure
 
@@ -58,9 +63,9 @@ The long-term vision (see `docs/dev_history.md` for the architectural groundwork
 
 * [ ] **Matchmaking logic, and NPC fill-in at roster time specifically.** NPC decision-making itself now exists (`engine/npc.py` — see dev history's 2026-07-30 NPC strategy profiles entry), but nothing yet assigns an NPC to backfill an open lobby slot automatically; `assign_npc_profile()` is still a manual call, not wired into any join/roster flow.
 * [ ] Per-game DB file provisioning/routing, and `db/connection.py`'s `DB_PATH` becoming per-game — today it's one global env var read fresh per call (correct for one game per deployment); a lobby will need a "resolve DB path for this game" mechanism layered on top later, not a change to `get_connection()` itself.
-* [ ] `config/game0.yaml`'s `home_sector_by_player` is a fixed 2-element, position-indexed list matching `config/game_config.yaml`'s 2 hardcoded players. A variable-size lobby roster will `IndexError` on `sc.home_sector_by_player[idx]` in `db/bootstrap.py` once roster size diverges from scenario file size. Reworking scenario files to support variable rosters is out of scope for now.
+* [x] ~~`home_sector_by_player` is a fixed 2-element position-indexed list; a variable-size roster will `IndexError`.~~ **Resolved 2026-07-30.** Scenarios now declare a `participants` list (directory email + that player's `home_sector`), resolved into `Seat` objects by `config/loader.py`'s `resolve_seats()`. Player count is a property of the scenario, so variable roster sizes work with no code change — `config/game_solo.yaml` is the 1-player proof. Positional pairing between the roster and the scenario is gone entirely.
 * [ ] `events.game_id INTEGER` exists in the schema but is never populated by any `INSERT INTO events` anywhere in the codebase — vestigial under the DB-per-game model. Fine to leave (dropping columns is out of scope), just noting it's dead.
-* [ ] `xsettlers_mcp/auth.py`'s `authenticate()` always reads `config/game_config.yaml`'s static roster directly, independent of whatever roster `bootstrap_game()` was actually seeded with. Once something actually calls `roster_override` with a dynamically-assembled roster, newly-seeded players won't be recognized by `authenticate()` until it's updated too — `auth.py` and bootstrap's roster source need to be reconciled together when the lobby is actually built, not before.
+* [ ] `roster_override` is still the one path that can desync identity. `authenticate()` now reads the same scenario `participants` list that `bootstrap_game()` seeds from, so the config path is reconciled — but a caller passing `roster_override` assembles seats that exist in no YAML file, and `authenticate()` will not recognize those players. A real lobby needs the directory itself to become dynamic (or `authenticate()` to fall back to the `players` table once a game is bootstrapped). Narrower than it was, not closed.
 
 ### NPC strategy profiles — remaining work
 

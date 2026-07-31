@@ -10,9 +10,14 @@ description: >
   The default MVP scenario. Two players, 8 ships each, no starting colony --
   everyone begins mobile and picks their own moment to colonize.
 
-home_sector_by_player:
-  - [25, 25, 0]  # Player 1
-  - [25, 50, 0]  # Player 2
+# Who plays this scenario, and where each of them starts. `player` references
+# an email in config/game_config.yaml's player directory -- tokens live there,
+# never here. The length of this list IS the player count for this scenario:
+# one entry is a solo game, five entries a five-player game, no code change
+# either way. Add `is_npc: true` to an entry to have it seeded as an NPC.
+participants:
+  - {player: "vincent@example.com", home_sector: [25, 25, 0]}
+  - {player: "player2@example.com", home_sector: [25, 50, 0]}
 
 ships_per_player: 8
 

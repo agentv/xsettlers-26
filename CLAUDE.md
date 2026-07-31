@@ -34,6 +34,8 @@ pytest tests/test_navigation.py::test_confirm_move_parks_at_sentinel -v
 
 Config is env-driven (see `.env.example`, loaded via `python-dotenv`): `DB_PATH`, `GAME_CONFIG_PATH`, `CONFIDENCE_DECAY_PER_TURN`, `GAME_TICK_SECONDS`, `TURN_LIMIT`, `MCP_SHARED_SECRET`.
 
+**Env vars shadow `config/game_config.yaml`, and most of that file's `game:` block is dead.** Only `max_players` (`config/loader.py`, `db/bootstrap.py`) and `score_weights` (`engine/turn.py`, `organization_tools.py`) are actually read. `tick_seconds`, `turn_limit`, and `confidence_decay_per_turn` are each parsed into `GameSettings` and then ignored in favor of an env var; `dimensions` and `feature_flags` are read by nothing at all. Changing a value in the YAML and expecting it to take effect is the trap here — check whether anything consumes the field first. Reconciling the two (YAML as default, env as override) is tracked in `docs/TODO.md`.
+
 Deploy target is Fly.io (`fly.toml`, `Dockerfile`) — persistent volume mounted at `/data` holds the SpatiaLite `.db` file.
 
 ## Architecture
@@ -56,9 +58,9 @@ There is **no separate `gateway.py`** despite what `docs/mcp_server_layer_design
 
 The MVP runs **one shared game per deployed instance** (the `games` table is a `CHECK (id = 1)` singleton). Flow:
 
-1. `list_scenarios()` (`xsettlers_mcp/game_select.py`) discovers scenarios by globbing `config/game*.yaml` (excluding `game_config.yaml`, which holds shared game settings + the fixed player roster, not a scenario).
-2. `select_scenario(player_token, scenario_name)` authenticates against the roster (`xsettlers_mcp/auth.py` — trusts the token's roster match at face value, no deeper identity verification), then calls `db/bootstrap.bootstrap_game()` on first selection for that scenario. Switching scenarios once a game is active is rejected.
-3. `bootstrap_game()` seeds sectors, players (from `game_config.yaml`'s roster, unless `roster_override` is passed — an unused escape hatch for a future dynamic lobby), starting ships + pods (from the scenario file's `pods_per_ship` templates), and stamps home sectors visible at confidence 100.
+1. `list_scenarios(player_token)` (`xsettlers_mcp/game_select.py`) discovers scenarios by globbing `config/game*.yaml` (excluding `game_config.yaml`, which holds engine settings + the player directory, not a scenario). Given a token it returns only the scenarios that player is a *participant* in; an unrecognized token gets an empty list, not the library.
+2. `select_scenario(player_token, scenario_name)` authenticates twice, deliberately: once with no scenario (who are you? — resolves the token against the directory) and again with the chosen scenario file (may you play *this* game? — requires being a participant). Identity is checked first so an unrecognized token learns nothing about which scenarios exist. Then `db/bootstrap.bootstrap_game()` on first selection. Switching scenarios once a game is active is rejected.
+3. `bootstrap_game()` seeds sectors, players, starting ships + pods (from the scenario's `pods_per_ship` templates), and stamps home sectors visible at confidence 100. It requires a `scenario_file` — there is no default scenario.
 
 `engine/clock.run_clock()` starts ticking immediately at server startup regardless of whether a scenario has been picked; `engine/turn.end_of_turn()` no-ops if the `games` table is empty so no turns are silently burned pre-selection.
 
@@ -94,9 +96,17 @@ The clock (`engine/clock.py`) calls `end_of_turn()` on a fixed interval (`GAME_T
 
 ### Config
 
-`config/game_config.yaml` holds shared game settings (tick interval, confidence decay, max players, turn limit, feature flags, score weights) and the **fixed player roster** — there is no runtime player-join path; changing the roster means bootstrapping a new database. It points to a `starting_configuration_file` (e.g. `config/game0.yaml`), which is loaded separately via `load_starting_configuration()` and declares its own `name`/`description` (shown to players choosing a scenario), home sectors per player, ship count, and pod loadout templates. Adding a new playable scenario is just adding a new `config/game<N>.yaml` — no code change, no touching `game_config.yaml`.
+**This service is a library of games, not one game** — that shapes the whole config split (reworked 2026-07-30; before that the roster lived in `game_config.yaml` and was paired to scenarios by list position, which made player count a property of the *service*).
 
-**Committed file, real credentials tension**: each roster entry's `player_token` is that player's actual auth credential (see above), but `game_config.yaml` is tracked in git and baked into the Docker image at build time. The committed values are intentionally obvious placeholders (`REPLACE_WITH_GENERATED_TOKEN_*`), not real secrets — this hasn't been resolved for a real multi-player deployment yet (no mechanism exists to keep real tokens out of git while still letting `xsettlers_mcp/auth.py` read them at runtime). Don't commit real generated tokens into this file.
+`config/game_config.yaml` holds engine-wide settings (tick interval, confidence decay, max players, turn limit, feature flags, score weights) and the **player directory** — who exists on this service, one entry per person, one `player_token` each. It says nothing about who plays what. It has no `starting_configuration_file` pointer; which scenario runs is a runtime choice made through `select_scenario()`.
+
+`config/game<N>.yaml` is a scenario: `name`/`description` (shown when choosing), `ships_per_player`, `pods_per_ship` templates, `home_colony`, and its own **`participants`** list — each entry naming a directory player by email plus that player's `home_sector` (and optional `is_npc`). **The length of the participants list is the scenario's player count**, so a solo game (`config/game_solo.yaml`) and a five-player game differ only in YAML; no code branches on player count. `max_players` is an engine ceiling, never a floor.
+
+`config/loader.py`'s `resolve_seats()` pairs each participant with their directory entry into a `Seat` (identity *and* starting position on one object), which is what `bootstrap_game()` iterates. Nothing downstream pairs two lists by index — that was the defect class where roster size and scenario size had to match by luck. A participant not in the directory raises at load time rather than silently seating fewer players.
+
+Adding a playable scenario is still just adding a `config/game<N>.yaml` — no code change, no touching `game_config.yaml` unless the scenario needs a player the directory doesn't have yet.
+
+**Committed file, real credentials tension**: each directory entry's `player_token` is that player's actual auth credential (see above), but `game_config.yaml` is tracked in git and baked into the Docker image at build time. The committed values are intentionally obvious placeholders (`REPLACE_WITH_GENERATED_TOKEN_*`), not real secrets — this hasn't been resolved for a real multi-player deployment yet (no mechanism exists to keep real tokens out of git while still letting `xsettlers_mcp/auth.py` read them at runtime). Don't commit real generated tokens into this file.
 
 ### Testing conventions
 

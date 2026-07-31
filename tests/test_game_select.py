@@ -22,6 +22,39 @@ def test_list_scenarios_finds_game1():
     assert game1["name"] == "Outbreak"
     assert game1["description"]
 
+def test_list_scenarios_finds_the_solo_scenario():
+    solo = next(s for s in list_scenarios() if s["scenario_name"] == "game_solo")
+    assert solo["player_count"] == 1
+
+def test_list_scenarios_returns_only_games_the_player_is_seated_in():
+    """A token is an invitation to specific games, not to the whole library.
+    Player Two is in the directory but not a participant in game_solo."""
+    mine = {s["scenario_name"] for s in list_scenarios("REPLACE_WITH_GENERATED_TOKEN_2")}
+    assert mine == {"game0", "game1"}
+    everyones = {s["scenario_name"] for s in list_scenarios("REPLACE_WITH_GENERATED_TOKEN_1")}
+    assert everyones == {"game0", "game1", "game_solo"}
+
+def test_list_scenarios_tells_an_unknown_token_nothing():
+    assert list_scenarios("U_NOT_ON_ROSTER") == []
+
+def test_select_scenario_rejects_a_known_player_not_seated_in_that_scenario():
+    _clear_active_game()
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_2", "game_solo")
+    assert result["ok"] is False
+    assert "not a participant" in result["error"]
+    assert get_active_game() is None      # nothing was bootstrapped
+
+def test_select_scenario_bootstraps_a_solo_game_with_one_player():
+    """Player count is a property of the scenario, not the service -- no code
+    path branches on how many participants there are."""
+    _clear_active_game()
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game_solo")
+    assert result["ok"] is True
+    conn = get_connection()
+    players = conn.execute("SELECT display_name FROM players").fetchall()
+    conn.close()
+    assert [p["display_name"] for p in players] == ["Vincent"]
+
 def test_get_active_game_none_before_selection():
     _clear_active_game()
     assert get_active_game() is None

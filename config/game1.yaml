@@ -11,9 +11,11 @@ description: >
   fleet of 8 ships, all producing from turn 1. Home sectors are set apart
   for a real early-game exploration phase before rivals make contact.
 
-home_sector_by_player:
-  - [3, 3, 0]    # Player 1 -- same as no-colony
-  - [12, 12, 0]  # Player 2
+# See config/game0.yaml for the participants format. `player` references an
+# email in config/game_config.yaml's player directory.
+participants:
+  - {player: "vincent@example.com", home_sector: [3, 3, 0]}
+  - {player: "player2@example.com", home_sector: [12, 12, 0]}
 
 ships_per_player: 8
 

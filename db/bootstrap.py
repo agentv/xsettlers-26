@@ -1,16 +1,19 @@
 # Closed roster rule: The player set for a game is fixed at bootstrap time.
-# game_config.yaml is the sole source of player identity by default, and
-# there is no runtime player-join path -- to change the roster, bootstrap a
-# new database. roster_override (below) is an explicit escape hatch for a
-# future caller (e.g. a lobby) that assembles a roster dynamically instead
-# of reading the YAML list; nothing calls it yet.
+# The roster comes from the chosen scenario's participants list, resolved
+# against config/game_config.yaml's player directory (see
+# config/loader.py's resolve_seats) -- so player count is a property of the
+# scenario, not of the service. There is no runtime player-join path; to
+# change who is playing, bootstrap a new database. roster_override (below)
+# is an explicit escape hatch for a future caller (e.g. a lobby) that
+# assembles seats dynamically instead of reading a scenario file; nothing
+# calls it yet.
 #
 # Which scenario gets bootstrapped is chosen at runtime via
 # xsettlers_mcp/game_select.py's select_scenario() -- see scenario_file/scenario_name/
 # selected_by below. The games table records that choice.
 
 from db.connection import get_connection
-from config.loader import load_config
+from config.loader import load_config, Seat
 from db.sectors import reveal_sector
 from engine.production import RESOURCE_STORAGE_COLUMN, RESOURCE_PRODUCING_MISSION
 
@@ -36,48 +39,55 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
     """
     Initialize a fresh game. Safe to call repeatedly — guards against double-init.
 
+    scenario_file (repo-root-relative, e.g. "config/game0.yaml") names which
+    game in the library to bootstrap; it is required, since there is no
+    default scenario. The scenario's participants, resolved against the
+    player directory, decide both who plays and where each of them starts —
+    so a solo scenario and a five-player scenario bootstrap identically with
+    no branching here.
+
     roster_override, if given, is a list of dicts (email, display_name,
-    player_token, optional is_npc) used instead of reading players from
-    config_path's players: list. Escape hatch for a future lobby that
-    assembles a roster dynamically (real players + NPC fill-in) rather
-    than reading a fixed YAML list. Not currently called by anything --
-    xsettlers_mcp/game_select.py's select_scenario() still always uses the config
-    file's roster.
+    player_token, home_sector, optional is_npc) used instead of the
+    scenario's own participants. Escape hatch for a future lobby that
+    assembles seats dynamically (real players + NPC fill-in) rather than
+    reading a fixed YAML list. Not currently called by anything --
+    xsettlers_mcp/game_select.py's select_scenario() always uses the
+    scenario's participants.
     """
     cfg  = load_config(config_path, scenario_override=scenario_file) if config_path \
            else load_config(scenario_override=scenario_file)
+    if cfg.starting_configuration is None:
+        raise ValueError("bootstrap_game() requires a scenario_file — there is no default scenario")
     conn = get_connection(); cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM sectors WHERE coord_x != -1")
     if cur.fetchone()[0] > 0:
         print("Game already bootstrapped — skipping."); conn.close(); return
     print(f"Bootstrapping game: {cfg.game.name} (scenario: {cfg.starting_configuration.name})")
 
-    # 1. Seed players
-    player_id_list = []
+    # 1. Seed players from the resolved seats -- identity and starting
+    #    position travel together, so nothing downstream pairs lists by index.
+    seats = roster_override if roster_override is not None else cfg.seats
     if roster_override is not None:
         if len(roster_override) > cfg.game.max_players:
             raise ValueError(
                 f"roster_override has {len(roster_override)} players but "
                 f"max_players={cfg.game.max_players}")
-        for p in roster_override:
-            cur.execute("""INSERT INTO players
-                (email,display_name,player_token,is_npc) VALUES (?,?,?,?)""",
-                (p["email"], p["display_name"], p["player_token"],
-                 int(bool(p.get("is_npc", False)))))
-            player_id_list.append(cur.lastrowid)
-            print(f"  Created player: {p['display_name']}")
-    else:
-        for p in cfg.players:
-            cur.execute("INSERT INTO players (email,display_name,player_token) VALUES (?,?,?)",
-                        (p.email, p.display_name, p.player_token))
-            player_id_list.append(cur.lastrowid)
-            print(f"  Created player: {p.display_name}")
+        seats = [Seat(email=p["email"], display_name=p["display_name"],
+                      player_token=p["player_token"],
+                      home_sector=list(p["home_sector"]),
+                      is_npc=bool(p.get("is_npc", False))) for p in roster_override]
+    player_id_list = []
+    for seat in seats:
+        cur.execute("""INSERT INTO players
+            (email,display_name,player_token,is_npc) VALUES (?,?,?,?)""",
+            (seat.email, seat.display_name, seat.player_token, int(seat.is_npc)))
+        player_id_list.append(cur.lastrowid)
+        print(f"  Created player: {seat.display_name}")
 
     # 2. Create starting ships for each player
     sc = cfg.starting_configuration
-    for idx, player_id in enumerate(player_id_list):
-        home_coords = tuple(sc.home_sector_by_player[idx])
-        home_sector_id = reveal_sector(cur, player_id, *home_coords)
+    for idx, (player_id, seat) in enumerate(zip(player_id_list, seats)):
+        home_sector_id = reveal_sector(cur, player_id, *tuple(seat.home_sector))
         for ship_num in range(sc.ships_per_player):
             ship_name = f"Ship-P{idx+1}-{ship_num+1:02d}"
             cur.execute("""INSERT INTO organizations
@@ -100,9 +110,8 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
     #    docs/player_guide.md's Outbreak section: "every organization -- each
     #    ship and the home colony alike -- carries the same 6-pod loadout").
     if sc.home_colony:
-        for idx, player_id in enumerate(player_id_list):
-            home_coords = tuple(sc.home_sector_by_player[idx])
-            home_sector_id = reveal_sector(cur, player_id, *home_coords)
+        for idx, (player_id, seat) in enumerate(zip(player_id_list, seats)):
+            home_sector_id = reveal_sector(cur, player_id, *tuple(seat.home_sector))
             cur.execute("""INSERT INTO organizations
                 (org_type,name,player_id,sector_id,is_mobile,mission)
                 VALUES ('colony',?,?,?,0,'idle')""",

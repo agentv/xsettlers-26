@@ -16,6 +16,9 @@ VALID_POD_TASKS = {"idle", "produce_energy", "produce_food", "produce_goods", "s
 # are always still present alongside these -- a client that wants its own
 # presentation is free to ignore all of this and build from the raw data.
 RESOURCE_ABBREV = {"energy": "E", "food": "F", "goods": "G"}
+# Legacy bootstrap names ("Ship-P1-01", "Colony-P1"). Defaults are short
+# now (S1..Sn, C1) and players can rename freely, so this only still
+# matters for games bootstrapped before 2026-07-31.
 _NAME_PREFIXES_TO_STRIP = ("Ship-", "Colony-")
 
 # Locked MVP cargo-table format for a single org's status (see show_organization):
@@ -253,6 +256,53 @@ def set_pod_scan_target(player_token: str, pod_id: int,
     conn.commit(); conn.close()
     return {"ok": True, "pod_id": pod_id,
             "target_x": target_x, "target_y": target_y, "target_z": target_z, **status}
+
+MAX_ORG_NAME_LENGTH = 24
+
+def rename_organization(player_token: str, org_id: int, name: str) -> dict:
+    """
+    Give one of your own ships or colonies a name of your choosing.
+
+    Names are how a player actually refers to a unit ("send S3 north", "what
+    is Fort Hope holding"), so they are required to be unique among that
+    player's own organizations -- an ambiguous name is not a name. Uniqueness
+    is per player, not global: two players may each field a "Vanguard", and
+    neither can see the other's roster anyway.
+
+    Bounded at MAX_ORG_NAME_LENGTH characters and stripped of surrounding
+    whitespace, because the name has to fit a fleet-report column on a phone.
+    Empty names are rejected rather than silently restoring the bootstrap
+    default -- clearing a name is not a thing you can do; renaming is.
+    """
+    name = (name or "").strip()
+    if not name:
+        return {"error": "Name cannot be empty"}
+    if len(name) > MAX_ORG_NAME_LENGTH:
+        return {"error": f"Name is {len(name)} characters; limit is {MAX_ORG_NAME_LENGTH}"}
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
+    player = cur.fetchone()
+    if not player:
+        conn.close(); return {"error": "Player not found"}
+    cur.execute("SELECT id, name FROM organizations WHERE id=? AND player_id=?",
+                (org_id, player["id"]))
+    org = cur.fetchone()
+    if not org:
+        conn.close(); return {"error": "Organization not found or not owned by player"}
+    cur.execute("""SELECT id FROM organizations
+        WHERE player_id=? AND id!=? AND name=? COLLATE NOCASE""",
+        (player["id"], org_id, name))
+    if cur.fetchone():
+        conn.close(); return {"error": f"You already have an organization named '{name}'"}
+    previous = org["name"]
+    record_event(
+        event_type="organization.renamed",
+        payload={"org_id": org_id, "from": previous, "to": name},
+        actor_id=player["id"], subject_id=org_id, subject_type="organization")
+    cur.execute("UPDATE organizations SET name=? WHERE id=?", (name, org_id))
+    conn.commit(); conn.close()
+    return {"ok": True, "org_id": org_id, "previous_name": previous, "name": name}
+
 
 def show_organization(player_token: str, org_id: int) -> dict:
     """

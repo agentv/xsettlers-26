@@ -4,6 +4,7 @@ from db.connection import get_connection
 from engine.turn import end_of_turn
 from xsettlers_mcp.tools.organization_tools import (
     set_mission, set_pod_task, show_civilization_status, show_game_status,
+    rename_organization,
     show_organization
 )
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
@@ -495,3 +496,41 @@ def test_show_game_status_does_not_leak_fleet_detail():
 
 def test_show_game_status_rejects_unknown_player():
     assert "error" in show_game_status("U_NOBODY")
+
+# --- rename_organization (players refer to units by name) ---
+
+def test_rename_organization_sets_a_new_name():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid, name="S1")
+    result = rename_organization("U_P1", oid, "Vanguard")
+    assert result["ok"] is True
+    assert (result["previous_name"], result["name"]) == ("S1", "Vanguard")
+    conn = get_connection()
+    assert conn.execute("SELECT name FROM organizations WHERE id=?", (oid,)).fetchone()["name"] == "Vanguard"
+    conn.close()
+
+def test_rename_organization_rejects_a_duplicate_within_one_player():
+    """An ambiguous name is not a name -- names are the player's handle for
+    issuing orders, so they must resolve to exactly one unit."""
+    pid = seed_player(); sid = seed_sector()
+    seed_ship(pid, sid, name="Vanguard"); other = seed_ship(pid, sid, name="S2")
+    result = rename_organization("U_P1", other, "vanguard")   # case-insensitive
+    assert "error" in result and "already have" in result["error"]
+
+def test_rename_organization_allows_the_same_name_for_different_players():
+    """Uniqueness is per player: neither can see the other's roster."""
+    p1 = seed_player(); p2 = seed_player(email="b@test.com", player_token="U_P2", display_name="Two")
+    sid = seed_sector()
+    a = seed_ship(p1, sid, name="S1"); b = seed_ship(p2, sid, name="S1")
+    assert rename_organization("U_P1", a, "Vanguard")["ok"] is True
+    assert rename_organization("U_P2", b, "Vanguard")["ok"] is True
+
+def test_rename_organization_rejects_empty_and_overlong_names():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    assert "error" in rename_organization("U_P1", oid, "   ")
+    assert "error" in rename_organization("U_P1", oid, "x" * 25)
+    assert rename_organization("U_P1", oid, "  Trimmed  ")["name"] == "Trimmed"
+
+def test_rename_organization_is_ownership_gated():
+    p1 = seed_player(); seed_player(email="b@test.com", player_token="U_P2", display_name="Two")
+    sid = seed_sector(); oid = seed_ship(p1, sid)
+    assert "error" in rename_organization("U_P2", oid, "Stolen")

@@ -15,6 +15,7 @@ from xsettlers_mcp.tools.sector_tools import get_sector, get_sector_map, show_se
 from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
 from xsettlers_mcp.tools.organization_tools import (
     set_mission, set_pod_task, set_pod_scan_target, show_organization,
+    rename_organization,
     show_civilization_status, show_game_status
 )
 from db.schema import init_schema
@@ -124,6 +125,13 @@ async def list_tools():
                 "task":{"type":"string"},
                 "target_x":{"type":"integer"},"target_y":{"type":"integer"},"target_z":{"type":"integer"}},
                 "required":["player_token","pod_id","task"]}),
+        types.Tool(name="rename_organization",
+            description="Give one of your own ships or colonies a name of your choosing (max 24 chars). "
+                        "Names are how a player refers to a unit, so they must be unique among your own "
+                        "organizations; defaults are short and sayable (S1..Sn for ships, C1 for a colony).",
+            inputSchema={"type":"object","properties":{
+                "player_token":{"type":"string"},"org_id":{"type":"integer"},"name":{"type":"string"}},
+                "required":["player_token","org_id","name"]}),
         types.Tool(name="set_pod_scan_target",
             description="Set or update the scan target coordinate for a pod in scan mission -- response includes in_range so you know immediately if the target is out of scan range.",
             inputSchema={"type":"object","properties":{
@@ -152,6 +160,7 @@ async def call_tool(name: str, arguments: dict):
         "set_mission":                set_mission,
         "set_pod_task":               set_pod_task,
         "set_pod_scan_target":        set_pod_scan_target,
+        "rename_organization":        rename_organization,
     }
     fn = dispatch.get(name)
     if not fn:

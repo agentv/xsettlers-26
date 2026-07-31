@@ -101,7 +101,9 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
     for idx, (player_id, seat) in enumerate(zip(player_id_list, seats)):
         home_sector_id = reveal_sector(cur, player_id, *tuple(seat.home_sector))
         for ship_num in range(sc.ships_per_player):
-            ship_name = f"Ship-P{idx+1}-{ship_num+1:02d}"
+            # Short by default: a player says "S3", not "Ship-P1-03".
+            # Unique per player, which is what makes a name referenceable.
+            ship_name = f"S{ship_num+1}"
             cur.execute("""INSERT INTO organizations
                 (org_type,name,player_id,sector_id,is_mobile,mission)
                 VALUES ('ship',?,?,?,1,'idle')""",
@@ -129,7 +131,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
             cur.execute("""INSERT INTO organizations
                 (org_type,name,player_id,sector_id,is_mobile,mission)
                 VALUES ('colony',?,?,?,0,'idle')""",
-                (f"Colony-P{idx+1}", player_id, home_sector_id))
+                ("C1", player_id, home_sector_id))
             colony_org_id = cur.lastrowid
             for pod_tmpl in sc.pods_per_ship:
                 for _ in range(pod_tmpl.count):

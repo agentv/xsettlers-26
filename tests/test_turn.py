@@ -4,7 +4,7 @@ from db.sectors import (DEFAULT_SECTOR_RESOURCE_UNITS, CONFIDENCE_DECAY_PER_TURN
                         TURNS_TO_BLINK_OUT)
 from engine.turn import (end_of_turn, check_consensus_acceleration,
                          _calculate_final_scores, get_next_tick_at)
-from xsettlers_mcp.tools.sector_tools import get_sector_map
+from xsettlers_mcp.tools.sector_tools import get_sector_map, show_sector_neighborhood
 from tests.conftest import (seed_player, seed_sector, seed_ship, seed_pod,
                             seed_player_sector)
 
@@ -134,7 +134,7 @@ def test_blinked_out_sector_leaves_the_map_but_keeps_its_row():
     confidence > 0), but the row survives as the player's own history of
     having been there."""
     pid = seed_player()
-    home = seed_sector(0, 0, 0); seed_ship(pid, home)
+    home = seed_sector(0, 0, 0); oid = seed_ship(pid, home)
     remembered = seed_sector(2, 0, 0)
     seed_player_sector(pid, remembered, CONFIDENCE_DECAY_PER_TURN)
 
@@ -142,6 +142,8 @@ def test_blinked_out_sector_leaves_the_map_but_keeps_its_row():
 
     assert _confidence(pid, remembered) == 0
     assert not any(s["id"] == remembered for s in get_sector_map("U_P1"))
+    neighborhood = show_sector_neighborhood("U_P1", org_id=oid, radius=3)
+    assert not any(s["id"] == remembered for s in neighborhood["sectors"])
     conn = get_connection()
     assert conn.execute("SELECT COUNT(*) n FROM player_sectors WHERE sector_id=?",
                         (remembered,)).fetchone()["n"] == 1

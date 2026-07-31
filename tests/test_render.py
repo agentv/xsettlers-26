@@ -1,8 +1,11 @@
-from views.render import render_status
+from views.render import render_status, render_map
 from xsettlers_mcp.tools.organization_tools import (
     show_civilization_status, show_game_status, show_organization
 )
-from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
+from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
+from tests.conftest import (
+    seed_player, seed_sector, seed_ship, seed_pod, seed_player_sector
+)
 
 def test_render_status_civilization_status_is_hint_driven():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
@@ -42,3 +45,53 @@ def test_render_status_no_special_casing_by_tool_name():
 
 def test_render_status_propagates_error():
     assert render_status({"error": "Player not found"}) == "Error: Player not found"
+
+# --- map rendering (display.kind == "map") ---
+
+def _neighborhood():
+    pid = seed_player(); sid = seed_sector(25, 25, 0); oid = seed_ship(pid, sid)
+    seed_player_sector(pid, sid, 100)
+    return show_sector_neighborhood("U_P1", org_id=oid)
+
+def test_render_map_draws_a_grid_with_absolute_axis_labels():
+    text = render_map(_neighborhood())
+    lines = text.splitlines()
+    header = next(i for i, l in enumerate(lines) if l.startswith("| y/x"))
+    assert lines[header].startswith("| y/x | 20 | 21 |")   # x across, absolute coords
+    assert lines[header + 1].startswith("|---|")
+    assert "| **25** |" in text                            # y down the side
+    assert "S1" in text
+
+def test_render_map_includes_the_legend_so_cells_are_decodable():
+    text = render_map(_neighborhood())
+    assert "S3 = 3 of your ships" in text
+    assert "(blank) = outside range" in text
+
+def test_render_status_dispatches_to_map_on_display_kind():
+    """Dispatch is on the shape of the data, not on which tool produced it."""
+    data = _neighborhood()
+    assert render_status(data) == render_map(data)
+
+def test_render_map_no_special_casing_by_tool_name():
+    """Same contract as render_status: an arbitrary dict following the map
+    display shape renders with no changes to render_map() itself."""
+    data = {"display": {"kind": "map", "header": "Somewhere",
+                        "grid": {"corner": "y/x", "x_labels": ["0", "1"],
+                                 "rows": [{"label": "0", "cells": ["A", ""]},
+                                          {"label": "1", "cells": ["", "B"]}]}}}
+    text = render_map(data)
+    assert text.startswith("**Somewhere**")
+    assert "| y/x | 0 | 1 |" in text
+    assert "| **0** | A |  |" in text
+    assert "| **1** |  | B |" in text
+
+def test_render_map_notes_off_plane_sectors():
+    pid = seed_player(); sid = seed_sector(25, 25, 0); oid = seed_ship(pid, sid)
+    seed_player_sector(pid, sid, 100)
+    upstairs = seed_sector(25, 25, 1)
+    seed_player_sector(pid, upstairs, 100)
+    text = render_map(show_sector_neighborhood("U_P1", org_id=oid))
+    assert "off this z-plane" in text
+
+def test_render_map_propagates_error():
+    assert render_map({"error": "Player not found"}) == "Error: Player not found"

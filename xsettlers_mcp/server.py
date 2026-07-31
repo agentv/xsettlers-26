@@ -62,7 +62,13 @@ async def list_tools():
             inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
                          "required":["player_token"]}),
         types.Tool(name="show_sector_neighborhood",
-            description="All visible sectors within Euclidean distance 2 of a center. Center is either an org_id or explicit (center_x, center_y, center_z) coordinates.",
+            description="Map the neighborhood around one of your organizations (aka view/visualize the neighborhood). "
+                        "Center is either an org_id -- the normal way to call it -- or explicit (center_x, center_y, center_z) "
+                        "coordinates; a ship in transit has no location and can't be a center. Default radius 5 (an 11x11 grid), "
+                        "max 10. Returns the complete lattice, not just known sectors: display.grid holds a ready-to-draw grid "
+                        "with absolute coordinates on both axes and one <=3-character marker per cell (your orgs, rival presence, "
+                        "'*' for seen-and-empty, '·' for never seen, or blank for out of range), plus display.legend. Pure view "
+                        "-- reveals nothing, costs nothing, changes no confidence.",
             inputSchema={"type":"object","properties":{
                 "player_token":{"type":"string"},
                 "org_id":{"type":"integer"},

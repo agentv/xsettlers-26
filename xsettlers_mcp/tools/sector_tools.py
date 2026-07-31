@@ -1,4 +1,57 @@
 from db.connection import get_connection
+from db.sectors import TURNS_TO_BLINK_OUT
+
+# --- Neighborhood viewport ---------------------------------------------------
+# Radius 5 gives an 11x11 bounding square, which is about as wide as a markdown
+# table stays readable on a phone -- the target client. MAX_ is a guard against
+# a caller asking for a viewport whose cell count explodes the response.
+NEIGHBORHOOD_RADIUS = 5
+MAX_NEIGHBORHOOD_RADIUS = 10
+
+# Cell vocabulary. Every marker is <= 3 characters so the grid stays narrow.
+UNKNOWN_CELL = "·"   # in range, never seen -- i.e. the scan-me list
+SEEN_CELL = "*"           # seen and still current; nothing of anyone's there
+EMPTY_CELL = ""           # outside the scan radius; renders as a blank cell
+
+CELL_LEGEND = [
+    "S3 = 3 of your ships    C = your colony    S3C = both",
+    "R = rival, no org of yours    S3! = rival alongside your orgs",
+    f"{SEEN_CELL} = seen, nothing there    {UNKNOWN_CELL} = in range, never seen",
+    "(blank) = outside range",
+    f"Sectors blink out {TURNS_TO_BLINK_OUT} turns after they were last seen.",
+    "Confidence and resources per marked sector are in the table below.",
+]
+
+
+def _cell_marker(known: bool, ships: int, colonies: int, rivals: int) -> str:
+    """
+    Render one grid cell in at most 3 characters: your own presence, else a
+    rival's, else a bare SEEN_CELL.
+
+    Confidence deliberately does NOT appear on the grid. It's a reporting
+    number, not a thing to steer by: with a flat decay a sector is either still
+    on your map or it has blinked off it (see db/sectors.py), so the readout
+    that matters is binary and the exact figure belongs in `highlights`.
+
+    A rival always wins the third character, truncating the own-org marker to
+    make room ("S6C" + rival -> "S6!"): a contested sector is the most
+    important cell on the board, and what it costs -- knowing a colony is also
+    there -- is static information the player already has, whereas the rival is
+    news. Exact composition of any marked cell is in `highlights` regardless.
+    """
+    if not known:
+        return UNKNOWN_CELL
+    if ships and colonies:
+        marker = f"S{ships}C" if ships < 10 and colonies == 1 else "S*C"
+    elif ships:
+        marker = f"S{ships}" if ships < 100 else "S9+"
+    elif colonies:
+        marker = "C" if colonies == 1 else (f"C{colonies}" if colonies < 100 else "C9+")
+    elif rivals:
+        return "R"
+    else:
+        return SEEN_CELL
+    return marker[:2] + "!" if rivals else marker
 
 
 def get_scan_range(org_id: int) -> int:
@@ -48,33 +101,69 @@ def show_sector_neighborhood(
         player_token: str,
         org_id: int = None,
         center_x: int = None, center_y: int = None, center_z: int = None,
-        radius: int = 2) -> list:
+        radius: int = NEIGHBORHOOD_RADIUS) -> dict:
     """
-    Return all sectors within Euclidean distance <= radius of a center point,
-    filtered by the player's fog-of-war (confidence > 0).
-    Center is either resolved from org_id (uses org's current sector coords)
-    or supplied directly as (center_x, center_y, center_z).
-    Ships in transit (sector_id = -1) are not valid org_id centers.
-    POC default radius: 2.
+    Render the neighborhood around a center point as a ready-to-draw grid,
+    plus the underlying sector data.
+
+    Center is either resolved from org_id (the org's current sector -- this is
+    the normal way to call it: "show me what's around this ship") or supplied
+    directly as (center_x, center_y, center_z). Ships in transit
+    (sector_id = -1) have no location and are not valid org_id centers.
+
+    Three things distinguish this from get_sector_map(), which returns a bare
+    list of what you know:
+
+    - It returns the *complete* lattice, not just known sectors. A cell you
+      have never seen is the most actionable thing on the map (it's where to
+      send a scan pod), and it has no `sectors` row at all under the lazy
+      reveal model (db/sectors.py) -- so the grid is synthesized from the
+      center and radius, and known sectors are overlaid onto it. Nothing here
+      creates sector rows: this is a pure view, it never calls reveal_sector().
+    - Cells carry your own orgs and rival presence, not just sector resources.
+    - `display` carries a finished grid (see views/render.py's render_map),
+      so every client draws the same map rather than each improvising one
+      from a coordinate list.
+
+    The grid is a single z-plane -- the center's. The model is 3D and distance
+    is 3D everywhere else in the codebase, but no scenario has yet placed
+    anything off z=0, so a plane is the whole picture today. Known sectors in
+    range but off-plane are still returned in `sectors` and counted in
+    `off_plane_count` rather than silently dropped, so the day z matters the
+    view says so instead of quietly lying.
+
+    Rival presence is reported only for sectors at confidence 100 -- i.e. ones
+    you currently occupy. Rival positions are read live from `organizations`
+    (there is no sighting history in the schema; engine/turn.py's rival
+    detection is still a TODO), so surfacing them on a stale cell would hand
+    the player current intel about a sector they last looked at 50 turns ago.
+    Occupation already grants full current detail, so this is leak-free.
     """
+    if radius < 1 or radius > MAX_NEIGHBORHOOD_RADIUS:
+        return {"error": f"radius must be between 1 and {MAX_NEIGHBORHOOD_RADIUS}"}
     conn = get_connection(); cur = conn.cursor()
     cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
+    player_id = player["id"]
+
+    label = None
     if org_id is not None:
-        cur.execute("""SELECT s.coord_x, s.coord_y, s.coord_z
+        cur.execute("""SELECT o.name, s.coord_x, s.coord_y, s.coord_z
             FROM organizations o JOIN sectors s ON s.id = o.sector_id
             WHERE o.id=? AND o.player_id=? AND o.sector_id != -1""",
-            (org_id, player["id"]))
+            (org_id, player_id))
         origin = cur.fetchone()
         if not origin:
             conn.close(); return {"error": "Organization not found, not owned by player, or currently in transit"}
         cx, cy, cz = origin["coord_x"], origin["coord_y"], origin["coord_z"]
+        label = origin["name"]
     elif None not in (center_x, center_y, center_z):
         cx, cy, cz = center_x, center_y, center_z
     else:
         conn.close(); return {"error": "Must supply either org_id or (center_x, center_y, center_z)"}
+
     r2 = radius ** 2
     cur.execute("""
         SELECT s.id, s.coord_x, s.coord_y, s.coord_z,
@@ -89,7 +178,78 @@ def show_sector_neighborhood(
             (s.coord_z - ?) * (s.coord_z - ?)
           ) <= ?
         ORDER BY ps.confidence DESC""",
-        (player["id"], cx, cx, cy, cy, cz, cz, r2))
+        (player_id, cx, cx, cy, cy, cz, cz, r2))
     sectors = [dict(r) for r in cur.fetchall()]
+
+    # Org overlays, keyed by sector. Both queries cover the whole board rather
+    # than just the viewport -- a player's org count is small, and filtering by
+    # a synthesized IN-list of sector ids would cost more than it saves.
+    own = {}
+    cur.execute("""SELECT sector_id, org_type, COUNT(*) AS n FROM organizations
+        WHERE player_id = ? AND sector_id != -1 GROUP BY sector_id, org_type""", (player_id,))
+    for row in cur.fetchall():
+        entry = own.setdefault(row["sector_id"], {"ship": 0, "colony": 0})
+        entry[row["org_type"]] = row["n"]
+    rivals = {row["sector_id"]: row["n"] for row in cur.execute(
+        """SELECT sector_id, COUNT(*) AS n FROM organizations
+           WHERE player_id != ? AND sector_id != -1 GROUP BY sector_id""", (player_id,)).fetchall()}
+
+    cur.execute("SELECT current_turn FROM game_state WHERE id=1")
+    turn_row = cur.fetchone()
+    current_turn = turn_row["current_turn"] if turn_row else None
     conn.close()
-    return sectors
+
+    by_coord = {}
+    for s in sectors:
+        orgs = own.get(s["id"], {})
+        s["own_ships"] = orgs.get("ship", 0)
+        s["own_colonies"] = orgs.get("colony", 0)
+        # See docstring: live rival positions are only honest where you're standing.
+        s["rival_orgs"] = rivals.get(s["id"], 0) if s["confidence"] >= 100 else 0
+        s["coords_display"] = f"({s['coord_x']},{s['coord_y']},{s['coord_z']})"
+        s["resources_display"] = (f"E{s['energy_capacity']:.0f}/"
+                                  f"F{s['food_capacity']:.0f}/G{s['goods_capacity']:.0f}")
+        s["cell"] = _cell_marker(True, s["own_ships"], s["own_colonies"], s["rival_orgs"])
+        s["in_plane"] = s["coord_z"] == cz
+        if s["in_plane"]:
+            by_coord[(s["coord_x"], s["coord_y"])] = s
+
+    x_range = list(range(cx - radius, cx + radius + 1))
+    rows, unknown_in_range = [], 0
+    for y in range(cy - radius, cy + radius + 1):
+        cells = []
+        for x in x_range:
+            if (x - cx) ** 2 + (y - cy) ** 2 > r2:
+                cells.append(EMPTY_CELL)
+                continue
+            known = by_coord.get((x, y))
+            if known:
+                cells.append(known["cell"])
+            else:
+                cells.append(UNKNOWN_CELL)
+                unknown_in_range += 1
+        rows.append({"label": str(y), "cells": cells})
+
+    highlights = [s for s in sectors
+                  if s["own_ships"] or s["own_colonies"] or s["rival_orgs"]]
+    origin = label or f"({cx},{cy},{cz})"
+    return {
+        "center": {"x": cx, "y": cy, "z": cz},
+        "radius": radius,
+        "org_id": org_id,
+        "turn": current_turn,
+        "sectors": sectors,
+        "highlights": highlights,
+        "unknown_in_range": unknown_in_range,
+        "off_plane_count": sum(1 for s in sectors if not s["in_plane"]),
+        "display": {
+            "kind": "map",
+            "header": f"Neighborhood of {origin} — radius {radius}, z-plane {cz}"
+                      + (f", turn {current_turn}" if current_turn is not None else ""),
+            "grid": {"corner": "y/x", "x_labels": [str(x) for x in x_range], "rows": rows},
+            "legend": CELL_LEGEND,
+            "rows_key": "highlights",
+            "columns": ["coords_display", "own_ships", "own_colonies", "rival_orgs",
+                        "confidence", "resources_display"],
+        },
+    }

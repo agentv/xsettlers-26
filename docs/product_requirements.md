@@ -200,12 +200,20 @@ Returns the complete properties of one of the player's own organizations: `org_t
 
 ### Show Sector Neighborhood (`show_sector_neighborhood`)
 
-Returns all sectors within Euclidean distance ≤ 2 of a center point, filtered by the player's fog-of-war (confidence > 0). The center may be specified as either:
+Renders the neighborhood around a center point as a ready-to-draw map. The center may be specified as either:
 
-* an `org_id` — the neighborhood is centered on that organization's current sector
-* a coordinate triple `(x, y, z)` — the neighborhood is centered on an arbitrary point in space
+* an `org_id` — the neighborhood is centered on that organization's current sector (the normal way to call it: "show me what's around this ship")
+* a coordinate triple `(x, y, z)` — centered on an arbitrary point in space
 
-Radius is fixed at 2 for the POC (parameterized in the signature for future flexibility). Ships in transit (at the sentinel sector) cannot serve as a valid `org_id` center — callers must supply explicit coordinates in that case.
+Default radius 5, giving an 11×11 bounding square (max 10). Ships in transit (at the sentinel sector) have no location and cannot serve as an `org_id` center — callers must supply explicit coordinates in that case.
+
+Unlike `get_sector_map`, which returns a bare list of what the player knows, this returns the **complete lattice** — every coordinate in range, including ones never visited. An unvisited cell has no `sectors` row at all under the lazy-reveal model, so the grid is synthesized from center and radius and known sectors are overlaid onto it. This is deliberate: a cell you have never seen is the most actionable thing on the map, since it is where a scan pod should go.
+
+It is a **pure view** — it reveals nothing, costs nothing, and changes no confidence. `reveal_sector()` remains the only writer.
+
+Cell markers are at most 3 characters (see [UI & Rendering Design](ui_and_rendering_design.md) for the full vocabulary and the rendering contract). Confidence deliberately does not appear on the grid: under blink-out a sector is either still on the map or gone from it, so the cell is binary and the numeric figure belongs in the accompanying detail rows.
+
+**Rival presence is reported only for sectors at confidence 100** — ones the player currently occupies. Rival positions are read live from `organizations` (there is no sighting history in the schema), so surfacing them on a decayed cell would hand the player current intelligence about a sector they last looked at many turns ago. Occupation already grants full current detail, so this restriction is leak-free.
 
 ### Show Game Status (`show_game_status`)
 

@@ -1,12 +1,11 @@
 import collections, os, json, math
 from config.loader import load_config
 from db.connection import get_connection
-from db.sectors import reveal_sector
+from db.sectors import reveal_sector, CONFIDENCE_DECAY_PER_TURN
 from engine.production import (get_production, get_consumption_recipe, ORG_UPKEEP_COST,
                                RESOURCE_CAPACITY_COLUMN, RESOURCE_STORAGE_COLUMN)
 from xsettlers_mcp.tools.sector_tools import get_scan_range
 
-CONFIDENCE_DECAY = float(os.getenv("CONFIDENCE_DECAY", 0.9))
 TURN_LIMIT = int(os.getenv("TURN_LIMIT", 20))
 
 def get_current_turn() -> int:
@@ -349,15 +348,16 @@ def end_of_turn():
         params = json.loads(org["mission_params"] or "{}")
         {"defend": _handle_defend, "attack": _handle_attack}.get(org["mission"], lambda *a: None)(cur, org, params)
 
-    # 5. Fog decay
-    cur.execute("""SELECT ps.player_id,ps.sector_id,ps.confidence FROM player_sectors ps
-        WHERE ps.confidence>0 AND NOT EXISTS (
-            SELECT 1 FROM organizations o WHERE o.sector_id=ps.sector_id AND o.player_id=ps.player_id
-        )""")
-    for row in cur.fetchall():
-        cur.execute("UPDATE player_sectors SET confidence=? WHERE player_id=? AND sector_id=?",
-                    (max(0, round(row["confidence"] * CONFIDENCE_DECAY)),
-                     row["player_id"], row["sector_id"]))
+    # 5. Fog decay — a flat subtraction, floored at 0. A sector that reaches 0
+    #    blinks out: the row is kept (it's the player's history of having been
+    #    there) but every read path filters on confidence > 0, so it leaves the
+    #    map entirely rather than lingering as a stale ghost.
+    cur.execute("""UPDATE player_sectors SET confidence = MAX(0, confidence - ?)
+        WHERE confidence > 0 AND NOT EXISTS (
+            SELECT 1 FROM organizations o
+            WHERE o.sector_id = player_sectors.sector_id
+              AND o.player_id = player_sectors.player_id
+        )""", (CONFIDENCE_DECAY_PER_TURN,))
 
     # 6. Holdings snapshot — calculated AFTER all processing is complete
     #    This is the canonical end-state: production, arrivals, missions, fog all resolved.

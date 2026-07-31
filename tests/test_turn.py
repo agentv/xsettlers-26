@@ -1,9 +1,12 @@
 import json
 from db.connection import get_connection
-from db.sectors import DEFAULT_SECTOR_RESOURCE_UNITS
+from db.sectors import (DEFAULT_SECTOR_RESOURCE_UNITS, CONFIDENCE_DECAY_PER_TURN,
+                        TURNS_TO_BLINK_OUT)
 from engine.turn import (end_of_turn, check_consensus_acceleration,
                          _calculate_final_scores, get_next_tick_at)
-from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
+from xsettlers_mcp.tools.sector_tools import get_sector_map
+from tests.conftest import (seed_player, seed_sector, seed_ship, seed_pod,
+                            seed_player_sector)
 
 def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
     """turn.snapshot events (one per player per turn) persist what was
@@ -99,6 +102,57 @@ def test_arrival_reveals_destination_and_stamps_visibility():
                       (pid, sector["id"])).fetchone()
     assert ps["confidence"] == 100
     conn.close()
+
+# --- fog decay (see db/sectors.py's CONFIDENCE_DECAY_PER_TURN) ---
+
+def _confidence(player_id, sector_id):
+    conn = get_connection()
+    row = conn.execute("SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",
+                       (player_id, sector_id)).fetchone()
+    conn.close(); return row["confidence"]
+
+def test_fog_decays_by_a_flat_amount_and_blinks_out_on_schedule():
+    """Flat subtraction, not a fraction of what's left: a proportional decay
+    on an integer column never reaches 0 (round(4 * 0.9) == 4), so sectors
+    would linger on the map forever. Confidence must land exactly on 0 after
+    TURNS_TO_BLINK_OUT unoccupied turns."""
+    pid = seed_player()
+    home = seed_sector(0, 0, 0); seed_ship(pid, home)   # keeps the player alive
+    remembered = seed_sector(9, 9, 0)
+    seed_player_sector(pid, remembered, 100)
+
+    seen = [_confidence(pid, remembered)]
+    for _ in range(TURNS_TO_BLINK_OUT):
+        end_of_turn()
+        seen.append(_confidence(pid, remembered))
+
+    assert seen == [100 - i * CONFIDENCE_DECAY_PER_TURN for i in range(TURNS_TO_BLINK_OUT + 1)]
+    assert seen[-1] == 0
+
+def test_blinked_out_sector_leaves_the_map_but_keeps_its_row():
+    """At 0 the sector drops out of every player-facing view (they all filter
+    confidence > 0), but the row survives as the player's own history of
+    having been there."""
+    pid = seed_player()
+    home = seed_sector(0, 0, 0); seed_ship(pid, home)
+    remembered = seed_sector(2, 0, 0)
+    seed_player_sector(pid, remembered, CONFIDENCE_DECAY_PER_TURN)
+
+    end_of_turn()
+
+    assert _confidence(pid, remembered) == 0
+    assert not any(s["id"] == remembered for s in get_sector_map("U_P1"))
+    conn = get_connection()
+    assert conn.execute("SELECT COUNT(*) n FROM player_sectors WHERE sector_id=?",
+                        (remembered,)).fetchone()["n"] == 1
+    conn.close()
+
+def test_fog_does_not_decay_a_sector_you_occupy():
+    pid = seed_player()
+    home = seed_sector(0, 0, 0); seed_ship(pid, home)
+    seed_player_sector(pid, home, 100)
+    end_of_turn()
+    assert _confidence(pid, home) == 100
 
 # --- org upkeep (see engine/production.py's ORG_UPKEEP_COST) ---
 

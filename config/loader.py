@@ -9,7 +9,7 @@ CONFIG_PATH = os.getenv("GAME_CONFIG_PATH", "config/game_config.yaml")
 class GameSettings:
     name: str
     tick_seconds: int
-    confidence_decay: float
+    confidence_decay_per_turn: int
     max_players: int
     turn_limit: int
     dimensions: int
@@ -79,7 +79,8 @@ def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameC
     game = GameSettings(
         name=_require(g, "name", "game.name"),
         tick_seconds=int(_require(g, "tick_seconds", "game.tick_seconds")),
-        confidence_decay=float(_require(g, "confidence_decay", "game.confidence_decay")),
+        confidence_decay_per_turn=int(_require(g, "confidence_decay_per_turn",
+                                               "game.confidence_decay_per_turn")),
         max_players=int(_require(g, "max_players", "game.max_players")),
         turn_limit=int(_require(g, "turn_limit", "game.turn_limit")),
         dimensions=int(g.get("dimensions", 3)),

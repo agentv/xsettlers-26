@@ -32,7 +32,7 @@ pytest tests/test_navigation.py::test_confirm_move_parks_at_sentinel -v
 
 **Requires a real Python (3.12, per the Dockerfile) with `sqlite3.Connection.enable_load_extension` and `mod_spatialite` installed** (`brew install spatialite-tools` on macOS). Every DB call goes through `db/connection.get_connection()`, which loads the `mod_spatialite` extension — this will fail on Python builds without extension-loading support (e.g. some sandboxed/minimal Python 3.9 installs).
 
-Config is env-driven (see `.env.example`, loaded via `python-dotenv`): `DB_PATH`, `GAME_CONFIG_PATH`, `CONFIDENCE_DECAY`, `GAME_TICK_SECONDS`.
+Config is env-driven (see `.env.example`, loaded via `python-dotenv`): `DB_PATH`, `GAME_CONFIG_PATH`, `CONFIDENCE_DECAY_PER_TURN`, `GAME_TICK_SECONDS`, `TURN_LIMIT`, `MCP_SHARED_SECRET`.
 
 Deploy target is Fly.io (`fly.toml`, `Dockerfile`) — persistent volume mounted at `/data` holds the SpatiaLite `.db` file.
 
@@ -73,7 +73,7 @@ Key fields and their split responsibilities:
 - **Three org-lock states**, all keyed off `is_mobile`/`sector_id`, enforced in `set_mission` (`xsettlers_mcp/tools/organization_tools.py`): in-transit (`sector_id == -1`, locked entirely — must `cancel_move` first), colony (locked against `move` only), mid-colonization (locked entirely for the 3-turn window).
 - **Mission vs task terminology**: pods use `mission` (`idle`/`produce_energy`/`produce_food`/`produce_goods`/`scan`), *not* the older `task`/`set_pod_task` vocabulary from `docs/mcp_server_layer_design.md` — that doc is retained for its hosting/gateway content but is superseded on this point by `docs/product_requirements.md` and `docs/data_model_and_storage_design.md`.
 - Sectors use a sparse/lazy model — only instantiated on interaction — plus a `POINTZ` geometry column (`sectors.location`) for spatial queries. A sentinel sector `(-1,-1,-1)` represents "in transit" and is created by `db/schema.init_schema()`.
-- `player_sectors` is the fog-of-war table: sparse, confidence-scored (100 on discovery/presence, decays ~10%/tick via `CONFIDENCE_DECAY` when unoccupied, never deleted at confidence 0 — becomes a stale "ghost memory" row).
+- `player_sectors` is the fog-of-war table: sparse, confidence-scored (100 on discovery/presence; an unoccupied sector loses a flat `CONFIDENCE_DECAY_PER_TURN` points per tick — subtraction, *not* a fraction of what remains, which on an integer column never reaches 0). At confidence 0 the sector **blinks out**: the row is never deleted, but every player-facing read filters `confidence > 0`, so it leaves the map entirely rather than showing as a stale "ghost". At the default 20/turn that's five turns from last sighting to gone. The constant lives in `db/sectors.py`, not `engine/turn.py`, because `engine/turn.py` imports `sector_tools` and the read side needs it too.
 - `events` is a write-ahead log with a **hybrid payload strategy**: player-action events store deltas, engine `turn.snapshot` events store full state (for replay/disaster recovery). `events.resolve_at_turn` drives deferred resolution (e.g. `colonize_complete` fires 3 turns after `set_mission('colonize', ...)`).
 - `models/` is currently an empty stub package — CRUD logic lives directly in `xsettlers_mcp/tools/*.py` for now; a refactor to pull it out is tracked in `docs/TODO.md` but not yet done. Don't expect model classes to exist there.
 

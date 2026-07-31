@@ -1,5 +1,6 @@
 from db.connection import get_connection
 from xsettlers_mcp.tools.sector_tools import get_scan_range
+from db.sectors import CONFIDENCE_DECAY_PER_TURN
 from xsettlers_mcp.tools.organization_tools import set_pod_mission
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from engine.turn import end_of_turn
@@ -13,7 +14,6 @@ def test_scan_within_range_reveals_target():
     decay (step 5) runs later in the same pass and immediately decays it
     since the scanned sector isn't occupied by any of the player's orgs --
     pre-existing engine behavior, not something reveal_sector changes."""
-    from engine.turn import CONFIDENCE_DECAY
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, mission="scan")
     seed_pod(sid, mission="produce_food", storage_current=100.0)
@@ -26,7 +26,7 @@ def test_scan_within_range_reveals_target():
     assert sector is not None
     ps = conn.execute("SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",
                       (pid, sector["id"])).fetchone()
-    assert ps["confidence"] == round(100 * CONFIDENCE_DECAY)
+    assert ps["confidence"] == 100 - CONFIDENCE_DECAY_PER_TURN
     conn.close()
 
 def test_scan_out_of_range_does_not_reveal_and_logs_alert():
@@ -52,7 +52,6 @@ def test_rescanning_known_sector_refreshes_confidence_without_altering_resources
     resources (reveal_sector is idempotent -- it's a fresh look at whatever
     is currently there, not a reset), and should refresh the player's
     confidence even if it had decayed to near-zero in the meantime."""
-    from engine.turn import CONFIDENCE_DECAY
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, mission="scan")
     seed_pod(sid, mission="produce_food", storage_current=100.0)
@@ -79,7 +78,7 @@ def test_rescanning_known_sector_refreshes_confidence_without_altering_resources
     assert resector["energy_capacity"] == original_capacity  # not re-randomized
     # stamped back to 100 by the re-scan, then decays once more within this
     # same end_of_turn() pass since the org still doesn't occupy it
-    assert ps["confidence"] == round(100 * CONFIDENCE_DECAY)
+    assert ps["confidence"] == 100 - CONFIDENCE_DECAY_PER_TURN
 
 def test_scan_out_of_range_still_costs_food():
     """The scan attempt still costs its food upkeep even though it fails --

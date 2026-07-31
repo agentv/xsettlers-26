@@ -1,7 +1,11 @@
 game:
   name: "XSettlers MVP"
   tick_seconds: 300
-  confidence_decay: 0.9
+  # Confidence points an unoccupied sector loses per turn (flat subtraction
+  # from 100) -- 20 means a sector blinks off the map on the 5th turn after
+  # it was last seen. Note: the engine currently reads this from the
+  # CONFIDENCE_DECAY_PER_TURN env var (see db/sectors.py), not from here.
+  confidence_decay_per_turn: 20
   max_players: 2
   turn_limit: 20
   dimensions: 2

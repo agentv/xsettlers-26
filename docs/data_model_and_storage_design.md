@@ -259,8 +259,8 @@ This table is **sparse** — rows exist only for sectors a player has discovered
 
 * **New discovery:** row inserted with `confidence = 100`
 * **Player org present:** `confidence` reset to `100` each tick
-* **Unoccupied sector:** `confidence = MAX(0, ROUND(confidence * 0.9))` each tick (~10% decay)
-* **Confidence hits 0:** sector shows a degraded "last known" indicator — it does not disappear from the player's map. The row is retained as a ghost memory showing stale information.
+* **Unoccupied sector:** `confidence = MAX(0, confidence - CONFIDENCE_DECAY_PER_TURN)` each tick — a flat subtraction, not a fraction of what remains. Confidence is a percentage of a fixed maximum (100), so proportional decay is wrong twice over: on an integer column it never reaches 0 (`ROUND(4 * 0.9) == 4` is a fixed point, so sectors linger forever at 4), and it stretches forgetting over dozens of turns instead of a span a player can hold in their head. At the default 20 points/turn a sector goes 100 → 80 → 60 → 40 → 20 → 0.
+* **Confidence hits 0 — the sector blinks out.** It disappears from the player's map entirely; there is no degraded "last known" ghost indicator. The `player_sectors` row is still retained (it is the player's own record of having been there, and re-scanning must not re-randomize the sector), but every player-facing read path filters on `confidence > 0`, so a blinked-out sector is indistinguishable from one never visited. Superseded the earlier ghost-memory design on 2026-07-30 — five turns of silence should cost you the sector, not leave a stale card on the table.
 
 Query for a player's current visible sectors:
 

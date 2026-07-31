@@ -1,4 +1,22 @@
+import math
+import os
+
 DEFAULT_SECTOR_RESOURCE_UNITS = 1000.0  # flat for now; TODO: randomize per-sector later
+
+# --- Fog of war ---------------------------------------------------------------
+# Confidence decays by a fixed number of points per turn, NOT by a fraction of
+# whatever is left. It's a percentage of a fixed maximum (100), so proportional
+# decay is the wrong model twice over: it never actually reaches 0 (at 10%/turn
+# on an integer column, round(4 * 0.9) == 4 is a fixed point, so sectors linger
+# forever at 4), and it stretches "forgetting" out over dozens of turns instead
+# of a span a player can reason about. At 20 points/turn, a sector that goes
+# unconfirmed blinks out of view on the 5th turn after it was last seen.
+#
+# Lives here rather than in engine/turn.py so both the decay step and the
+# read-side views can name it -- engine/turn.py imports sector_tools, so the
+# constant can't live on either of those without a cycle.
+CONFIDENCE_DECAY_PER_TURN = int(os.getenv("CONFIDENCE_DECAY_PER_TURN", 20))
+TURNS_TO_BLINK_OUT = math.ceil(100 / CONFIDENCE_DECAY_PER_TURN)
 
 
 def reveal_sector(cur, player_id: int, coord_x: int, coord_y: int, coord_z: int) -> int:

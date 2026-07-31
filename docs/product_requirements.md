@@ -93,7 +93,7 @@ The following pod missions are defined in the game model. Only a subset are acti
 
 * **Occupation**: an org present in a sector pins confidence at 100. Full detail shown.
 * **Scan**: executed by a pod with `scan` mission at end of turn. Grants full detail for the targeted sector. Confidence decays from that point.
-* **Fog decay**: unoccupied sectors lose confidence each turn. At confidence = 0, the sector is not removed — instead a degraded "last known" indicator is shown, signaling that the player once had knowledge of this sector but it is now stale.
+* **Fog decay**: unoccupied sectors lose a flat number of confidence points each turn (`CONFIDENCE_DECAY_PER_TURN`, default 20 — see [Data Model & Storage Design](data_model_and_storage_design.md) for why it is subtractive rather than proportional). At confidence = 0 the sector **blinks out**: it leaves the player's map entirely, with no degraded "last known" indicator. The underlying row is retained as history, but nothing player-facing shows it. At the default rate, a sector you stop confirming is gone on the fifth turn.
 * **Rival detection**: if a rival org is present in the scanned sector at time of resolution, that information is surfaced with high priority in the player view.
 
 ---

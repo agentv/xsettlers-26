@@ -17,20 +17,32 @@ from config.loader import load_config, Seat
 from db.sectors import reveal_sector
 from engine.production import RESOURCE_STORAGE_COLUMN, RESOURCE_PRODUCING_MISSION
 
-def _full_cargo_for_mission(mission: str, capacity: float) -> dict:
+def _starting_cargo_for_mission(mission: str, capacity: float, fill: float) -> dict:
     """
-    A freshly bootstrapped pod starts full -- see engine/production.py's
-    POD_CONSUMPTION_RECIPE: production costs other resources to run (e.g.
-    produce_goods costs energy), so starting empty would deadlock the
-    economy at bootstrap. "Full" means full of whatever resource matches the
-    pod's mission at creation time (energy_stored/food_stored/goods_stored
-    are independent of current mission from then on -- see engine/turn.py).
-    Non-producing missions (idle, scan) start with nothing stored.
+    Seed a freshly bootstrapped pod with `fill` (0.0-1.0) of its capacity,
+    in whatever resource matches its mission at creation time
+    (energy_stored/food_stored/goods_stored are independent of current
+    mission from then on -- see engine/turn.py). Non-producing missions
+    (idle, scan) start with nothing stored regardless of fill, having no
+    matching resource.
+
+    `fill` comes from the scenario, not from here -- how rich a game starts
+    is a scenario characteristic (see config/loader.py's starting_fill).
+    It used to be hardcoded at 100%, which had two costs: every scenario was
+    equally rich whatever its intent, and a fleet at capacity cannot
+    accumulate, so production was pure waste and only consumption could move
+    the score.
+
+    Note the floor this trades against: production costs other resources to
+    run (engine/production.py's POD_CONSUMPTION_RECIPE -- produce_goods costs
+    energy, and so on), so a scenario that starts at or near 0.0 deadlocks its
+    own economy at bootstrap with nothing to spend. Scarcity is a dial, not a
+    switch.
     """
     stored = {"energy_stored": 0.0, "food_stored": 0.0, "goods_stored": 0.0}
     for resource, producing_mission in RESOURCE_PRODUCING_MISSION.items():
         if producing_mission == mission:
-            stored[RESOURCE_STORAGE_COLUMN[resource]] = capacity
+            stored[RESOURCE_STORAGE_COLUMN[resource]] = capacity * fill
     return stored
 
 def bootstrap_game(config_path: str = None, scenario_file: str = None,
@@ -98,7 +110,9 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
             # Expand pod templates: each template has a count
             for pod_tmpl in sc.pods_per_ship:
                 for _ in range(pod_tmpl.count):
-                    cargo = _full_cargo_for_mission(pod_tmpl.mission, pod_tmpl.storage_capacity)
+                    cargo = _starting_cargo_for_mission(pod_tmpl.mission,
+                                                        pod_tmpl.storage_capacity,
+                                                        pod_tmpl.starting_fill)
                     cur.execute("""INSERT INTO pods
                         (mission,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
                         VALUES (?,?,?,?,?,?)""",
@@ -119,7 +133,9 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
             colony_org_id = cur.lastrowid
             for pod_tmpl in sc.pods_per_ship:
                 for _ in range(pod_tmpl.count):
-                    cargo = _full_cargo_for_mission(pod_tmpl.mission, pod_tmpl.storage_capacity)
+                    cargo = _starting_cargo_for_mission(pod_tmpl.mission,
+                                                        pod_tmpl.storage_capacity,
+                                                        pod_tmpl.starting_fill)
                     cur.execute("""INSERT INTO pods
                         (mission,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
                         VALUES (?,?,?,?,?,?)""",

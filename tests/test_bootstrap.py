@@ -114,6 +114,27 @@ def test_bootstrap_solo_scenario_seeds_exactly_one_player():
     assert ships == 8
     assert colonies == 1       # game_solo sets home_colony: true
 
+def test_bootstrap_seeds_pods_at_the_scenario_starting_fill(tmp_path, monkeypatch):
+    """The scenario decides how rich a game begins, not db/bootstrap.py."""
+    lean = tmp_path / "game_lean.yaml"
+    lean.write_text(
+        'name: "Lean"\ndescription: "d"\nstarting_fill: 0.25\n'
+        'participants:\n  - {player: "vincent@example.com", home_sector: [0, 0, 0]}\n'
+        'ships_per_player: 1\n'
+        'pods_per_ship:\n'
+        '  - {mission: produce_energy, count: 1, storage_capacity: 100.0}\n'
+        '  - {mission: produce_food, count: 1, storage_capacity: 100.0, starting_fill: 1.0}\n')
+    bootstrap_game(scenario_file=str(lean), scenario_name="lean", selected_by="test")
+    conn = get_connection()
+    pods = conn.execute(
+        "SELECT mission, storage_capacity, energy_stored, food_stored FROM pods ORDER BY mission"
+    ).fetchall()
+    conn.close()
+    by_mission = {p["mission"]: p for p in pods}
+    assert by_mission["produce_energy"]["energy_stored"] == 25.0   # scenario fill
+    assert by_mission["produce_food"]["food_stored"] == 100.0      # template override
+    assert all(p["storage_capacity"] == 100.0 for p in pods)       # capacity untouched
+
 def test_bootstrap_requires_a_scenario():
     """There is no default scenario — the service is a library of games."""
     import pytest

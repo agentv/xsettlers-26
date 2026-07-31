@@ -21,6 +21,14 @@ participants:
 
 ships_per_player: 8
 
+# How full every pod starts, as a fraction of its storage_capacity. Stated
+# explicitly rather than left to the default, because how rich a game begins
+# is a scenario decision. 1.0 preserves this scenario's original balance --
+# note that a fleet starting at capacity cannot accumulate anything, so its
+# production is waste until something is spent. Individual pod templates below
+# may override this.
+starting_fill: 1.0
+
 # Each ship receives one pod per entry below, repeated `count` times.
 # Mission values are the canonical pod missions (see Product Requirements /
 # Data Model & Storage Design): idle | produce_energy | produce_food | produce_goods | scan.

@@ -5,6 +5,16 @@ from typing import List
 
 CONFIG_PATH = os.getenv("GAME_CONFIG_PATH", "config/game_config.yaml")
 
+# How full every pod starts when a scenario doesn't say otherwise, as a
+# fraction of storage_capacity. 0.3 (set 2026-07-30, replacing the original
+# hardcoded 1.0): a fleet starting at capacity cannot accumulate anything, so
+# its production is pure waste and only spending moves the score -- measured
+# in play-testing, a 100%-full start held total holdings pinned for the whole
+# game while a lean start grew steadily. Starting lean makes production the
+# game rather than a formality. Scenarios override it freely; this is only
+# the fallback.
+DEFAULT_STARTING_FILL = 0.3
+
 @dataclass
 class GameSettings:
     name: str
@@ -21,6 +31,10 @@ class PodTemplateDef:
     mission: str
     count: int
     storage_capacity: float = 100.0
+    # Fraction of storage_capacity this pod holds at bootstrap, 0.0-1.0.
+    # How rich a game starts is a scenario characteristic, not an engine
+    # constant -- see StartingConfiguration.starting_fill.
+    starting_fill: float = DEFAULT_STARTING_FILL
 
 @dataclass
 class ParticipantDef:
@@ -41,6 +55,10 @@ class StartingConfiguration:
     ships_per_player: int
     pods_per_ship: List[PodTemplateDef]
     home_colony: bool = False
+    # Scenario-wide default for how full every pod starts, 0.0-1.0. Individual
+    # pod templates may override it. Falls back to DEFAULT_STARTING_FILL when
+    # the scenario is silent.
+    starting_fill: float = DEFAULT_STARTING_FILL
 
 @dataclass
 class PlayerDef:
@@ -81,10 +99,14 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
     """
     with open(path, "r") as f:
         sc_raw = yaml.safe_load(f)
+    scenario_fill = _fraction(sc_raw.get("starting_fill", DEFAULT_STARTING_FILL),
+                              "starting_fill")
     pods_per_ship = [PodTemplateDef(
         mission=_require(p, "mission", "pods_per_ship[].mission"),
         count=int(_require(p, "count", "pods_per_ship[].count")),
         storage_capacity=float(p.get("storage_capacity", 100.0)),
+        starting_fill=_fraction(p.get("starting_fill", scenario_fill),
+                                "pods_per_ship[].starting_fill"),
     ) for p in sc_raw.get("pods_per_ship", [])]
     participants = [ParticipantDef(
         player=_require(p, "player", "participants[].player"),
@@ -101,7 +123,15 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
                                       "ships_per_player")),
         pods_per_ship=pods_per_ship,
         home_colony=bool(sc_raw.get("home_colony", False)),
+        starting_fill=scenario_fill,
     )
+
+
+def _fraction(value, path: str) -> float:
+    f = float(value)
+    if not 0.0 <= f <= 1.0:
+        raise ValueError(f"{path} must be between 0.0 and 1.0, got {f}")
+    return f
 
 
 def resolve_seats(starting_configuration: StartingConfiguration,

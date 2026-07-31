@@ -45,6 +45,23 @@ def init_schema():
         cols = {row[1] for row in cur.execute("PRAGMA table_info(pods)").fetchall()}
         if "storage_current" in cols and "energy_stored" not in cols:
             cur.execute("DROP TABLE pods")
+    # One-time migration: pods.mission -> pods.task (2026-07-31). `mission`
+    # meant two different things depending on which table you were reading:
+    # on organizations it is what the vehicle is doing (idle/move/colonize/
+    # defend/attack), on pods what the worker is doing (produce_*/scan/idle).
+    # One word, two concepts, and the renderer already called the pod one
+    # "task" -- so a player reading a ship report saw "mission: idle" above a
+    # column headed "task" and reasonably concluded the pods were idle too.
+    # Unlike the drops above this preserves data: a live game has pods with
+    # real task values, and RENAME COLUMN also rewrites the CHECK constraint
+    # that references the column.
+    cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='pods'")
+    if cur.fetchone()[0] > 0:
+        cols = {row[1] for row in cur.execute("PRAGMA table_info(pods)").fetchall()}
+        if "mission" in cols and "task" not in cols:
+            cur.execute("ALTER TABLE pods RENAME COLUMN mission TO task")
+        if "mission_params" in cols and "task_params" not in cols:
+            cur.execute("ALTER TABLE pods RENAME COLUMN mission_params TO task_params")
     # One-time migration: game_state gains next_tick_at (2026-07-30) -- lets
     # a status report show "time until next tick" without needing to ask the
     # live server process directly. Nullable, ADD COLUMN is safe on an
@@ -103,9 +120,12 @@ def init_schema():
         CREATE TABLE IF NOT EXISTS pods (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             org_id           INTEGER REFERENCES organizations(id),
-            mission          TEXT DEFAULT 'idle'
-                             CHECK(mission IN ('idle','produce_energy','produce_food','produce_goods','scan')),
-            mission_params   TEXT,
+            -- `task` is what this pod's crew does; the parent organization's
+            -- `mission` is what the vehicle does. Deliberately different
+            -- words for deliberately different concepts (renamed 2026-07-31).
+            task             TEXT DEFAULT 'idle'
+                             CHECK(task IN ('idle','produce_energy','produce_food','produce_goods','scan')),
+            task_params      TEXT,
             storage_capacity REAL DEFAULT 0,
             energy_stored    REAL DEFAULT 0,
             food_stored      REAL DEFAULT 0,

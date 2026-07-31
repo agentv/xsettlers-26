@@ -51,24 +51,24 @@ def seed_ship(player_id, sector_id, name="Test Ship"):
                        (name,player_id)).fetchone()["id"]
     conn.close(); return oid
 
-def seed_pod(org_id, mission="idle", storage_capacity=100.0, storage_current=0.0):
+def seed_pod(org_id, task="idle", storage_capacity=100.0, storage_current=0.0):
     """
-    storage_current seeds whichever typed column matches `mission`
+    storage_current seeds whichever typed column matches `task`
     (energy_stored for produce_energy, etc.) -- storage is generic per pod
-    and independent of current mission (see engine/turn.py), but seeding via
-    the pod's own mission is the natural convention for test setup. Missions
+    and independent of current task (see engine/turn.py), but seeding via
+    the pod's own task is the natural convention for test setup. Tasks
     with no matching resource (idle, scan) default to energy_stored --
     arbitrary, since it doesn't functionally matter for a non-producing pod.
     """
     column = {"produce_energy": "energy_stored", "produce_food": "food_stored",
-              "produce_goods": "goods_stored"}.get(mission, "energy_stored")
+              "produce_goods": "goods_stored"}.get(task, "energy_stored")
     conn = get_connection()
     conn.execute(f"""INSERT INTO pods
-        (mission,org_id,storage_capacity,{column}) VALUES (?,?,?,?)""",
-        (mission,org_id,storage_capacity,storage_current))
+        (task,org_id,storage_capacity,{column}) VALUES (?,?,?,?)""",
+        (task,org_id,storage_capacity,storage_current))
     conn.commit()
-    pid = conn.execute("SELECT id FROM pods WHERE org_id=? AND mission=? ORDER BY id DESC LIMIT 1",
-                       (org_id,mission)).fetchone()["id"]
+    pid = conn.execute("SELECT id FROM pods WHERE org_id=? AND task=? ORDER BY id DESC LIMIT 1",
+                       (org_id,task)).fetchone()["id"]
     conn.close(); return pid
 
 def seed_player_sector(player_id, sector_id, confidence=100):

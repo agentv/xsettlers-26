@@ -54,17 +54,27 @@ def _cell_marker(known: bool, ships: int, colonies: int, rivals: int) -> str:
     return marker[:2] + "!" if rivals else marker
 
 
+# Euclidean radius a scan can reach from the scanning org's sector. Raised
+# from 1 to 2 on 2026-07-31: at range 1 a Euclidean radius reaches only the
+# four orthogonal neighbours, because a diagonal is sqrt(2) ~= 1.41 > 1. That
+# reads as broken to a player who asked to scan the sector "just there" and
+# was refused. Range 2 reaches 12 sectors -- the 4 orthogonal, the 4 diagonals
+# (sqrt(2)), and the 4 two-out orthogonals -- which is the smallest radius
+# where a scan behaves the way people expect a scan to behave.
+SCAN_RANGE = 2
+
+
 def get_scan_range(org_id: int) -> int:
     """
     Returns the scan range for an org.
     POC: always returns 1.
-    Future: sum range contributions from pods in scan mission.
+    Future: sum range contributions from pods on the scan task.
     """
     return 1
 
 
 # Note: `scan_sector` is no longer a player-callable action. Scanning is now
-# executed by the engine at end of turn for all pods in `scan` mission with a
+# executed by the engine at end of turn for all pods on the `scan` task with a
 # valid target. See `engine/turn.py` for scan resolution logic.
 
 

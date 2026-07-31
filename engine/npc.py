@@ -3,7 +3,7 @@ NPC strategy execution. Each is_npc=1 player with a row in npc_profiles gets
 its registered strategy function invoked once per turn, early in
 end_of_turn() (see run_npc_decisions, called from engine/turn.py before any
 turn-resolution processing). A strategy decides and acts by calling the
-exact same tool functions (confirm_move today; set_pod_mission/set_mission
+exact same tool functions (confirm_move today; set_pod_task/set_mission
 as more strategies need them) any human player calls through the MCP
 interface -- no special-cased write path, no direct mutation of
 organizations/pods from here. Each tool call commits its own connection
@@ -14,7 +14,7 @@ returns (see the comment at that call site).
 Per-NPC working memory (what player2_policy.py, this strategy's prototype,
 used to track in a stray .player2_plan.json file) lives in
 npc_profiles.memory, a JSON blob mutated turn to turn -- same pattern
-pods.mission_params already uses for per-pod working state.
+pods.task_params already uses for per-pod working state.
 """
 import json
 from db.connection import get_connection

@@ -29,8 +29,8 @@ ships_per_player: 8
 starting_fill: 0.3
 
 pods_per_ship:
-  - {mission: produce_energy, count: 2, storage_capacity: 100.0}
-  - {mission: produce_goods,  count: 2, storage_capacity: 100.0}
-  - {mission: produce_food,   count: 2, storage_capacity: 100.0}
+  - {task: produce_energy, count: 2, storage_capacity: 100.0}
+  - {task: produce_goods,  count: 2, storage_capacity: 100.0}
+  - {task: produce_food,   count: 2, storage_capacity: 100.0}
 
 home_colony: true

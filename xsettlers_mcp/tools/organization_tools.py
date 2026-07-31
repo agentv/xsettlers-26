@@ -8,7 +8,7 @@ from xsettlers_mcp.tools.sector_tools import get_scan_range
 import json, math
 
 VALID_ORG_MISSIONS = {"idle", "move", "colonize", "defend", "attack"}
-VALID_POD_MISSIONS = {"idle", "produce_energy", "produce_food", "produce_goods", "scan"}
+VALID_POD_TASKS = {"idle", "produce_energy", "produce_food", "produce_goods", "scan"}
 
 # Presentation hints for status-report tools (show_civilization_status,
 # show_game_status): offloads simple, repetitive formatting work onto the
@@ -52,7 +52,7 @@ def _org_production(tasking: dict, in_transit: bool) -> dict:
     """
     Gross per-turn production an org's current pod deployment would yield at
     full input availability -- i.e. POD_PRODUCTION's base rate times how many
-    pods are tasked to each producing mission. This is the "nameplate" figure,
+    pods are tasked to each producing task. This is the "nameplate" figure,
     not a prediction of what end_of_turn() will actually credit: it does not
     account for POD_CONSUMPTION_RECIPE input costs, org upkeep, or storage
     caps, all of which can prorate the real output down (see engine/turn.py).
@@ -62,8 +62,8 @@ def _org_production(tasking: dict, in_transit: bool) -> dict:
     sector-capacity cap -- food/goods aren't sector-sourced and are unaffected.
     """
     production = {}
-    for mission, outputs in POD_PRODUCTION.items():
-        count = tasking.get(mission, 0)
+    for task, outputs in POD_PRODUCTION.items():
+        count = tasking.get(task, 0)
         if not count:
             continue
         for resource, base_amount in outputs.items():
@@ -162,10 +162,12 @@ def set_mission(player_token: str, org_id: int, mission: str, params: dict = Non
     conn.commit(); conn.close()
     return {"ok": True, "org_id": org_id, "mission": mission}
 
-def set_pod_mission(player_token: str, pod_id: int, mission: str,
+def set_pod_task(player_token: str, pod_id: int, task: str,
                    target_x: int = None, target_y: int = None, target_z: int = None) -> dict:
     """
-    Set a pod's mission. Validates ownership and mission type.
+    Set a pod's task -- what its crew does, as distinct from the parent
+    organization's `mission`, which is what the vehicle does. Validates
+    ownership and task type.
     If mission='scan' and target_x/target_y/target_z are all provided, sets the
     scan target (a coordinate -- sectors are lazily instantiated, see
     db/sectors.py, so the target need not exist yet) in the same call. The
@@ -174,13 +176,13 @@ def set_pod_mission(player_token: str, pod_id: int, mission: str,
     distance/scan_range/in_range so the player finds out immediately whether
     it's legal, and can fix it before end of turn rather than finding out
     only at resolution.
-    If mission='scan' and no target is given, the pod enters scan mission with
+    If task='scan' and no target is given, the pod enters the scan task with
     no target — set_pod_scan_target must be called separately before end of turn.
     """
-    if mission not in VALID_POD_MISSIONS:
-        return {"error": f"Invalid pod mission '{mission}'. Valid: {sorted(VALID_POD_MISSIONS)}"}
+    if task not in VALID_POD_TASKS:
+        return {"error": f"Invalid pod task '{task}'. Valid: {sorted(VALID_POD_TASKS)}"}
     target_coords = (target_x, target_y, target_z)
-    if mission == "scan" and any(c is not None for c in target_coords) and \
+    if task == "scan" and any(c is not None for c in target_coords) and \
             any(c is None for c in target_coords):
         return {"error": "target_x, target_y, and target_z must all be provided together"}
     conn = get_connection(); cur = conn.cursor()
@@ -196,18 +198,18 @@ def set_pod_mission(player_token: str, pod_id: int, mission: str,
     params = {}
     status = {"current_x": None, "current_y": None, "current_z": None,
               "distance": None, "scan_range": None, "in_range": None}
-    if mission == "scan" and target_x is not None:
+    if task == "scan" and target_x is not None:
         params["target_x"], params["target_y"], params["target_z"] = target_x, target_y, target_z
         status = _scan_target_status(cur, pod["org_id"], target_x, target_y, target_z)
         params["in_range"] = status["in_range"]
     record_event(
-        event_type="pod.mission_set",
-        payload={"pod_id": pod_id, "mission": mission, "params": params},
+        event_type="pod.task_set",
+        payload={"pod_id": pod_id, "task": task, "params": params},
         actor_id=player["id"], subject_id=pod_id, subject_type="pod")
-    cur.execute("UPDATE pods SET mission=?, mission_params=? WHERE id=?",
-                (mission, json.dumps(params) if params else None, pod_id))
+    cur.execute("UPDATE pods SET task=?, task_params=? WHERE id=?",
+                (task, json.dumps(params) if params else None, pod_id))
     conn.commit(); conn.close()
-    return {"ok": True, "pod_id": pod_id, "mission": mission,
+    return {"ok": True, "pod_id": pod_id, "task": task,
             "target_x": target_x, "target_y": target_y, "target_z": target_z, **status}
 
 def set_pod_scan_target(player_token: str, pod_id: int,
@@ -231,13 +233,13 @@ def set_pod_scan_target(player_token: str, pod_id: int,
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
-    cur.execute("""SELECT p.id, p.mission, p.org_id FROM pods p JOIN organizations o ON o.id=p.org_id
+    cur.execute("""SELECT p.id, p.task, p.org_id FROM pods p JOIN organizations o ON o.id=p.org_id
         WHERE p.id=? AND o.player_id=?""", (pod_id, player["id"]))
     pod = cur.fetchone()
     if not pod:
         conn.close(); return {"error": "Pod not found or not owned by player"}
-    if pod["mission"] != "scan":
-        conn.close(); return {"error": "Pod is not in scan mission — set mission to 'scan' first"}
+    if pod["task"] != "scan":
+        conn.close(); return {"error": "Pod is not on the scan task — set its task to 'scan' first"}
     status = _scan_target_status(cur, pod["org_id"], target_x, target_y, target_z)
     params = {"target_x": target_x, "target_y": target_y, "target_z": target_z,
               "in_range": status["in_range"]}
@@ -246,7 +248,7 @@ def set_pod_scan_target(player_token: str, pod_id: int,
         payload={"pod_id": pod_id, "target_x": target_x, "target_y": target_y, "target_z": target_z,
                  "in_range": status["in_range"]},
         actor_id=player["id"], subject_id=pod_id, subject_type="pod")
-    cur.execute("UPDATE pods SET mission_params=? WHERE id=?",
+    cur.execute("UPDATE pods SET task_params=? WHERE id=?",
                 (json.dumps(params), pod_id))
     conn.commit(); conn.close()
     return {"ok": True, "pod_id": pod_id,
@@ -256,10 +258,10 @@ def show_organization(player_token: str, org_id: int) -> dict:
     """
     Return the complete properties of one of the player's own organizations:
     org record (type, mission, mission_params, is_mobile, sector location)
-    plus pods grouped by task (mission) — count of pods on each task, total
+    plus pods grouped by task — count of pods on each task, total
     capacity of that group, and what's actually stored there broken down by
     resource type (energy/food/goods). Storage is generic per pod and
-    independent of current mission (see engine/turn.py), so a task group's
+    independent of current task (see engine/turn.py), so a task group's
     contents don't necessarily match its own task -- e.g. produce_goods pods
     can still be holding energy leftover from before a retask. Individual
     pods aren't listed separately; a ship with 6 pods reads as up to 3 task
@@ -291,12 +293,12 @@ def show_organization(player_token: str, org_id: int) -> dict:
         conn.close(); return {"error": "Organization not found or not owned by player"}
     result = dict(org)
     cur.execute("""
-        SELECT mission AS task, COUNT(*) AS count,
+        SELECT task, COUNT(*) AS count,
                SUM(storage_capacity) AS capacity,
                SUM(energy_stored) AS energy,
                SUM(food_stored) AS food,
                SUM(goods_stored) AS goods
-        FROM pods WHERE org_id = ? GROUP BY mission""", (org_id,))
+        FROM pods WHERE org_id = ? GROUP BY task""", (org_id,))
     result["tasks"] = [dict(t) for t in cur.fetchall()]
     for t in result["tasks"]:
         t["task_display"] = _TASK_DISPLAY.get(t["task"], t["task"])
@@ -329,8 +331,8 @@ def show_civilization_status(player_token: str) -> dict:
       sector location, a per-org cargo summary (current/capacity summed across
       that org's pods), a per-org storage breakdown (energy/food/goods
       currently held, summed across that org's pods regardless of each pod's
-      own mission -- storage is generic per pod, see RESOURCE_STORAGE_COLUMN),
-      a tasking breakdown (pod count per mission, e.g.
+      own task -- storage is generic per pod, see RESOURCE_STORAGE_COLUMN),
+      a tasking breakdown (pod count per task, e.g.
       {"produce_energy": 2, "produce_food": 2, "produce_goods": 2} -- this is
       the pod-deployment picture), and a production breakdown (see
       _org_production -- gross per-turn output at full input availability,
@@ -390,9 +392,9 @@ def show_civilization_status(player_token: str) -> dict:
             (o["id"],)).fetchone()
         storage = {"energy": cargo["energy"] or 0.0, "food": cargo["food"] or 0.0,
                    "goods": cargo["goods"] or 0.0}
-        tasks = cur.execute("SELECT mission, COUNT(*) AS n FROM pods WHERE org_id=? GROUP BY mission",
+        tasks = cur.execute("SELECT task, COUNT(*) AS n FROM pods WHERE org_id=? GROUP BY task",
                            (o["id"],)).fetchall()
-        tasking = {t["mission"]: t["n"] for t in tasks}
+        tasking = {t["task"]: t["n"] for t in tasks}
         in_transit = o["sector_id"] == -1
         production = _org_production(tasking, in_transit)
         entry = {

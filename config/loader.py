@@ -28,7 +28,7 @@ class GameSettings:
 
 @dataclass
 class PodTemplateDef:
-    mission: str
+    task: str
     count: int
     storage_capacity: float = 100.0
     # Fraction of storage_capacity this pod holds at bootstrap, 0.0-1.0.
@@ -102,7 +102,7 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
     scenario_fill = _fraction(sc_raw.get("starting_fill", DEFAULT_STARTING_FILL),
                               "starting_fill")
     pods_per_ship = [PodTemplateDef(
-        mission=_require(p, "mission", "pods_per_ship[].mission"),
+        task=_require(p, "task", "pods_per_ship[].task"),
         count=int(_require(p, "count", "pods_per_ship[].count")),
         storage_capacity=float(p.get("storage_capacity", 100.0)),
         starting_fill=_fraction(p.get("starting_fill", scenario_fill),

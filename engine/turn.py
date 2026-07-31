@@ -55,7 +55,7 @@ def _player_holdings(cur) -> dict:
 def _available_org_resource(cur, org_id: int, resource: str) -> float:
     """
     An org's pooled stock of a resource: summed across ALL of that org's
-    pods' <resource>_stored column, regardless of each pod's current mission
+    pods' <resource>_stored column, regardless of each pod's current task
     -- storage is generic per pod, so retasking a pod never hides whatever
     it already has stored (see RESOURCE_STORAGE_COLUMN).
     """
@@ -67,7 +67,7 @@ def _available_org_resource(cur, org_id: int, resource: str) -> float:
 def _drain_org_resource(cur, org_id: int, resource: str, amount: float):
     """Drain amount of a resource from an org's pooled stock, sequentially
     (by pod id) across whichever of its pods currently hold that resource --
-    regardless of their current mission."""
+    regardless of their current task."""
     if amount <= 0:
         return
     col = RESOURCE_STORAGE_COLUMN[resource]
@@ -167,7 +167,7 @@ def end_of_turn():
     conn.close()
 
     # 0. NPC decisions -- each is_npc=1 player with a profile acts before
-    #    this turn resolves, by calling the same confirm_move/set_pod_mission/
+    #    this turn resolves, by calling the same confirm_move/set_pod_task/
     #    set_mission tool functions a human player would (see engine/npc.py).
     #    Each of those calls opens and commits its own connection, so this
     #    runs to completion with nothing left open before the turn's own
@@ -201,7 +201,7 @@ def end_of_turn():
 
     # 3. Org upkeep, then pod production (input-costed, see engine/production.py's
     #    POD_CONSUMPTION_RECIPE), then scan resolution.
-    #    Produce missions run for all pods regardless of transit state, but
+    #    Produce tasks run for all pods regardless of transit state, but
     #    produce_energy specifically can't harvest anything while in transit
     #    (see below). Scan resolution runs only for stationary orgs (transit
     #    suppresses scan).
@@ -215,16 +215,16 @@ def end_of_turn():
     consumption = collections.defaultdict(lambda: collections.defaultdict(float))
     _apply_org_upkeep(cur, consumption)
 
-    cur.execute("""SELECT p.id,p.mission,p.mission_params,p.org_id,
+    cur.execute("""SELECT p.id,p.task,p.task_params,p.org_id,
                 o.sector_id AS org_sector_id, o.player_id
         FROM pods p JOIN organizations o ON o.id = p.org_id
         ORDER BY p.id""")
     for pod in cur.fetchall():
-        mission = pod["mission"]
+        task = pod["task"]
         player_id = pod["player_id"]
 
         # 3a/b. Production, gated by input cost.
-        #    Each producing mission (plus scan) costs some other resource(s)
+        #    Each producing task (plus scan) costs some other resource(s)
         #    to run (e.g. produce_goods costs 2 energy + 1 food) -- drawn
         #    from the org's own pooled stock of that resource (see
         #    _available_org_resource/_drain_org_resource above). idle costs
@@ -240,9 +240,9 @@ def end_of_turn():
         #    Known gap, deferred: when multiple players' pods share one
         #    sector, whoever's pod processes first (by pod id) gets first
         #    claim on what's left that turn -- no fair-split model yet.
-        if mission in ("produce_energy", "produce_food", "produce_goods"):
-            base_production = get_production(mission)
-            recipe = get_consumption_recipe(mission)
+        if task in ("produce_energy", "produce_food", "produce_goods"):
+            base_production = get_production(task)
+            recipe = get_consumption_recipe(task)
             org_id = pod["org_id"]
 
             ratio = 1.0
@@ -287,8 +287,8 @@ def end_of_turn():
 
         # 3c. Scan: costs food (see POD_CONSUMPTION_RECIPE) but produces no
         #     output -- stationary orgs only (transit suppresses scan).
-        elif mission == "scan":
-            recipe = get_consumption_recipe(mission)
+        elif task == "scan":
+            recipe = get_consumption_recipe(task)
             org_id = pod["org_id"]
             ratio = 1.0
             for resource, required in recipe.items():
@@ -306,7 +306,7 @@ def end_of_turn():
                 "SELECT o.sector_id,o.player_id,s.coord_x,s.coord_y,s.coord_z FROM organizations o "
                 "JOIN sectors s ON s.id=o.sector_id WHERE o.id=?", (pod["org_id"],)).fetchone()
             if ratio > 0 and org and org["sector_id"] != -1:
-                params = json.loads(pod["mission_params"] or "{}")
+                params = json.loads(pod["task_params"] or "{}")
                 tx, ty, tz = params.get("target_x"), params.get("target_y"), params.get("target_z")
                 if tx is not None and ty is not None and tz is not None:
                     distance = math.sqrt((tx-org["coord_x"])**2 + (ty-org["coord_y"])**2 +

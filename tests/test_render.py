@@ -9,7 +9,7 @@ from tests.conftest import (
 
 def test_render_status_civilization_status_is_hint_driven():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    seed_pod(oid, mission="produce_energy", storage_current=10.0)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
     status = show_civilization_status("U_P1")
     text = render_status(status)
     assert "short_name" in text            # header row uses the API's own column names
@@ -26,7 +26,7 @@ def test_render_status_game_status_uses_standings_rows_key():
 
 def test_render_status_show_organization_includes_header_line():
     pid = seed_player(); sid = seed_sector(3, 3, 0); oid = seed_ship(pid, sid)
-    seed_pod(oid, mission="produce_energy", storage_current=10.0)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
     status = show_organization("U_P1", oid)
     text = render_status(status)
     assert text.startswith(f"**{status['display']['header']}**")

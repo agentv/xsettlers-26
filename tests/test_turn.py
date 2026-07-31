@@ -17,8 +17,8 @@ def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
     blocked (no goods input available anywhere in the org), so only the
     energy pod's overflow contributes any waste this turn."""
     pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
-    seed_pod(oid, mission="produce_energy", storage_capacity=10.0, storage_current=10.0)
-    seed_pod(oid, mission="produce_food", storage_capacity=10.0, storage_current=10.0)
+    seed_pod(oid, task="produce_energy", storage_capacity=10.0, storage_current=10.0)
+    seed_pod(oid, task="produce_food", storage_capacity=10.0, storage_current=10.0)
     end_of_turn()
     conn = get_connection()
     row = conn.execute(
@@ -56,9 +56,9 @@ def test_calculate_final_scores_applies_score_weights():
     sid = seed_sector()
     o1 = seed_ship(p1, sid, name="P1 Ship")
     o2 = seed_ship(p2, sid, name="P2 Ship")
-    seed_pod(o1, mission="produce_energy", storage_capacity=100.0, storage_current=80.0)  # weighted 0
-    seed_pod(o2, mission="produce_food", storage_capacity=100.0, storage_current=10.0)
-    seed_pod(o2, mission="produce_goods", storage_capacity=100.0, storage_current=10.0)
+    seed_pod(o1, task="produce_energy", storage_capacity=100.0, storage_current=80.0)  # weighted 0
+    seed_pod(o2, task="produce_food", storage_capacity=100.0, storage_current=10.0)
+    seed_pod(o2, task="produce_goods", storage_capacity=100.0, storage_current=10.0)
     standings = _calculate_final_scores()
     by_player = {s["player_id"]: s["score"] for s in standings}
     assert by_player[p1] == 0
@@ -165,8 +165,8 @@ def test_org_upkeep_drains_pooled_food_and_energy():
     its own production this same turn -- isolates the upkeep drain, since
     otherwise production would immediately mask it back up to capacity."""
     pid = seed_player(); sid = seed_sector(energy=0.0); oid = seed_ship(pid, sid)
-    seed_pod(oid, mission="produce_food", storage_current=100.0)
-    seed_pod(oid, mission="produce_energy", storage_current=100.0)
+    seed_pod(oid, task="produce_food", storage_current=100.0)
+    seed_pod(oid, task="produce_energy", storage_current=100.0)
     end_of_turn()
     conn = get_connection()
     food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
@@ -180,7 +180,7 @@ def test_org_upkeep_prorated_when_insufficient():
     upkeep should prorate to the most restrictive resource (energy, at 0),
     draining nothing rather than going negative or draining food anyway."""
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    seed_pod(oid, mission="produce_food", storage_current=2.0)
+    seed_pod(oid, task="produce_food", storage_current=2.0)
     end_of_turn()
     conn = get_connection()
     food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
@@ -189,7 +189,7 @@ def test_org_upkeep_prorated_when_insufficient():
 
 def test_idle_pod_costs_nothing():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    pod = seed_pod(oid, mission="idle", storage_current=42.0)
+    pod = seed_pod(oid, task="idle", storage_current=42.0)
     end_of_turn()
     conn = get_connection()
     assert conn.execute("SELECT energy_stored FROM pods WHERE id=?",

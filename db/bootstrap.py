@@ -15,14 +15,14 @@
 from db.connection import get_connection
 from config.loader import load_config, Seat
 from db.sectors import reveal_sector
-from engine.production import RESOURCE_STORAGE_COLUMN, RESOURCE_PRODUCING_MISSION
+from engine.production import RESOURCE_STORAGE_COLUMN, RESOURCE_PRODUCING_TASK
 
-def _starting_cargo_for_mission(mission: str, capacity: float, fill: float) -> dict:
+def _starting_cargo_for_task(task: str, capacity: float, fill: float) -> dict:
     """
     Seed a freshly bootstrapped pod with `fill` (0.0-1.0) of its capacity,
-    in whatever resource matches its mission at creation time
+    in whatever resource matches its task at creation time
     (energy_stored/food_stored/goods_stored are independent of current
-    mission from then on -- see engine/turn.py). Non-producing missions
+    task from then on -- see engine/turn.py). Non-producing tasks
     (idle, scan) start with nothing stored regardless of fill, having no
     matching resource.
 
@@ -40,8 +40,8 @@ def _starting_cargo_for_mission(mission: str, capacity: float, fill: float) -> d
     switch.
     """
     stored = {"energy_stored": 0.0, "food_stored": 0.0, "goods_stored": 0.0}
-    for resource, producing_mission in RESOURCE_PRODUCING_MISSION.items():
-        if producing_mission == mission:
+    for resource, producing_task in RESOURCE_PRODUCING_TASK.items():
+        if producing_task == task:
             stored[RESOURCE_STORAGE_COLUMN[resource]] = capacity * fill
     return stored
 
@@ -110,13 +110,13 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
             # Expand pod templates: each template has a count
             for pod_tmpl in sc.pods_per_ship:
                 for _ in range(pod_tmpl.count):
-                    cargo = _starting_cargo_for_mission(pod_tmpl.mission,
+                    cargo = _starting_cargo_for_task(pod_tmpl.task,
                                                         pod_tmpl.storage_capacity,
                                                         pod_tmpl.starting_fill)
                     cur.execute("""INSERT INTO pods
-                        (mission,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
+                        (task,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
                         VALUES (?,?,?,?,?,?)""",
-                        (pod_tmpl.mission, org_id, pod_tmpl.storage_capacity,
+                        (pod_tmpl.task, org_id, pod_tmpl.storage_capacity,
                          cargo["energy_stored"], cargo["food_stored"], cargo["goods_stored"]))
         print(f"  Created {sc.ships_per_player} ships for player {player_id}.")
 
@@ -133,13 +133,13 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
             colony_org_id = cur.lastrowid
             for pod_tmpl in sc.pods_per_ship:
                 for _ in range(pod_tmpl.count):
-                    cargo = _starting_cargo_for_mission(pod_tmpl.mission,
+                    cargo = _starting_cargo_for_task(pod_tmpl.task,
                                                         pod_tmpl.storage_capacity,
                                                         pod_tmpl.starting_fill)
                     cur.execute("""INSERT INTO pods
-                        (mission,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
+                        (task,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
                         VALUES (?,?,?,?,?,?)""",
-                        (pod_tmpl.mission, colony_org_id, pod_tmpl.storage_capacity,
+                        (pod_tmpl.task, colony_org_id, pod_tmpl.storage_capacity,
                          cargo["energy_stored"], cargo["food_stored"], cargo["goods_stored"]))
 
     cur.execute("INSERT OR IGNORE INTO game_state (id,current_turn) VALUES (1,0)")

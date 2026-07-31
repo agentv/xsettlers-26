@@ -2,7 +2,7 @@ POD_PRODUCTION = {
     "produce_energy": {"energy": 10.0},
     "produce_food":   {"food":   10.0},
     "produce_goods":  {"goods":   5.0},
-    # Non-producing missions
+    # Non-producing tasks
     "idle": {}, "scan": {},
 }
 
@@ -15,7 +15,7 @@ RESOURCE_CAPACITY_COLUMN = {
     "energy": "energy_capacity",
 }
 
-# Input cost to run each producing mission, drawn from the org's own pooled
+# Input cost to run each producing task, drawn from the org's own pooled
 # stock of that resource across ALL its pods (see RESOURCE_STORAGE_COLUMN --
 # storage is generic per pod, independent of that pod's current mission, so
 # retasking a pod never hides what it already has stored). Output is
@@ -39,7 +39,7 @@ ORG_UPKEEP_COST = {"food": 5.0, "energy": 1.0}
 
 # Which pod column holds a resource's stock. Storage is per-pod but generic
 # -- a pod can hold a mix of resource types regardless of its current
-# mission, since retasking never clears or relabels existing cargo (see
+# task, since retasking never clears or relabels existing cargo (see
 # engine/turn.py's _store_org_resource/_available_org_resource).
 RESOURCE_STORAGE_COLUMN = {
     "energy": "energy_stored",
@@ -47,19 +47,19 @@ RESOURCE_STORAGE_COLUMN = {
     "goods":  "goods_stored",
 }
 
-# Which mission produces a given resource -- used only at bootstrap, to seed
+# Which task produces a given resource -- used only at bootstrap, to seed
 # a freshly created pod's starting cargo into the column matching its
-# initial mission (see db/bootstrap.py's _full_cargo_for_mission). Not used
+# initial task (see db/bootstrap.py's _starting_cargo_for_task). Not used
 # for run-time availability/consumption -- that's keyed by
-# RESOURCE_STORAGE_COLUMN alone, independent of current mission.
-RESOURCE_PRODUCING_MISSION = {
+# RESOURCE_STORAGE_COLUMN alone, independent of current task.
+RESOURCE_PRODUCING_TASK = {
     "energy": "produce_energy",
     "food":   "produce_food",
     "goods":  "produce_goods",
 }
 
-def get_production(mission: str) -> dict:
-    return POD_PRODUCTION.get(mission, {})
+def get_production(task: str) -> dict:
+    return POD_PRODUCTION.get(task, {})
 
-def get_consumption_recipe(mission: str) -> dict:
-    return POD_CONSUMPTION_RECIPE.get(mission, {})
+def get_consumption_recipe(task: str) -> dict:
+    return POD_CONSUMPTION_RECIPE.get(task, {})

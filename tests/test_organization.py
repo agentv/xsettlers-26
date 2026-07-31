@@ -3,7 +3,7 @@ import pytest
 from db.connection import get_connection
 from engine.turn import end_of_turn
 from xsettlers_mcp.tools.organization_tools import (
-    set_mission, set_pod_mission, show_civilization_status, show_game_status,
+    set_mission, set_pod_task, show_civilization_status, show_game_status,
     show_organization
 )
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
@@ -98,23 +98,23 @@ def test_set_mission_move_requires_dest_params():
     assert org["sector_id"] != -1          # rejected before anything was mutated
     assert org["mission"] != "move"
 
-# --- set_pod_mission happy path ---
+# --- set_pod_task happy path ---
 
-def test_set_pod_mission_produce_energy():
+def test_set_pod_task_produce_energy():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     pod = seed_pod(oid)
-    result = set_pod_mission("U_P1", pod, "produce_energy")
+    result = set_pod_task("U_P1", pod, "produce_energy")
     assert result.get("ok") is True
     conn = get_connection()
-    assert conn.execute("SELECT mission FROM pods WHERE id=?",
-                        (pod,)).fetchone()["mission"] == "produce_energy"
+    assert conn.execute("SELECT task FROM pods WHERE id=?",
+                        (pod,)).fetchone()["task"] == "produce_energy"
     conn.close()
 
 def test_storage_capped_at_capacity():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     pod = seed_pod(oid, storage_capacity=100.0, storage_current=95.0)
-    seed_pod(oid, mission="produce_food", storage_current=100.0)
-    set_pod_mission("U_P1", pod, "produce_energy"); end_of_turn()
+    seed_pod(oid, task="produce_food", storage_current=100.0)
+    set_pod_task("U_P1", pod, "produce_energy"); end_of_turn()
     conn = get_connection()
     assert conn.execute("SELECT energy_stored FROM pods WHERE id=?",
                         (pod,)).fetchone()["energy_stored"] == 100.0
@@ -129,10 +129,10 @@ def test_non_energy_production_continues_in_transit_if_input_available():
     from xsettlers_mcp.tools.navigation_tools import confirm_move
     pid = seed_player(); oid = seed_sector(0,0,0)
     ship = seed_ship(pid, oid)
-    energy_pod = seed_pod(ship, mission="produce_energy", storage_current=100.0)  # feeds goods' input
-    seed_pod(ship, mission="produce_food", storage_current=100.0)  # feeds goods' + org upkeep's food cost
+    energy_pod = seed_pod(ship, task="produce_energy", storage_current=100.0)  # feeds goods' input
+    seed_pod(ship, task="produce_food", storage_current=100.0)  # feeds goods' + org upkeep's food cost
     goods_pod  = seed_pod(ship, storage_capacity=100.0, storage_current=0.0)
-    set_pod_mission("U_P1", goods_pod, "produce_goods")
+    set_pod_task("U_P1", goods_pod, "produce_goods")
     confirm_move("U_P1", ship, 3, 0, 0); end_of_turn()
     conn = get_connection()
     assert conn.execute("SELECT goods_stored FROM pods WHERE id=?",
@@ -145,8 +145,8 @@ def test_production_depletes_sector_capacity():
     pid = seed_player(); sid = seed_sector(energy=50.0)
     oid = seed_ship(pid, sid)
     pod = seed_pod(oid, storage_capacity=100.0, storage_current=0.0)
-    seed_pod(oid, mission="produce_food", storage_current=100.0)
-    set_pod_mission("U_P1", pod, "produce_energy"); end_of_turn()
+    seed_pod(oid, task="produce_food", storage_current=100.0)
+    set_pod_task("U_P1", pod, "produce_energy"); end_of_turn()
     conn = get_connection()
     sector = conn.execute("SELECT energy_capacity FROM sectors WHERE id=?", (sid,)).fetchone()
     pod_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()
@@ -158,8 +158,8 @@ def test_production_floors_at_zero_and_stops_once_depleted():
     pid = seed_player(); sid = seed_sector(energy=5.0)  # less than the flat rate (10)
     oid = seed_ship(pid, sid)
     pod = seed_pod(oid, storage_capacity=100.0, storage_current=0.0)
-    seed_pod(oid, mission="produce_food", storage_current=100.0)
-    set_pod_mission("U_P1", pod, "produce_energy"); end_of_turn()
+    seed_pod(oid, task="produce_food", storage_current=100.0)
+    set_pod_task("U_P1", pod, "produce_energy"); end_of_turn()
     conn = get_connection()
     sector = conn.execute("SELECT energy_capacity FROM sectors WHERE id=?", (sid,)).fetchone()
     pod_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()
@@ -182,8 +182,8 @@ def test_energy_production_stops_during_transit():
     pid = seed_player(); oid = seed_sector(0,0,0, energy=1000.0)
     ship = seed_ship(pid, oid)
     pod = seed_pod(ship, storage_capacity=100.0, storage_current=0.0)
-    seed_pod(ship, mission="produce_food", storage_current=100.0)  # plenty of food available
-    set_pod_mission("U_P1", pod, "produce_energy"); confirm_move("U_P1", ship, 3, 0, 0); end_of_turn()
+    seed_pod(ship, task="produce_food", storage_current=100.0)  # plenty of food available
+    set_pod_task("U_P1", pod, "produce_energy"); confirm_move("U_P1", ship, 3, 0, 0); end_of_turn()
     conn = get_connection()
     pod_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()
     conn.close()
@@ -196,8 +196,8 @@ def test_retasking_a_pod_does_not_clear_its_storage():
     real inventory, not a label derived from its current mission. Retasking
     must never wipe or hide what's already there."""
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    pod = seed_pod(oid, mission="produce_energy", storage_current=42.0)
-    set_pod_mission("U_P1", pod, "idle")
+    pod = seed_pod(oid, task="produce_energy", storage_current=42.0)
+    set_pod_task("U_P1", pod, "idle")
     conn = get_connection()
     energy = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()["energy_stored"]
     conn.close()
@@ -208,11 +208,11 @@ def test_retasked_pods_energy_still_counts_toward_org_pool():
     stored energy invisible to consumption, even though it physically
     remained. Now it must still be available to pay other pods' recipes."""
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    energy_pod = seed_pod(oid, mission="produce_energy", storage_current=100.0)
-    set_pod_mission("U_P1", energy_pod, "idle")  # retask away from produce_energy
+    energy_pod = seed_pod(oid, task="produce_energy", storage_current=100.0)
+    set_pod_task("U_P1", energy_pod, "idle")  # retask away from produce_energy
     goods_pod = seed_pod(oid, storage_capacity=100.0, storage_current=0.0)
-    set_pod_mission("U_P1", goods_pod, "produce_goods")  # needs 2 energy + 1 food
-    seed_pod(oid, mission="produce_food", storage_current=100.0)
+    set_pod_task("U_P1", goods_pod, "produce_goods")  # needs 2 energy + 1 food
+    seed_pod(oid, task="produce_food", storage_current=100.0)
     end_of_turn()
     conn = get_connection()
     goods = conn.execute("SELECT goods_stored FROM pods WHERE id=?", (goods_pod,)).fetchone()["goods_stored"]
@@ -223,9 +223,9 @@ def test_production_overflow_spills_into_sibling_pod():
     """A producing pod already full should spill its output into another pod
     in the same org with free space, rather than losing it."""
     pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
-    full_pod = seed_pod(oid, mission="produce_energy", storage_capacity=10.0, storage_current=10.0)
+    full_pod = seed_pod(oid, task="produce_energy", storage_capacity=10.0, storage_current=10.0)
     empty_pod = seed_pod(oid, storage_capacity=100.0, storage_current=0.0)  # idle, all free space
-    seed_pod(oid, mission="produce_food", storage_current=100.0)
+    seed_pod(oid, task="produce_food", storage_current=100.0)
     end_of_turn()
     conn = get_connection()
     full_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (full_pod,)).fetchone()
@@ -242,8 +242,8 @@ def test_production_overflow_lost_when_org_fully_saturated():
     """If every pod in the org is completely full, excess production is
     simply lost -- not stored anywhere, not an error."""
     pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
-    full_energy_pod = seed_pod(oid, mission="produce_energy", storage_capacity=10.0, storage_current=10.0)
-    full_food_pod = seed_pod(oid, mission="produce_food", storage_capacity=10.0, storage_current=10.0)
+    full_energy_pod = seed_pod(oid, task="produce_energy", storage_capacity=10.0, storage_current=10.0)
+    full_food_pod = seed_pod(oid, task="produce_food", storage_capacity=10.0, storage_current=10.0)
     end_of_turn()
     conn = get_connection()
     row = conn.execute("SELECT energy_stored,food_stored,goods_stored FROM pods WHERE id=?",
@@ -254,33 +254,33 @@ def test_production_overflow_lost_when_org_fully_saturated():
     # affordable) are simply lost, not stored anywhere or raising an error
     assert row["energy_stored"] == 10.0
 
-# --- set_pod_mission negative paths ---
+# --- set_pod_task negative paths ---
 
-def test_set_pod_mission_unknown_player():
-    assert "error" in set_pod_mission("U_NOBODY", 1, "produce_energy")
+def test_set_pod_task_unknown_player():
+    assert "error" in set_pod_task("U_NOBODY", 1, "produce_energy")
 
-def test_set_pod_mission_invalid_type():
+def test_set_pod_task_invalid_type():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     pod = seed_pod(oid)
-    assert "error" in set_pod_mission("U_P1", pod, "explode")
+    assert "error" in set_pod_task("U_P1", pod, "explode")
 
-def test_set_pod_mission_unowned_pod():
+def test_set_pod_task_unowned_pod():
     p1 = seed_player(email="p1@t.com", player_token="U_P1")
     p2 = seed_player(email="p2@t.com", player_token="U_P2")
     sid = seed_sector(); oid = seed_ship(p2, sid); pod = seed_pod(oid)
-    assert "error" in set_pod_mission("U_P1", pod, "produce_energy")
+    assert "error" in set_pod_task("U_P1", pod, "produce_energy")
 
-# --- set_pod_mission scan target ---
+# --- set_pod_task scan target ---
 
-def test_set_pod_mission_scan_stores_target_coords():
+def test_set_pod_task_scan_stores_target_coords():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     pod = seed_pod(oid)
-    result = set_pod_mission("U_P1", pod, "scan", target_x=5, target_y=5, target_z=0)
+    result = set_pod_task("U_P1", pod, "scan", target_x=5, target_y=5, target_z=0)
     assert result["target_x"] == 5 and result["target_y"] == 5 and result["target_z"] == 0
     assert result["in_range"] is False  # distance sqrt(50) >> scan range 1
     conn = get_connection()
-    params = json.loads(conn.execute("SELECT mission_params FROM pods WHERE id=?",
-                                     (pod,)).fetchone()["mission_params"])
+    params = json.loads(conn.execute("SELECT task_params FROM pods WHERE id=?",
+                                     (pod,)).fetchone()["task_params"])
     conn.close()
     assert params == {"target_x": 5, "target_y": 5, "target_z": 0, "in_range": False}
 
@@ -288,7 +288,7 @@ def test_set_pod_mission_scan_stores_target_coords():
     ((0,0,0), (1,0,0), 1.0, True),
     ((3,3,0), (5,3,0), 2.0, False),
 ])
-def test_set_pod_mission_scan_target_status(origin, target, expected_distance, expected_in_range):
+def test_set_pod_task_scan_target_status(origin, target, expected_distance, expected_in_range):
     """The response should remind the player where they are and how far the
     target is, not just a bare in_range boolean -- one call gives the full
     picture: current position, target, distance, scan range, legality.
@@ -296,7 +296,7 @@ def test_set_pod_mission_scan_target_status(origin, target, expected_distance, e
     independently-failing things (merged per the 2026-07-29 test-suite audit)."""
     pid = seed_player(); sid = seed_sector(*origin); oid = seed_ship(pid, sid)
     pod = seed_pod(oid)
-    result = set_pod_mission("U_P1", pod, "scan",
+    result = set_pod_task("U_P1", pod, "scan",
                              target_x=target[0], target_y=target[1], target_z=target[2])
     assert (result["current_x"], result["current_y"], result["current_z"]) == origin
     assert result["distance"] == expected_distance
@@ -308,23 +308,23 @@ def test_scan_target_status_none_while_in_transit():
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid)
     confirm_move("U_P1", sid, 3, 0, 0)
-    result = set_pod_mission("U_P1", pod, "scan", target_x=1, target_y=0, target_z=0)
+    result = set_pod_task("U_P1", pod, "scan", target_x=1, target_y=0, target_z=0)
     assert result["current_x"] is None and result["distance"] is None and result["in_range"] is None
 
 def test_set_pod_scan_target_reports_in_range():
     from xsettlers_mcp.tools.organization_tools import set_pod_scan_target
     pid = seed_player(); sid = seed_sector(0,0,0); oid = seed_ship(pid, sid)
     pod = seed_pod(oid)
-    set_pod_mission("U_P1", pod, "scan")
+    set_pod_task("U_P1", pod, "scan")
     result = set_pod_scan_target("U_P1", pod, 5, 5, 0)
     assert result["in_range"] is False
     result = set_pod_scan_target("U_P1", pod, 1, 0, 0)
     assert result["in_range"] is True
 
-def test_set_pod_mission_scan_partial_target_rejected():
+def test_set_pod_task_scan_partial_target_rejected():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     pod = seed_pod(oid)
-    assert "error" in set_pod_mission("U_P1", pod, "scan", target_x=5, target_y=5)
+    assert "error" in set_pod_task("U_P1", pod, "scan", target_x=5, target_y=5)
 
 # --- show_civilization_status: player-scoped fleet report (roster + aggregates) ---
 
@@ -336,10 +336,10 @@ def test_show_civilization_status_org_fields_tasking_storage_production():
     split into 3 tests originally; consolidated per the 2026-07-29 test-
     suite audit)."""
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    seed_pod(oid, mission="produce_energy", storage_current=10.0)
-    seed_pod(oid, mission="produce_energy", storage_current=10.0)
-    seed_pod(oid, mission="produce_food", storage_current=20.0)
-    seed_pod(oid, mission="produce_goods", storage_current=5.0)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    seed_pod(oid, task="produce_food", storage_current=20.0)
+    seed_pod(oid, task="produce_goods", storage_current=5.0)
     status = show_civilization_status("U_P1")
     org = next(o for o in status["organizations"] if o["id"] == oid)
     assert org["tasking"] == {"produce_energy": 2, "produce_food": 1, "produce_goods": 1}
@@ -356,8 +356,8 @@ def test_show_civilization_status_production_zeroes_energy_in_transit():
     sector-capacity cap, see _org_production)."""
     from xsettlers_mcp.tools.navigation_tools import confirm_move
     pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
-    seed_pod(oid, mission="produce_energy", storage_current=10.0)
-    seed_pod(oid, mission="produce_food", storage_current=20.0)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    seed_pod(oid, task="produce_food", storage_current=20.0)
     confirm_move("U_P1", oid, 3, 0, 0)
     status = show_civilization_status("U_P1")
     org = next(o for o in status["organizations"] if o["id"] == oid)
@@ -365,8 +365,8 @@ def test_show_civilization_status_production_zeroes_energy_in_transit():
 
 def test_show_civilization_status_assets_include_capacity_and_percent_full():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    seed_pod(oid, mission="produce_energy", storage_capacity=100.0, storage_current=50.0)
-    seed_pod(oid, mission="produce_food", storage_capacity=100.0, storage_current=50.0)
+    seed_pod(oid, task="produce_energy", storage_capacity=100.0, storage_current=50.0)
+    seed_pod(oid, task="produce_food", storage_capacity=100.0, storage_current=50.0)
     status = show_civilization_status("U_P1")
     assert status["assets"]["capacity"] == 200.0
     assert status["assets"]["total"] == 100.0
@@ -377,8 +377,8 @@ def test_show_civilization_status_display_hints():
     and a top-level display block, so a client with no LLM in the loop can
     render a table without building its own formatting logic."""
     pid = seed_player(); sid = seed_sector(3,3,0); oid = seed_ship(pid, sid)
-    seed_pod(oid, mission="produce_energy", storage_current=10.0)
-    seed_pod(oid, mission="produce_food", storage_current=20.0)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    seed_pod(oid, task="produce_food", storage_current=20.0)
     status = show_civilization_status("U_P1")
     org = next(o for o in status["organizations"] if o["id"] == oid)
     assert org["short_name"] == org["name"].replace("Ship-", "")
@@ -422,8 +422,8 @@ def test_show_civilization_status_turns_remaining_zero_when_arrival_due_this_tur
 
 def test_show_organization_display_hints_cargo_table():
     pid = seed_player(); sid = seed_sector(3,3,0); oid = seed_ship(pid, sid, name="Ship-P1-05")
-    seed_pod(oid, mission="produce_energy", storage_capacity=100.0, storage_current=100.0)
-    seed_pod(oid, mission="produce_energy", storage_capacity=100.0, storage_current=77.0)
+    seed_pod(oid, task="produce_energy", storage_capacity=100.0, storage_current=100.0)
+    seed_pod(oid, task="produce_energy", storage_capacity=100.0, storage_current=77.0)
     result = show_organization("U_P1", oid)
     assert result["status"] == "at (3,3,0)"
     assert result["display"]["header"] == "Ship-P1-05 — at (3,3,0), idle"
@@ -448,8 +448,8 @@ def test_show_game_status_returns_all_players_standings():
     sid = seed_sector()
     o1 = seed_ship(p1, sid, name="P1 Ship")
     o2 = seed_ship(p2, sid, name="P2 Ship")
-    seed_pod(o1, mission="produce_food", storage_capacity=100.0, storage_current=80.0)
-    seed_pod(o2, mission="produce_food", storage_capacity=100.0, storage_current=20.0)
+    seed_pod(o1, task="produce_food", storage_capacity=100.0, storage_current=80.0)
+    seed_pod(o2, task="produce_food", storage_capacity=100.0, storage_current=20.0)
     status = show_game_status("U_P1")
     assert status["next_tick_at"] is None  # clock never ran in this test -- see engine.turn.get_next_tick_at
     by_player = {s["player_id"]: s for s in status["standings"]}
@@ -473,9 +473,9 @@ def test_show_game_status_ranks_by_weighted_score_not_raw_total():
     sid = seed_sector()
     o1 = seed_ship(p1, sid, name="P1 Ship")
     o2 = seed_ship(p2, sid, name="P2 Ship")
-    seed_pod(o1, mission="produce_energy", storage_capacity=100.0, storage_current=80.0)  # weighted 0
-    seed_pod(o2, mission="produce_food", storage_capacity=100.0, storage_current=10.0)
-    seed_pod(o2, mission="produce_goods", storage_capacity=100.0, storage_current=10.0)
+    seed_pod(o1, task="produce_energy", storage_capacity=100.0, storage_current=80.0)  # weighted 0
+    seed_pod(o2, task="produce_food", storage_capacity=100.0, storage_current=10.0)
+    seed_pod(o2, task="produce_goods", storage_capacity=100.0, storage_current=10.0)
     status = show_game_status("U_P1")
     by_player = {s["player_id"]: s for s in status["standings"]}
     assert by_player[p1]["total"] == 80.0

@@ -34,13 +34,13 @@ def test_bootstrap_home_colony_gets_same_pod_loadout_as_ship():
     assert len(colonies) == 2
     for colony in colonies:
         pods = conn.execute(
-            "SELECT mission FROM pods WHERE org_id=?", (colony["id"],)
+            "SELECT task FROM pods WHERE org_id=?", (colony["id"],)
         ).fetchall()
         assert len(pods) == 6
-        missions = [p["mission"] for p in pods]
-        assert missions.count("produce_energy") == 2
-        assert missions.count("produce_goods") == 2
-        assert missions.count("produce_food") == 2
+        tasks = [p["task"] for p in pods]
+        assert tasks.count("produce_energy") == 2
+        assert tasks.count("produce_goods") == 2
+        assert tasks.count("produce_food") == 2
     conn.close()
 
 def test_bootstrap_diaspora_ships_alongside_colony():
@@ -122,17 +122,17 @@ def test_bootstrap_seeds_pods_at_the_scenario_starting_fill(tmp_path, monkeypatc
         'participants:\n  - {player: "vincent@example.com", home_sector: [0, 0, 0]}\n'
         'ships_per_player: 1\n'
         'pods_per_ship:\n'
-        '  - {mission: produce_energy, count: 1, storage_capacity: 100.0}\n'
-        '  - {mission: produce_food, count: 1, storage_capacity: 100.0, starting_fill: 1.0}\n')
+        '  - {task: produce_energy, count: 1, storage_capacity: 100.0}\n'
+        '  - {task: produce_food, count: 1, storage_capacity: 100.0, starting_fill: 1.0}\n')
     bootstrap_game(scenario_file=str(lean), scenario_name="lean", selected_by="test")
     conn = get_connection()
     pods = conn.execute(
-        "SELECT mission, storage_capacity, energy_stored, food_stored FROM pods ORDER BY mission"
+        "SELECT task, storage_capacity, energy_stored, food_stored FROM pods ORDER BY task"
     ).fetchall()
     conn.close()
-    by_mission = {p["mission"]: p for p in pods}
-    assert by_mission["produce_energy"]["energy_stored"] == 25.0   # scenario fill
-    assert by_mission["produce_food"]["food_stored"] == 100.0      # template override
+    by_task = {p["task"]: p for p in pods}
+    assert by_task["produce_energy"]["energy_stored"] == 25.0   # scenario fill
+    assert by_task["produce_food"]["food_stored"] == 100.0      # template override
     assert all(p["storage_capacity"] == 100.0 for p in pods)       # capacity untouched
 
 def test_bootstrap_requires_a_scenario():

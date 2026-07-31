@@ -36,9 +36,9 @@ starting_fill: 1.0
 # POD_CONSUMPTION_RECIPE, not here -- they're fixed per mission type, not
 # configurable per scenario.
 pods_per_ship:
-  - {mission: produce_energy, count: 2, storage_capacity: 100.0}
-  - {mission: produce_goods,  count: 2, storage_capacity: 100.0}
-  - {mission: produce_food,   count: 2, storage_capacity: 100.0}
+  - {task: produce_energy, count: 2, storage_capacity: 100.0}
+  - {task: produce_goods,  count: 2, storage_capacity: 100.0}
+  - {task: produce_food,   count: 2, storage_capacity: 100.0}
 
 # Set to true to spawn a starting colony at each player's home sector.
 home_colony: false

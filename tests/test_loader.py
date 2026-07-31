@@ -84,7 +84,7 @@ def test_starting_fill_falls_back_to_the_project_default_when_unstated(tmp_path)
         'name: "Silent"\ndescription: "d"\n'
         'participants:\n  - {player: "vincent@example.com", home_sector: [0, 0, 0]}\n'
         'ships_per_player: 1\n'
-        'pods_per_ship:\n  - {mission: produce_energy, count: 1, storage_capacity: 100.0}\n')
+        'pods_per_ship:\n  - {task: produce_energy, count: 1, storage_capacity: 100.0}\n')
     sc = load_starting_configuration(str(silent))
     assert sc.starting_fill == DEFAULT_STARTING_FILL == 0.3
     assert sc.pods_per_ship[0].starting_fill == 0.3
@@ -105,8 +105,8 @@ def test_scenario_starting_fill_cascades_to_every_pod_template(tmp_path):
         'participants:\n  - {player: "vincent@example.com", home_sector: [0, 0, 0]}\n'
         'ships_per_player: 1\n'
         'pods_per_ship:\n'
-        '  - {mission: produce_energy, count: 1, storage_capacity: 100.0}\n'
-        '  - {mission: produce_food, count: 1, storage_capacity: 100.0}\n')
+        '  - {task: produce_energy, count: 1, storage_capacity: 100.0}\n'
+        '  - {task: produce_food, count: 1, storage_capacity: 100.0}\n')
     sc = load_starting_configuration(str(lean))
     assert sc.starting_fill == 0.25
     assert [p.starting_fill for p in sc.pods_per_ship] == [0.25, 0.25]
@@ -120,8 +120,8 @@ def test_pod_template_can_override_the_scenario_fill(tmp_path):
         'participants:\n  - {player: "vincent@example.com", home_sector: [0, 0, 0]}\n'
         'ships_per_player: 1\n'
         'pods_per_ship:\n'
-        '  - {mission: produce_food, count: 1, storage_capacity: 100.0, starting_fill: 1.0}\n'
-        '  - {mission: produce_goods, count: 1, storage_capacity: 100.0}\n')
+        '  - {task: produce_food, count: 1, storage_capacity: 100.0, starting_fill: 1.0}\n'
+        '  - {task: produce_goods, count: 1, storage_capacity: 100.0}\n')
     sc = load_starting_configuration(str(mixed))
     assert [p.starting_fill for p in sc.pods_per_ship] == [1.0, 0.2]
 

@@ -4,7 +4,7 @@ from xsettlers_mcp.tools.sector_tools import (
     UNKNOWN_CELL, SEEN_CELL, EMPTY_CELL, MAX_NEIGHBORHOOD_RADIUS,
 )
 from db.sectors import CONFIDENCE_DECAY_PER_TURN, TURNS_TO_BLINK_OUT
-from xsettlers_mcp.tools.organization_tools import set_pod_mission
+from xsettlers_mcp.tools.organization_tools import set_pod_task
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from engine.turn import end_of_turn
 from tests.conftest import (
@@ -20,10 +20,10 @@ def test_scan_within_range_reveals_target():
     since the scanned sector isn't occupied by any of the player's orgs --
     pre-existing engine behavior, not something reveal_sector changes."""
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    pod = seed_pod(sid, mission="scan")
-    seed_pod(sid, mission="produce_food", storage_current=100.0)
+    pod = seed_pod(sid, task="scan")
+    seed_pod(sid, task="produce_food", storage_current=100.0)
     r = get_scan_range(sid)
-    set_pod_mission("U_P1", pod, "scan", target_x=r, target_y=0, target_z=0)
+    set_pod_task("U_P1", pod, "scan", target_x=r, target_y=0, target_z=0)
     end_of_turn()
     conn = get_connection()
     sector = conn.execute(
@@ -36,11 +36,11 @@ def test_scan_within_range_reveals_target():
 
 def test_scan_out_of_range_does_not_reveal_and_logs_alert():
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    pod = seed_pod(sid, mission="scan")
-    seed_pod(sid, mission="produce_food", storage_current=100.0)
+    pod = seed_pod(sid, task="scan")
+    seed_pod(sid, task="produce_food", storage_current=100.0)
     r = get_scan_range(sid)
     out_of_range_x = r + 5
-    set_pod_mission("U_P1", pod, "scan", target_x=out_of_range_x, target_y=0, target_z=0)
+    set_pod_task("U_P1", pod, "scan", target_x=out_of_range_x, target_y=0, target_z=0)
     end_of_turn()
     conn = get_connection()
     sector = conn.execute(
@@ -58,9 +58,9 @@ def test_rescanning_known_sector_refreshes_confidence_without_altering_resources
     is currently there, not a reset), and should refresh the player's
     confidence even if it had decayed to near-zero in the meantime."""
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    pod = seed_pod(sid, mission="scan")
-    seed_pod(sid, mission="produce_food", storage_current=100.0)
-    set_pod_mission("U_P1", pod, "scan", target_x=1, target_y=0, target_z=0)
+    pod = seed_pod(sid, task="scan")
+    seed_pod(sid, task="produce_food", storage_current=100.0)
+    set_pod_task("U_P1", pod, "scan", target_x=1, target_y=0, target_z=0)
     end_of_turn()  # first scan: reveals the sector, stamps then decays confidence
 
     conn = get_connection()
@@ -72,7 +72,7 @@ def test_rescanning_known_sector_refreshes_confidence_without_altering_resources
                  (pid, sector["id"]))
     conn.commit(); conn.close()
 
-    set_pod_mission("U_P1", pod, "scan", target_x=1, target_y=0, target_z=0)  # re-scan same target
+    set_pod_task("U_P1", pod, "scan", target_x=1, target_y=0, target_z=0)  # re-scan same target
     end_of_turn()
 
     conn = get_connection()
@@ -245,10 +245,10 @@ def test_scan_out_of_range_still_costs_food():
     """The scan attempt still costs its food upkeep even though it fails --
     only the reveal is gated by range, not the resource cost."""
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    pod = seed_pod(sid, mission="scan")
-    seed_pod(sid, mission="produce_food", storage_current=100.0)
+    pod = seed_pod(sid, task="scan")
+    seed_pod(sid, task="produce_food", storage_current=100.0)
     r = get_scan_range(sid)
-    set_pod_mission("U_P1", pod, "scan", target_x=r+5, target_y=0, target_z=0)
+    set_pod_task("U_P1", pod, "scan", target_x=r+5, target_y=0, target_z=0)
     end_of_turn()
     conn = get_connection()
     food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (sid,)).fetchone()["s"]

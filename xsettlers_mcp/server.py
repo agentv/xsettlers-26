@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import hmac
 import json
 import os
 import uvicorn
@@ -215,23 +214,30 @@ session_manager = StreamableHTTPSessionManager(app=app, stateless=True)
 async def health(request):
     return PlainTextResponse("ok")
 
-# Stopgap perimeter auth: a single static shared secret, not per-player keys.
-# This only gates *reaching* /mcp at all -- it does not verify that a given
-# player_token in a request's arguments really is who it claims to be (every
-# tool still trusts player_token at face value; see docs/TODO.md). It stops
-# an anonymous internet stranger from calling tools; it does not stop
-# whoever holds the secret from impersonating any player in the roster.
-# Fails closed: if MCP_SHARED_SECRET isn't set, every request is rejected
-# rather than silently left open -- avoids "forgot to configure it" in prod.
-MCP_SHARED_SECRET = os.getenv("MCP_SHARED_SECRET")
-
-def _authorized(scope) -> bool:
-    if not MCP_SHARED_SECRET:
-        return False
-    headers = dict(scope.get("headers") or [])
-    presented = headers.get(b"authorization", b"").decode("utf-8", "ignore")
-    expected = f"Bearer {MCP_SHARED_SECRET}"
-    return hmac.compare_digest(presented, expected)
+# SECURITY POSTURE: /mcp IS OPEN. There is no perimeter auth.
+#
+# The `Authorization: Bearer <MCP_SHARED_SECRET>` gate that used to sit here
+# was removed on 2026-07-31, deliberately. It was incompatible with the way
+# MCP clients actually connect: Claude's custom-connector flow accepts a
+# server URL and optionally OAuth, with no field for a static header, so a
+# connector pointed at this server could only ever receive a 401. Choosing
+# between "reachable from Slack" and "has a perimeter", the perimeter went.
+#
+# What now stands between the internet and the game is `player_token` alone --
+# every tool resolves it against the roster and rejects anything else. That
+# was always the real gate; the shared secret only ever decided who could
+# knock. But note the two things that makes true right now, neither of them
+# comfortable:
+#
+#   1. The roster in config/game_config.yaml holds placeholder tokens
+#      (REPLACE_WITH_GENERATED_TOKEN_*) and that file is in a PUBLIC repo, as
+#      is this server's URL. Anyone who reads the repo can play as anyone.
+#   2. There is no rate limiting, so nothing slows a caller down.
+#
+# Accepted knowingly for now: the game holds nothing of value and nobody knows
+# it exists. Both facts stop being true the moment either changes. Real
+# hardening means OAuth on this endpoint plus per-player tokens that live
+# somewhere other than git -- see docs/TODO.md.
 
 class _MCPASGIApp:
     """
@@ -245,11 +251,6 @@ class _MCPASGIApp:
     POST /mcp to /mcp/.
     """
     async def __call__(self, scope, receive, send):
-        if not _authorized(scope):
-            await send({"type": "http.response.start", "status": 401,
-                        "headers": [(b"content-type", b"text/plain")]})
-            await send({"type": "http.response.body", "body": b"Unauthorized"})
-            return
         await session_manager.handle_request(scope, receive, send)
 
 @contextlib.asynccontextmanager

@@ -195,3 +195,67 @@ def test_idle_pod_costs_nothing():
     assert conn.execute("SELECT energy_stored FROM pods WHERE id=?",
                         (pod,)).fetchone()["energy_stored"] == 42.0
     conn.close()
+
+# --- end-of-game scoreboard (must be recorded, not just printed) ---
+
+def _play_to_game_over():
+    from engine.turn import TURN_LIMIT
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_goods", storage_current=50.0)
+    seed_pod(oid, task="produce_food", storage_current=100.0)
+    for _ in range(TURN_LIMIT):
+        end_of_turn()
+    return pid
+
+def test_final_scores_are_recorded_as_an_event_not_just_printed():
+    """A game whose outcome exists only in a server log is a game nobody can
+    be told they won -- and replay/audit needs the scoreboard as it stood at
+    the whistle, not something recomputed later."""
+    from engine.turn import get_final_scores, FINAL_SCORES_EVENT
+    _play_to_game_over()
+    conn = get_connection()
+    row = conn.execute("SELECT payload FROM events WHERE event_type=?",
+                       (FINAL_SCORES_EVENT,)).fetchone()
+    conn.close()
+    assert row is not None
+    final = get_final_scores()
+    assert final["winner"] == "Player One"
+    assert final["final_turn"] == final["turn_limit"]
+    assert final["score_weights"]                      # self-explaining without re-reading config
+    top = final["standings"][0]
+    assert top["rank"] == 1
+    assert {"score", "energy", "food", "goods", "total", "capacity"} <= set(top)
+
+def test_final_scores_are_written_once():
+    """Writing twice would give a game two endings."""
+    from engine.turn import FINAL_SCORES_EVENT
+    _play_to_game_over()
+    end_of_turn(); end_of_turn()          # no-ops past the limit
+    conn = get_connection()
+    n = conn.execute("SELECT COUNT(*) n FROM events WHERE event_type=?",
+                     (FINAL_SCORES_EVENT,)).fetchone()["n"]
+    conn.close()
+    assert n == 1
+
+def test_get_final_scores_is_none_before_game_over():
+    from engine.turn import get_final_scores
+    seed_player()
+    end_of_turn()
+    assert get_final_scores() is None
+
+def test_show_game_status_becomes_the_final_scoreboard_after_game_over():
+    """The scoreboard a player is handed at the end is the recorded one."""
+    from xsettlers_mcp.tools.organization_tools import show_game_status
+    _play_to_game_over()
+    status = show_game_status("U_P1")
+    assert status["game_over"] is True and status["is_final"] is True
+    assert status["winner"] == "Player One"
+    assert status["display"]["header"].startswith("FINAL — game over at turn")
+    assert status["standings"][0]["rank"] == 1
+
+def test_show_game_status_is_not_final_mid_game():
+    from xsettlers_mcp.tools.organization_tools import show_game_status
+    seed_player(); end_of_turn()
+    status = show_game_status("U_P1")
+    assert status["game_over"] is False and status["winner"] is None
+    assert status["display"]["header"].startswith("Turn ")

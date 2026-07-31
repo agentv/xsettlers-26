@@ -2,7 +2,7 @@ from config.loader import load_config
 from db.connection import get_connection
 from db.events import record_event
 from engine.production import POD_PRODUCTION
-from engine.turn import get_current_turn, get_next_tick_at
+from engine.turn import get_current_turn, get_next_tick_at, get_final_scores
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.sector_tools import (
     get_scan_range, resolve_bearing, bearing_name, SCAN_BEARINGS)
@@ -715,12 +715,33 @@ def show_game_status(player_token: str) -> dict:
     for rank, s in enumerate(standings, start=1):
         s["rank"] = rank
     conn.close()
+
+    # Once the game is over this becomes the end-of-game scoreboard: the
+    # RECORDED result, not a recomputation. get_final_scores() reads the
+    # game.final_scores event written at the whistle, so what a player is
+    # shown afterwards is what actually happened, and stays right even if
+    # anything touches state later.
+    final = get_final_scores()
+    game_over = final is not None
+    if game_over:
+        standings = final["standings"]
+        for s in standings:
+            s.setdefault("utilization",
+                         round(s["total"] / s["capacity"] * 100, 1) if s.get("capacity") else 0.0)
+    header = (f"FINAL — game over at turn {final['final_turn']} of {final['turn_limit']}. "
+              f"Winner: {final['winner']}" if game_over
+              else f"Turn {current_turn} of {turn_limit}")
     return {
         "turn": current_turn,
         "turn_limit": turn_limit,
         "next_tick_at": next_tick_at,
+        "game_over": game_over,
+        "is_final": game_over,
+        "winner": final["winner"] if game_over else None,
+        "score_weights": final["score_weights"] if game_over else dict(weights),
         "standings": standings,
         "display": {
+            "header": header,
             "resource_abbrev": RESOURCE_ABBREV,
             "rows_key": "standings",
             "columns": ["rank", "display_name", "score", "energy", "food", "goods", "utilization"],

@@ -476,25 +476,47 @@ def _snapshot_holdings(cur, turn: int, before_holdings: dict, production: dict, 
                 "goods_wasted": round(wasted["goods"], 2),
             })
 
+FINAL_SCORES_EVENT = "game.final_scores"
+
 def _calculate_final_scores() -> list:
     """
     Weighted game score per player: config/game_config.yaml's score_weights
     applied to each player's total stored energy/food/goods, highest wins --
     same formula xsettlers_mcp/tools/organization_tools.py's show_game_status
     uses, so the winner here always matches what was checkable mid-game via
-    that tool. Returns the ranked standings (also printed, for the server log).
+    that tool.
+
+    The result is PERSISTED as a `game.final_scores` event, not merely printed.
+    A game whose outcome exists only in a server log is a game nobody can be
+    told they won: players need the result back, and replay/audit needs the
+    scoreboard as it stood at the final whistle rather than something
+    recomputed later against state that may have moved on. The payload carries
+    the full breakdown (rank, score, per-resource totals, and the weights used
+    to derive it) so the scoreboard is self-explaining without re-reading
+    config.
+
+    Idempotent: writing twice would give a game two endings, so an existing
+    event for this game is left alone and returned as-is.
     """
-    weights = load_config().game.score_weights
     conn = get_connection(); cur = conn.cursor()
+    existing = cur.execute(
+        "SELECT payload FROM events WHERE event_type=? ORDER BY id LIMIT 1",
+        (FINAL_SCORES_EVENT,)).fetchone()
+    if existing:
+        conn.close()
+        return json.loads(existing["payload"])["standings"]
+
+    weights = load_config().game.score_weights
     cur.execute("""
-        SELECT o.player_id, p.display_name,
+        SELECT p.id AS player_id, p.display_name,
                SUM(pods.energy_stored) AS energy,
                SUM(pods.food_stored) AS food,
-               SUM(pods.goods_stored) AS goods
-        FROM pods
-        JOIN organizations o ON o.id = pods.org_id
-        JOIN players p ON p.id = o.player_id
-        GROUP BY o.player_id
+               SUM(pods.goods_stored) AS goods,
+               SUM(pods.storage_capacity) AS capacity
+        FROM players p
+        LEFT JOIN organizations o ON o.player_id = p.id
+        LEFT JOIN pods ON pods.org_id = o.id
+        GROUP BY p.id
     """)
     standings = []
     for row in cur.fetchall():
@@ -502,11 +524,35 @@ def _calculate_final_scores() -> list:
         score = (energy * weights.get("energy", 0) + food * weights.get("food", 0)
                  + goods * weights.get("goods", 0))
         standings.append({"player_id": row["player_id"], "display_name": row["display_name"],
-                          "score": score})
-    conn.close()
+                          "score": score, "energy": energy, "food": food, "goods": goods,
+                          "total": energy + food + goods, "capacity": row["capacity"] or 0})
     standings.sort(key=lambda s: s["score"], reverse=True)
+    for rank, s in enumerate(standings, start=1):
+        s["rank"] = rank
+
+    final_turn = cur.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()["current_turn"]
+    _record_event_direct(cur, final_turn, FINAL_SCORES_EVENT,
+                         payload={"final_turn": final_turn, "turn_limit": TURN_LIMIT,
+                                  "score_weights": dict(weights),
+                                  "winner": standings[0]["display_name"] if standings else None,
+                                  "standings": standings})
+    conn.commit(); conn.close()
     for s in standings:
-        print(f"  {s['display_name']}: {s['score']:.1f} pts")
+        print(f"  {s['rank']}. {s['display_name']}: {s['score']:.1f} pts")
+    return standings
+
+
+def get_final_scores() -> dict:
+    """
+    The recorded end-of-game scoreboard, or None if the game hasn't ended.
+    Reads the persisted `game.final_scores` event rather than recomputing, so
+    what a player is shown afterwards is what actually happened at the whistle.
+    """
+    conn = get_connection()
+    row = conn.execute("SELECT payload FROM events WHERE event_type=? ORDER BY id LIMIT 1",
+                       (FINAL_SCORES_EVENT,)).fetchone()
+    conn.close()
+    return json.loads(row["payload"]) if row else None
     return standings
 
 def _handle_colonize(cur, org, current_turn):

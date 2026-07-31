@@ -125,11 +125,31 @@ Slack → Slackbot AI → MCP tool call
 
 # Python Implementation
 
-The standard library is the `mcp` Python SDK. A minimal server skeleton:
+> **Superseded: the transport is streamable HTTP, not stdio.** The sketch below
+> shows `stdio_server()`, which was the plan when this was written and is
+> **not** what the server does. It was replaced on 2026-07-22:
+> `xsettlers_mcp/server.py` builds a `StreamableHTTPSessionManager`, wraps it in
+> Starlette, and serves `POST /mcp` and `GET /health` on port 8080 via uvicorn.
+> stdio only works for a client that spawns the server process itself over piped
+> stdin/stdout, which a remotely-hosted deployment cannot be — and remote
+> hosting is the entire point of the Fly.io selection further down this page.
+> **There is no stdio path anywhere in the codebase.**
+>
+> Two further corrections to the skeleton: the local package is
+> `xsettlers_mcp/`, not `mcp/` (renamed to stop it shadowing the `mcp` SDK it
+> imports), and the tool argument is `player_token`, not `slack_user_id`
+> (renamed the same day identity stopped being Slack-specific).
+>
+> The `Server` / `@app.list_tools()` / `@app.call_tool()` shape below is still
+> accurate — only the transport, package name, and argument name changed. Read
+> `xsettlers_mcp/server.py` for what is actually served.
+
+The standard library is the `mcp` Python SDK. A minimal server skeleton
+(historical — see the note above before copying anything from it):
 
 ```python
 from mcp.server import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.stdio import stdio_server      # SUPERSEDED: now streamable HTTP
 from mcp import types
 
 app = Server("xsettlers")

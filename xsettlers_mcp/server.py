@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import hmac
+import json
 import os
 import uvicorn
 from starlette.applications import Starlette
@@ -179,8 +180,27 @@ async def call_tool(name: str, arguments: dict):
     }
     fn = dispatch.get(name)
     if not fn:
-        return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
-    return [types.TextContent(type="text", text=str(fn(**arguments)))]
+        return [types.TextContent(type="text",
+                                  text=json.dumps({"error": f"Unknown tool: {name}"}))]
+    return [types.TextContent(type="text", text=_as_json(fn(**arguments)))]
+
+
+def _as_json(result) -> str:
+    """
+    Serialize a tool's return value as JSON.
+
+    Tools return plain dicts and lists, but this used to go over the wire as
+    `str(result)` -- Python's repr, with single quotes and True/None. An LLM
+    client reads that fine, which is why it survived this long; anything that
+    actually parses the payload cannot, since it is not JSON and never was.
+    Responses are JSON now, which is what a tool result is supposed to be.
+
+    `default=str` is a backstop, not a design: every field a tool returns today
+    is a primitive out of sqlite3, but a response that fails to serialize would
+    fail the whole call, and losing type fidelity on some future stray value is
+    a far better outcome than a tool that errors at the transport layer.
+    """
+    return json.dumps(result, default=str)
 
 # Streamable HTTP transport -- deployed on Fly.io (see fly.toml), which routes
 # network traffic to internal_port 8080; stdio (piped stdin/stdout) only works

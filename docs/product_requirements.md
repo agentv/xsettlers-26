@@ -2,7 +2,7 @@
 
 # Overview
 
-XSettlers is a multiplayer, turn-based space strategy game played entirely through Slack via an MCP server. Players manage organizations (ships and colonies) across a 3D sector map, competing to expand territory, produce resources, and outlast rivals.
+XSettlers is a multiplayer, turn-based space strategy game played through any MCP-speaking client (Slack is the intended home, but nothing in the server is Slack-specific). Players manage organizations (ships and colonies) across a 3D sector map, competing to expand territory, produce resources, and outlast rivals.
 
 ---
 
@@ -52,29 +52,30 @@ Players control **organizations** — the fundamental unit of agency. Two types:
 # Pods
 
 * Each organization carries one or more **pods**.
-* A pod has no intrinsic type — it is defined entirely by its **mission**.
-* Valid pod missions: `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`.
-* The colloquial names *energy*, *farm*, and *factory* map to the `produce_energy`, `produce_food`, and `produce_goods` missions respectively — useful in UI and narrative, not a data field.
-* Each pod has storage (`storage_current`, `storage_capacity`), `energy_consumption`, and `food_consumption`.
-* Pods execute their mission every turn regardless of whether their parent org is in transit or stationary.
+* A pod has no intrinsic type — it is defined entirely by its **task**.
+* Valid pod tasks: `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`.
+* **Pods have `task`; organizations have `mission`.** Two different concepts, two different words, deliberately (renamed 2026-07-31 — one word for both was actively misleading in status reports, where an idle *ship* sat above a table of busy *pods*).
+* The colloquial names *energy*, *farm*, and *factory* map to the `produce_energy`, `produce_food`, and `produce_goods` tasks respectively — useful in UI and narrative, not a data field.
+* Each pod has generic storage (`storage_capacity` plus `energy_stored`/`food_stored`/`goods_stored`) — a pod holds any mix of resources regardless of its own task, so retasking never hides or relabels existing cargo.
+* Pods execute their task every turn regardless of whether their parent org is in transit or stationary, with two exceptions in transit: energy cannot be harvested (no sector to harvest from) and scans do not report.
 
-## Pod Missions — Full Roster
+## Pod Tasks — Full Roster
 
-The following pod missions are defined in the game model. Only a subset are active in any given game instance; the rest are deferred for future implementation.
+The following pod tasks are defined in the game model. Only a subset are active in any given game instance; the rest are deferred for future implementation.
 
-| Pod Mission | Colloquial Name | Status | Description |
+| Pod Task | Colloquial Name | Status | Description |
 |---|---|---|---|
 | `idle` | — | **Active** | Pod does nothing. Default state. |
-| `produce_energy` | energy | **Active** | Produces energy each turn. Powers other pods and contributes to movement capacity. |
-| `produce_food` | farm | **Active** | Produces food each turn based on sector `food_capacity`. Consumes energy but not food. |
-| `produce_goods` | factory | **Active** | Produces goods each turn based on sector `goods_capacity`. Consumes energy and food. Goods are required to build new pods or convert ships to colonies. |
-| `scan` | scanner | **Active** | Scans a designated adjacent sector at end of turn. Requires a scan target to be set via `set_pod_scan_target`. Ships in transit cannot scan. |
+| `produce_energy` | energy | **Active** | Harvests energy from the organization's current sector — the only resource drawn from the map, and the sector depletes as it is taken. Consumes food. |
+| `produce_food` | farm | **Active** | Manufactures food each turn from stored resources — **not** sector-sourced. Consumes energy and goods. |
+| `produce_goods` | factory | **Active** | Manufactures goods each turn from stored resources — **not** sector-sourced. Consumes energy and food, and produces at half the rate of the other two. The highest-scoring resource. |
+| `scan` | scanner | **Active** | Scans one sector at end of turn, aimed by bearing via `set_pod_scan_bearing`. Consumes food. Suppressed (but still charged) while in transit. |
 | `crew` | crew | Deferred | General-purpose pod. Flexible but less productive than specialized pods. |
 | `cargo` | cargo | Deferred | Stores goods, energy, and food. Does not consume energy but consumes food for its crew. |
 | `defend` | defense | Deferred | Absorbs damage from attackers. Requires combat system. |
 | `attack` | attack | Deferred | Attacks other ships and colonies. Requires combat system. |
 
-**POC active missions:** `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. All other missions are recognized in the data model but are not instantiated in any current game instance.
+**POC active tasks:** `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. All other entries above are recognized in the data model but are not instantiated in any current game instance.
 
 **Platform note:** The original XSettlers architecture (xsettlers-game-papi) was designed as a Mule application with a System/Process/Experience API layer and an HTML5/D3 front end. That architecture is superseded. The current stack is **Python · SpatiaLite · MCP SDK · Slack** — see [MCP Server Layer Design](mcp_server_layer_design.md) for the current design.
 
@@ -101,8 +102,8 @@ The following pod missions are defined in the game model. Only a subset are acti
 
 # Scanning
 
-* Scanning is performed by pods assigned the `scan` mission — it is not a discrete player action.
-* A scan pod must have a **scan target** set via `set_pod_scan_target(pod_id, sector_id)` before end of turn for the scan to execute.
+* Scanning is performed at end of turn by an organization's own sensors and by any pods on the `scan` task — it is not a discrete player action.
+* A scanner must be **aimed** before end of turn for the scan to execute — via `set_org_scan_bearing` for an organization's own sensors, or `set_pod_scan_bearing` for a pod on the `scan` task. An unaimed scanner still pays its food cost and reveals nothing.
 * Scan range is **fixed at 2 sectors** (Euclidean distance ≤ 2), derived from `get_scan_range(org_id)` — always call it, never hard-code the number. Raised from 1 on 2026-07-31: under a Euclidean metric, range 1 reaches only the four orthogonal neighbours, because a diagonal is √2 ≈ 1.41. Being refused a scan of the sector diagonally adjacent reads as broken. Range 2 reaches **12 sectors** — 4 orthogonal, 4 diagonal, 4 two-out orthogonal — the smallest radius at which scanning behaves the way a player expects.
 * **A scan is aimed by a bearing relative to the scanner, not by absolute coordinates** (2026-07-31). Sensors are mounted on the thing that carries them: they look a fixed direction and distance from wherever it currently is, and a ship flying away from a sector does not keep seeing it. Two consequences: a scan pattern survives a move with no re-aiming, and range becomes a permanent property of the aim rather than something that can silently stop being true — so an out-of-range aim is **rejected when set** instead of failing at resolution.
 * **Bearings**: `N NE E SE S SW W NW` (distance 1 or √2) and `N2 E2 S2 W2` (distance 2) — the 12 names map exactly onto the 12 sectors reachable at range 2. Explicit `offset_x/y/z` is always available for anything the table doesn't name (including off-plane targets). **North is −y**, matching the neighborhood map's rendering; arbitrary but fixed.
@@ -144,15 +145,19 @@ This section is the canonical design-authority inventory of every action a playe
 
 Assigns a mission to one of the player's organizations. Valid missions are: `idle`, `move`, `colonize`, `defend`, `attack`. Colonies cannot be assigned the `move` mission. Setting a ship's mission to `colonize` causes it to convert to a colony at end of turn if it remains in the target sector.
 
-### Set Pod Mission (`set_pod_mission`)
+### Set Pod Task (`set_pod_task`)
 
-Assigns a mission to a pod belonging to the player's organization. Valid missions: `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. Pod missions take effect immediately and persist until changed. Pods continue running their mission regardless of whether their parent ship is in transit (except `scan`, which is suppressed during transit).
+Assigns a task to a pod belonging to the player's organization. Valid tasks: `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. Tasks take effect immediately and persist until changed. Pods continue running their task regardless of whether their parent ship is in transit (except `scan`, whose reveal is suppressed during transit, and `produce_energy`, which has no sector to draw from).
 
-When `mission = scan`, a `target_sector_id` may optionally be supplied in the same call. If omitted, the pod enters scan mission with no target — the player must follow up with `set_pod_scan_target` before end of turn for the scan to execute.
+For `task = scan`, an aim may optionally be supplied in the same call as either a compass `bearing` or an explicit `offset_x/y/z`. If omitted, the pod takes the scan task with no aim — `set_pod_scan_bearing` must follow before end of turn, or the pod pays its food cost and reveals nothing.
 
-### Set Pod Scan Target (`set_pod_scan_target`)
+### Set Pod Scan Bearing (`set_pod_scan_bearing`)
 
-Assigns or changes the scan target sector for a pod already in `scan` mission. Can be called independently at any time before end of turn. The target sector must be within scan range (POC: Euclidean distance ≤ 1) at the time of end-of-turn resolution — not at the time of assignment. If the target is out of range at resolution, the scan does not execute and the player is alerted.
+Aims a pod already on the `scan` task. See [Scanning](#scanning) for the bearing vocabulary. An out-of-range aim is **rejected when set** rather than at resolution: an aim is an offset, so its range is fixed and cannot drift.
+
+### Rename Organization (`rename_organization`)
+
+Gives one of the player's own ships or colonies a name of their choosing (max 24 characters). Names must be unique among that player's own organizations, case-insensitively — a name is how a player issues an order, so an ambiguous one is not a name. Uniqueness is per player, not global. Defaults are `S1`…`Sn` for ships and `C1` for a colony.
 
 ---
 
@@ -174,13 +179,15 @@ Available while a ship is in transit. Rubber-bands the ship back to its `origin_
 
 ## Scanning
 
-### Set Pod Mission to Scan (`set_pod_mission` with `mission=scan`)
+### Set Organization Scan Bearing (`set_org_scan_bearing`)
 
-Assigns the `scan` mission to a pod. Optionally includes a `target_sector_id` in the same call. If the target is not provided here, `set_pod_scan_target` must be called separately before end of turn.
+Aims an organization's **own** sensors. Every ship and colony can scan one sector per turn on its own account — a ship's bridge, a colony's headquarters — without dedicating a pod to it. Identical in every rule to a scan pod: same food cost, same range, same transit suppression. An organization that also carries scan pods gets both, and each pays its own way.
 
-### Set Pod Scan Target (`set_pod_scan_target`)
+### Set Pod Scan Bearing (`set_pod_scan_bearing`)
 
-Designates the sector to be scanned by a pod in `scan` mission. Can be called any time before end of turn. Scan executes at end of turn if the target is within range; otherwise the player is alerted and no scan occurs.
+Aims a pod already on the `scan` task. Same vocabulary and same rules as the organization's own sensors — scanning is scanning, whoever carries the equipment.
+
+Both take either a compass `bearing` or an explicit `offset_x/y/z`, and passing neither clears the aim (and stops paying for it).
 
 ---
 

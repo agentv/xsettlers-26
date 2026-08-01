@@ -18,121 +18,181 @@ ships follow, carrying the people, equipment, and resources needed to claim
 and shape whatever they find.
 
 You command one of these fledgling societies. You control a fleet of ships
-that move through a grid of space sectors, each with its own capacity to
-produce energy, food, and goods. Ships can be converted into permanent
-colonies — sacrificing mobility for the ability to produce at greater scale.
-Your colonies in turn fuel the construction of new ships, and the cycle of
-expansion continues.
+that move through a grid of space sectors, harvesting energy and turning it
+into food and goods. Ships can be converted into permanent colonies —
+trading mobility for a fixed foothold.
 
 You are not alone. Rival civilizations are out there too, expanding from
 their own home worlds, scouting the same promising sectors, racing toward the
 same rich territories.
 
-**The player who accumulates the most resources by the end of the game
-wins.**
+**The player holding the most valuable stockpile at the end of the game
+wins** — and value is not the same as volume. See [Winning](#winning).
 
 ---
 
 ## The Basics
 
-The game is played turn by turn, through Slack. Each turn, you issue
-commands to your ships and colonies whenever you're ready — there's no
-real-time pressure. Once every player has declared they're done for the
-turn, the turn resolves all at once: ships that were traveling arrive, pods
-produce, scans reveal what they've found, and the universe advances by one
-tick.
+The game is played turn by turn. You issue commands whenever you're ready —
+there's no real-time pressure. The turn resolves on a fixed timer, or early
+the moment every player has declared they're done: ships that were traveling
+arrive, pods produce, scans reveal what they found, and the universe advances
+by one tick.
+
+You play through an **MCP client** — Slack is the intended home, but the
+server doesn't care which client you use.
 
 Everything you own falls into one of two kinds of **organizations**:
 
-- **Ships** — mobile. They can move across the map, scan the space around
-  them, and carry pods that keep producing the whole time.
-- **Colonies** — stationary. Once a ship converts into a colony, it can never
+- **Ships** — mobile. They move across the map and carry pods that keep
+  producing the whole time.
+- **Colonies** — stationary. Once a ship converts into a colony it can never
   move again, but it becomes a fixed, permanent base of operations.
 
-Every organization — ship or colony — carries **pods**. Pods are what
-actually do the productive work.
+Every organization — ship or colony — carries **pods**, and every
+organization also has **sensors of its own** (see
+[Scanning & Discovery](#scanning--discovery)).
+
+You can rename any ship or colony to whatever you like. Defaults are `S1`…`Sn`
+and `C1`; names must be unique within your own fleet, because a name is how
+you give an order.
 
 ---
 
 ## Pods: What Actually Produces
 
-A pod's job is defined by its **mission**, which you can reassign at any
-time:
+A pod's job is its **task**, which you can reassign at any time. (Note the
+vocabulary: *pods* have **tasks**, *organizations* have **missions**. They are
+different things and the game uses different words for them deliberately.)
 
-| Mission | What it does |
+| Task | What it does |
 |---|---|
-| `produce_energy` | Generates energy every turn. Energy powers everything else. |
-| `produce_food` | Generates food every turn. |
-| `produce_goods` | Generates goods every turn — this is also where raw-material extraction ("mining") lives for now: there's no separate mining step in the current game, produce_goods covers both. A distinct mining mechanic may be split out in a future version. |
-| `scan` | Looks at a nearby sector and reports back what's there. |
-| `idle` | Does nothing. The default until you assign it something else. |
+| `produce_energy` | Harvests energy from the sector the organization is sitting in. This is the only thing drawn from the map itself — and the sector runs down as you take it. |
+| `produce_food` | Manufactures food. Costs energy and goods to run. |
+| `produce_goods` | Manufactures goods. Costs energy and food to run. Slower than the other two, and the most valuable thing you can make. |
+| `scan` | Looks at a nearby sector and reports what's there. Costs food. |
+| `idle` | Does nothing, and costs nothing. |
 
-Pods keep running their assigned mission every turn, whether their ship is
-sitting still or in the middle of a journey — **with one exception**: a pod
-on `scan` mission is suppressed while its ship is traveling. You can't scan
-mid-flight.
+Two things worth understanding early, because they shape everything:
 
-There's no setup required to get started — every ship begins the game with
-its pods already producing.
+**Only energy comes from the map.** Food and goods are manufactured out of
+what you already hold. Energy is therefore the input to your whole economy —
+and the sector you're standing on depletes as you draw on it. Sit still long
+enough and the ground runs dry.
+
+**Storage is shared and finite.** Each pod has a capacity, and production
+that has nowhere to go is simply lost. A full fleet produces nothing of
+value, so watch how full you are, not just what you're making.
+
+Pods keep running their task every turn, whether their ship is sitting still
+or mid-journey — with two exceptions while traveling: energy can't be
+harvested (there's no sector to harvest from), and scans don't report back.
 
 ---
 
 ## Movement
 
-When you send a ship somewhere, it doesn't teleport — it takes a number of
+When you send a ship somewhere it doesn't teleport — it takes a number of
 turns proportional to the distance. While it's en route:
 
-- The ship is considered **in transit** and is not sitting in any normal
-  sector — you'll see it flagged as such.
-- It **cannot** be scanned from, and it can't be given a new mission until it
-  arrives (or you cancel the move).
-- Its produce pods (`produce_energy` / `produce_food` / `produce_goods`)
-  **keep working** the entire time. A ship en route is not a ship on pause —
-  it's still generating resources for you every turn.
+- The ship is **in transit**, sitting in no normal sector; you'll see it
+  flagged as such.
+- It **can't be given a new mission**, and its pods can't be retasked, until
+  it arrives — or you cancel the move. Set anything you want it doing on
+  arrival *before* you send it.
+- Its food and goods pods **keep working** the entire time, spending down the
+  energy it's carrying with no way to replace it. A long voyage can arrive
+  with empty tanks and no way to restart its own economy.
 
-You can preview a move before committing to it, to see how many turns it'll
-take and when you'd arrive. Once committed, you can still cancel a move while
-it's in progress — the ship rubber-bands back to where it started, with no
-partial credit for the distance it covered.
+Distance is measured in a straight line, and travel time rounds up. **A
+diagonal move costs the same as three straight steps** — moving one sector
+across and one up is a distance of about 1.41, but two diagonal steps is 2.83,
+which rounds to 3 turns. Straight lines are consistently better value.
+
+You can preview a move before committing to see how long it takes. Once
+committed you can still cancel while it's in progress — the ship rubber-bands
+back to where it started, with no credit for the distance covered.
 
 ---
 
 ## Colonizing
 
-Any ship can be ordered to colonize the sector it's currently sitting in.
-Once that completes, the ship becomes a permanent colony there: it loses the
-ability to move, but the tradeoff is a foothold you can build around
-indefinitely. Colonies keep producing through their pods exactly like ships
-do, and once you commit a ship to colonizing, it's locked in for a short
-transition window before the conversion finishes.
+Any ship can be ordered to colonize the sector it's sitting in. Once that
+completes the ship becomes a permanent colony there: it loses the ability to
+move, but you gain a foothold you can build around. Colonies produce through
+their pods exactly like ships do. Committing a ship to colonize locks it for
+a short transition window before the conversion finishes.
+
+Choose the ground carefully. A colony can never relocate, so it lives or dies
+on the sector you left it in — and that sector depletes like any other.
 
 ---
 
 ## Scanning & Discovery
 
-Space is mostly unknown at the start of the game. You only know what your
-ships have actually looked at. A pod on `scan` mission, aimed at a nearby
-sector, reveals that sector's contents at the end of the turn — but only if
-its ship is stationary and the target is close enough. Sectors you've
-scanned stay visible for a while, but that knowledge fades over time if you
-don't refresh it — so revisiting territory matters, not just discovering it
-once.
+Space is unknown at the start. You only know what you have actually looked at.
+
+**Every organization can scan one sector per turn on its own account** — a
+ship's bridge, a colony's headquarters — without dedicating a pod to it. Pods
+can *additionally* be put on the `scan` task for more coverage. The rules are
+identical either way; the only difference is what carries the equipment. Each
+scan costs food.
+
+You aim a scan by **bearing** — a direction and distance relative to the
+scanner, not a fixed map coordinate:
+
+```
+        N2
+    NW  N  NE
+W2  W   ·   E   E2
+    SW  S  SE
+        S2
+```
+
+Those twelve bearings are exactly what a scanner can reach. `N`/`E`/`S`/`W`
+are one sector away, the diagonals about 1.41, and `N2`/`E2`/`S2`/`W2` are two.
+Anything further is out of range and will be refused when you set it.
+
+Because a bearing is relative, **it travels with the ship**. Point a scout
+north-east once and it keeps scanning north-east wherever it goes, with no
+re-aiming after a move. A scan reveals only the sector you aimed at — range
+governs how far you can reach, not how much you see.
+
+Ships in transit can be aimed, but won't report until they land.
+
+**Knowledge fades.** A sector you aren't occupying loses confidence every
+turn, and after five turns without a fresh look it **blinks off your map
+entirely** — indistinguishable from somewhere you've never been. Revisiting
+territory matters, not just discovering it once. Holding a scan bearing on a
+sector keeps it visible indefinitely.
 
 ---
 
 ## Winning
 
 The game runs for a fixed number of turns. At the end of the last turn,
-everything you've accumulated — every unit of energy, food, and goods sitting
-in storage across every ship and colony you own — is added up into a single
-score.
+everything in storage across every ship and colony you own is scored.
 
-**Highest total wins.**
+**Value is not volume.** Each resource is weighted:
 
-There's no partial credit for resources you produced but haven't banked, and
-no bonus for territory alone — production is what counts. Explore fast
-enough to find good sectors, but not so aggressively that your pods sit idle
-while you're still deciding where to go.
+| Resource | Points per unit |
+|---|---|
+| Goods | **2** |
+| Food | **1** |
+| Energy | **0** |
+
+Energy scores nothing. It is a *means* — the input that makes food and goods
+possible — not an asset. A hold full of energy at the final whistle is worth
+precisely nothing, so the endgame question is how much of it you managed to
+convert before time ran out.
+
+Goods are worth double food and are the slowest thing to produce. That
+tension is the game: the most valuable resource is the one you can make least
+of, and making it costs you both of the others.
+
+**Highest score wins.** There's no bonus for territory, for the number of
+colonies you hold, or for sectors explored — only for what's in the hold when
+the music stops.
 
 ---
 
@@ -140,52 +200,66 @@ while you're still deciding where to go.
 
 | You want to... | Command |
 |---|---|
+| See which games you can join | `list_scenarios` |
+| Start or join one | `select_scenario` |
 | See how long a move would take, without committing | `preview_move` |
 | Actually move a ship | `confirm_move` |
 | Change your mind mid-flight | `cancel_move` |
-| Give an organization a new mission (move/colonize/defend/attack/idle) | `set_mission` |
-| Change what a pod is doing | `set_pod_mission` |
-| Point a scan pod at a target | `set_pod_scan_target` |
-| Check on one of your ships or colonies | `show_organization` |
-| Look at nearby sectors | `show_sector_neighborhood` |
-| See your overall standing | `show_game_status` |
+| Give an organization a mission (move/colonize/defend/attack/idle) | `set_mission` |
+| Change what a pod is doing | `set_pod_task` |
+| Aim an organization's own sensors | `set_org_scan_bearing` |
+| Aim a scan pod | `set_pod_scan_bearing` |
+| Name a ship or colony | `rename_organization` |
+| Check on one ship or colony | `show_organization` |
+| Review your whole fleet | `show_civilization_status` |
+| Look at the space around something | `show_sector_neighborhood` |
+| See the standings | `show_game_status` |
 | Signal you're done for this turn | `declare_end_turn` |
 | Take that back | `rescind_end_turn` |
 
-Full technical detail on each of these lives in
-[Product Requirements](product_requirements.md).
+Every command takes your `player_token` as its first argument. Full technical
+detail lives in [Product Requirements](product_requirements.md).
 
 ---
 
-## Scenario One: Outbreak
+## Scenarios
 
-> This section describes `config/game1.yaml` ("Outbreak"), a distinct
-> scenario alongside the no-colony MVP default (`config/game0.yaml`,
-> "Diaspora"). Both are selectable via the `list_scenarios` and
-> `select_scenario` MCP tools — see [MCP Server Layer Design](mcp_server_layer_design.md)
-> for the gateway/selection flow. (Naming note: this scenario was originally
-> sketched under the name "Diaspora" before either scenario file existed;
-> that name now belongs to `game0.yaml` instead — see `docs/TODO.md` for
-> the history.)
+A scenario decides who plays, where they start, what they start with, and how
+rich they start. Three ship today; `list_scenarios` shows the ones you're
+seated in.
+
+### Solo (`game_solo`)
+
+One player, no rivals. Eight ships plus an established colony at
+`(10,10,0)`, everything starting at 30% of storage capacity — so production
+actually matters from turn 1. Because you're the only player, declaring end of
+turn advances the clock immediately instead of waiting out the timer, which
+makes this much the best scenario for learning the game or testing a client.
+
+### Diaspora (`game0`)
+
+Two players, 8 ships each, **no starting colony** — everyone begins mobile and
+picks their own moment to plant roots. Home sectors are 25 sectors apart. Holds
+start full.
+
+### Outbreak (`game1`)
 
 One foothold, and a fleet to expand from it.
 
 - **Players:** 2.
-- **Starting colony:** each player begins with one colony already
-  established at their home sector — a fixed foothold from turn 1.
-- **Starting fleet:** 8 ships per player, all identical, all spawned
-  alongside the home colony on turn 1.
-- **Pods:** every organization — each ship and the home colony alike —
-  carries the same 6-pod loadout: 2 producing energy, 2 producing goods,
-  2 producing food, all active and producing from turn 1. No setup needed
-  to get started.
-- **Starting positions:** home sectors are set well apart (12.7 sectors,
-  Euclidean, in the current layout) — far enough for a real exploration
-  phase, close enough that contact with your rival is likely mid-game.
-- **Length:** 20 turns, then the game ends and scores are tallied.
-- **How you win:** same as always — total resources accumulated across every
-  ship and colony you own, highest score at the end of turn 20 takes it.
+- **Starting colony:** each player begins with a colony already established at
+  their home sector — a fixed foothold from turn 1.
+- **Starting fleet:** 8 ships per player, all identical, spawned alongside the
+  home colony.
+- **Pods:** every organization — each ship and the home colony alike — carries
+  the same 6-pod loadout: 2 energy, 2 goods, 2 food, all producing from turn 1.
+- **Starting positions:** home sectors about 12.7 sectors apart — far enough
+  for a real exploration phase, close enough that contact is likely mid-game.
+- **Length:** 20 turns, then scores are tallied.
 
-The name is a placeholder for the vibe, not a locked design: this is the
-scenario we're using to find out how much a fleet built out from a single
-foothold can actually build in 20 turns.
+Holds start full in Outbreak, which has a consequence worth knowing: a fleet
+at capacity can't accumulate anything, so early production is wasted until you
+spend something. Solo starts lean deliberately to avoid that.
+
+> *Naming note: Outbreak was originally sketched under the name "Diaspora"
+> before either scenario file existed. That name now belongs to `game0`.*

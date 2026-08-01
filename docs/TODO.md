@@ -26,8 +26,8 @@ exist.
 
 * [ ] **Is energy production meant to be suppressed in transit?** Observed in play-testing 2026-07-30: a ship with `mission='move'` reports `E:0, F:20, G:10` — pod tasking unchanged (still 2 energy pods), but energy output stops while food and goods continue. Since food and goods each consume energy to run (`engine/production.py`'s recipes) and energy is the one input that needs none, a long voyage burns down its carried energy with no way to replenish it, and can arrive unable to restart its own economy. That is either a nice hidden cost of exploration or an accident of how transit suppression was written. Not yet traced through `engine/turn.py` — decide which it is before treating it as a rule.
 
-* [ ] **Player-settable organization names** — no tool exists to rename an org post-bootstrap (`name` is written once at bootstrap and never touched again by any tool in `organization_tools.py`). Needs a new tool, likely `rename_organization(player_token, org_id, name)` — ownership-gated like everything else in that module, with some not-yet-decided sanity bound on length/characters. First instance of a broader question worth keeping in mind: `mission` is currently the only org characteristic a player can edit post-bootstrap (via `set_mission`/`set_pod_mission`) — if more editable characteristics get added later, worth revisiting whether they each get their own bespoke tool or start warranting a more general "edit organization" entry point.
-* [ ] `organization_tools.py` — `set_pod_mission(mission='scan')`: if the parent ship is currently in transit (`mission == 'move'`), allow the assignment but return a warning that the scan pod will be suppressed until arrival.
+* [ ] **A general "edit organization" entry point may eventually be warranted.** `rename_organization` was built 2026-07-31, and `mission`/`task` are settable, so a player can now edit three things about an org — each via its own bespoke tool. If more editable characteristics arrive, revisit whether they each get a tool or whether one general editor is the better shape. Not urgent; noted so the third bespoke tool isn't followed by a fourth without anyone asking.
+* [ ] `organization_tools.py` — `set_pod_task(task='scan')`: if the parent ship is currently in transit, allow the assignment but return a warning that the scan will be suppressed (though still charged) until arrival.
 * [ ] Consider a DB-level `CHECK` constraint enforcing `org_type != 'colony' OR is_mobile = 0` on `organizations` — currently only enforced by application code (bootstrap + colonize resolution), not the schema itself.
 
 ## Distance metric — Euclidean for the MVP, revisit later
@@ -263,5 +263,5 @@ The long-term vision (see `docs/dev_history.md` for the architectural groundwork
 
 Core system is built (see `docs/dev_history.md`'s 2026-07-30 entry: schema, registry, execution hook, `assign_npc_profile()`). Still open:
 
-* [ ] Only one registered strategy (`fan_out_consolidate`) exists — no `set_mission`/`set_pod_mission`-driven strategies yet; the registry supports them, nothing uses them.
+* [ ] Only one registered strategy (`fan_out_consolidate`) exists — no `set_mission`/`set_pod_task`-driven strategies yet; the registry supports them, nothing uses them.
 * [ ] No roster-time NPC assignment — still a manual `assign_npc_profile()` call, not wired into any lobby/bootstrap flow (see "Multi-game lobby" above).

@@ -1,5 +1,15 @@
 # XSettlers Task Journal
 
+> **Superseded — retained for early project history only (2026-07-31).**
+> This journal stopped being maintained around 2026-07-15 and its contents are
+> now stale in ways that mislead: the one "Open / In Progress" row below claims
+> `fly.toml` still needs volume configuration, but the volume was created and
+> the app deployed on 2026-07-29, and the `mcp/tools/` path it mentions was
+> renamed to `xsettlers_mcp/tools/` on 2026-07-22. Nothing here is authoritative.
+>
+> Open work now lives in [Known TODOs](TODO.md); completed work and the
+> reasoning behind settled decisions live in [Dev History](dev_history.md).
+
 New entries added at top. Completed tasks include derived information captured at time of completion.
 
 **Hosting: Fly.io.** That's the only deployment target for XSettlers — see `docs/mcp_server_layer_design.md` and `fly.toml`.

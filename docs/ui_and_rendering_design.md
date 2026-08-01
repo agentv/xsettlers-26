@@ -9,7 +9,7 @@
 These are the four authoritative rules governing what a player can see. All view models and renderers must respect them.
 
 1. **Occupation** — An org physically present in a sector grants full, current detail on that sector. The player's `confidence` in that sector is pinned at 100 as long as any of their orgs occupies it.
-2. **Scan** — Executed by a pod on `scan` mission at end of turn, granting full detail on the target sector at the moment of resolution. Confidence starts decaying from that point forward per the normal fog decay rate (`CONFIDENCE_DECAY_PER_TURN`).
+2. **Scan** — Executed at end of turn by an organization's own sensors (every org can scan one sector per turn without a pod) and by any pods on the `scan` task, granting full detail on the target sector at the moment of resolution. Confidence starts decaying from that point forward per the normal fog decay rate (`CONFIDENCE_DECAY_PER_TURN`).
 3. **Fog decay — blink-out** — Any sector not currently occupied loses a flat `CONFIDENCE_DECAY_PER_TURN` points each turn (default 20). At confidence = 0 the sector **leaves the player's view entirely**. There is no degraded "last known" ghost indicator: a sector the player has stopped confirming becomes indistinguishable from one they never visited. The `player_sectors` row survives as history, but every player-facing read filters `confidence > 0`. At the default rate that is five turns from last sighting to gone. (This reverses the earlier ghost-memory design, decided 2026-07-30; see [Data Model & Storage Design](data_model_and_storage_design.md) for why the decay is subtractive rather than proportional.)
 4. **Rival detection** — If a rival org is within the player's scan range at the time of a scan, that org's presence is surfaced with **high priority** in the player view — distinct from ordinary sector data but not a hard alert system.
 
@@ -22,7 +22,7 @@ These are the four authoritative rules governing what a player can see. All view
 > **Superseded: scanning is no longer a player-callable action.** The
 > `scan_sector` tool described below was never built as such. Scanning is a
 > *pod mission*: a player sets a pod to `scan` with a target coordinate
-> (`set_pod_mission` / `set_pod_scan_target` in
+> (`set_pod_task` / `set_pod_scan_bearing` in
 > `xsettlers_mcp/tools/organization_tools.py`), and the engine resolves it at
 > end of turn (`engine/turn.py`, step 3). The range rule, the reveal, and the
 > confidence stamp below all still describe what happens — only the trigger
@@ -57,13 +57,15 @@ These are the four authoritative rules governing what a player can see. All view
 **Location:** `xsettlers_mcp/tools/sector_tools.py`
 
 ```python
+SCAN_RANGE = 2
+
 def get_scan_range(org_id: int) -> int:
     """
     Returns the scan range for an org.
-    POC: always returns 1.
+    POC: always returns SCAN_RANGE, ignoring the org.
     Future: query pods for sensor type and sum range contributions.
     """
-    return 1
+    return SCAN_RANGE
 ```
 
 ---
@@ -87,7 +89,7 @@ Two modes. One view model builder per subject type. Renderers are separate and c
 * Own orgs: full detail.
 * Rival orgs: presence indicated if in a currently visible sector; no internal detail.
 * Resource levels in unoccupied sectors reflect the last scan, not current state.
-* Natural renderer: Slack MCP response (`views/slack_renderer.py`).
+* Natural renderer: an MCP tool response (`views/render.py` today; a richer `views/slack_renderer.py` remains design).
 
 ---
 
@@ -234,7 +236,7 @@ built in `sector_tools.py`; `render_map()` only arranges them.
   double-width glyph (all emoji are), and the target client is a phone.
 * **Absolute coordinates on both axes**, not offsets from the center — a
   coordinate read off the map goes straight into `preview_move` or
-  `set_pod_scan_target` with no arithmetic.
+  `set_pod_scan_bearing` with no arithmetic.
 * **Bounding square, with out-of-range cells blank.** The blank corners trace
   the disc shape of the radius, teaching the player their own range.
 * **One z-plane — the center's.** The model is 3D and distance is 3D

@@ -17,6 +17,22 @@ primary_region = "sjc"
   internal_port = 8080
   protocol = "tcp"
 
+  # The machine does NOT wake on inbound traffic (set 2026-08-01). Fly's
+  # default is to auto-start a stopped machine when a request arrives, which
+  # means a single stray HTTP request restarts the game clock and starts
+  # burning turns with nobody watching -- and this endpoint is public and
+  # unauthenticated, so "nobody will call it" is not a guarantee. Starting the
+  # game is meant to be a decision, not a side effect of someone's port scan.
+  #
+  # Consequence: after `fly machine stop`, the app stays down until explicitly
+  # started -- requests get a connection error, not a cold start. To bring it
+  # back: `fly machine start <id> -a xsettlers`, or `fly deploy`.
+  #
+  # To restore Fly's normal wake-on-request behaviour, set this to true (or
+  # delete the line) and redeploy. That is the whole change; nothing else
+  # depends on it.
+  auto_start_machines = false
+
   [[services.ports]]
     port = 443
     handlers = ["tls", "http"]

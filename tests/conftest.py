@@ -31,11 +31,13 @@ def seed_player(email="player@test.com", player_token="U_P1", display_name="Play
                        (player_token,)).fetchone()["id"]
     conn.close(); return pid
 
-def seed_sector(x=0, y=0, z=0, energy=50.0, food=50.0, goods=50.0):
+def seed_sector(x=0, y=0, z=0, energy=50.0):
+    # Energy is the only capacity a sector has -- food and goods are
+    # manufactured from held stock, never harvested (see db/sectors.py).
     conn = get_connection()
     conn.execute("""INSERT OR IGNORE INTO sectors
-        (coord_x,coord_y,coord_z,energy_capacity,food_capacity,goods_capacity)
-        VALUES (?,?,?,?,?,?)""", (x,y,z,energy,food,goods))
+        (coord_x,coord_y,coord_z,energy_capacity)
+        VALUES (?,?,?,?)""", (x,y,z,energy))
     conn.commit()
     sid = conn.execute("SELECT id FROM sectors WHERE coord_x=? AND coord_y=? AND coord_z=?",
                        (x,y,z)).fetchone()["id"]

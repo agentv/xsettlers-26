@@ -139,7 +139,7 @@ def get_sector_map(player_token: str) -> list:
     if not player:
         conn.close(); return {"error": "Player not found"}
     cur.execute("""SELECT s.id,s.coord_x,s.coord_y,s.coord_z,
-               s.energy_capacity,s.food_capacity,s.goods_capacity,ps.confidence
+               s.energy_capacity,ps.confidence
         FROM sectors s JOIN player_sectors ps ON ps.sector_id=s.id
         WHERE ps.player_id=? AND ps.confidence>0 ORDER BY ps.confidence DESC""", (player["id"],))
     sectors = [dict(r) for r in cur.fetchall()]; conn.close()
@@ -216,7 +216,7 @@ def show_sector_neighborhood(
     r2 = radius ** 2
     cur.execute("""
         SELECT s.id, s.coord_x, s.coord_y, s.coord_z,
-               s.energy_capacity, s.food_capacity, s.goods_capacity, ps.confidence
+               s.energy_capacity, ps.confidence
         FROM sectors s
         JOIN player_sectors ps ON ps.sector_id = s.id
         WHERE ps.player_id = ? AND ps.confidence > 0
@@ -256,8 +256,10 @@ def show_sector_neighborhood(
         # See docstring: live rival positions are only honest where you're standing.
         s["rival_orgs"] = rivals.get(s["id"], 0) if s["confidence"] >= 100 else 0
         s["coords_display"] = f"({s['coord_x']},{s['coord_y']},{s['coord_z']})"
-        s["resources_display"] = (f"E{s['energy_capacity']:.0f}/"
-                                  f"F{s['food_capacity']:.0f}/G{s['goods_capacity']:.0f}")
+        # Energy only: it is the sole resource a sector yields (see
+        # db/sectors.py). This used to read "E1000/F1000/G1000", advertising
+        # two pools that could never be harvested from the map.
+        s["resources_display"] = f"E{s['energy_capacity']:.0f}"
         s["cell"] = _cell_marker(True, s["own_ships"], s["own_colonies"], s["rival_orgs"])
         s["in_plane"] = s["coord_z"] == cz
         if s["in_plane"]:

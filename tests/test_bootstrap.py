@@ -1,6 +1,6 @@
 from db.connection import get_connection
 from db.bootstrap import bootstrap_game
-from db.sectors import DEFAULT_SECTOR_RESOURCE_UNITS
+from db.sectors import MIN_SECTOR_ENERGY, MAX_SECTOR_ENERGY
 
 def _bootstrap(scenario_file="config/game0.yaml", scenario_name="game0"):
     bootstrap_game(scenario_file=scenario_file, scenario_name=scenario_name,
@@ -144,14 +144,12 @@ def test_bootstrap_requires_a_scenario():
 def test_bootstrap_seeds_only_home_sectors_not_full_grid():
     """Sectors are lazily instantiated (see db/sectors.py's reveal_sector) --
     bootstrap should only reveal the two players' home sectors, not a
-    pre-seeded grid, and each should get the flat default resource units."""
+    pre-seeded grid, and each should get a rolled energy capacity in the legal band."""
     _bootstrap()
     conn = get_connection()
-    sectors = conn.execute("""SELECT coord_x,coord_y,coord_z,energy_capacity,
-        food_capacity,goods_capacity FROM sectors WHERE id != -1""").fetchall()
+    sectors = conn.execute("""SELECT coord_x,coord_y,coord_z,energy_capacity
+        FROM sectors WHERE id != -1""").fetchall()
     conn.close()
     assert len(sectors) == 2
     for s in sectors:
-        assert s["energy_capacity"] == DEFAULT_SECTOR_RESOURCE_UNITS
-        assert s["food_capacity"] == DEFAULT_SECTOR_RESOURCE_UNITS
-        assert s["goods_capacity"] == DEFAULT_SECTOR_RESOURCE_UNITS
+        assert MIN_SECTOR_ENERGY <= s["energy_capacity"] <= MAX_SECTOR_ENERGY

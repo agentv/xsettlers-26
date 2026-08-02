@@ -96,3 +96,33 @@ def test_cancel_move_rubber_bands_to_origin():
 def test_cancel_move_not_in_transit():
     pid = seed_player(); oid = seed_sector(); sid = seed_ship(pid, oid)
     assert "error" in cancel_move("U_P1", sid)
+
+
+def test_arrival_reads_a_rivals_established_sector_rather_than_reseeding_it():
+    """Arrival reveals the destination through the same reveal_sector() a scan
+    uses, so a ship landing on ground a rival already stripped inherits what
+    is actually left there -- it does not get a fresh full pool for being the
+    first of *its* owner's units to see the place."""
+    from engine.turn import end_of_turn
+    from db.sectors import reveal_sector
+    finder = seed_player(email="finder@t.com", player_token="U_FINDER")
+    traveller = seed_player(email="trav@t.com", player_token="U_TRAV")
+    # The finder discovers (2,0,0) and works it down to 40 energy.
+    conn = get_connection(); cur = conn.cursor()
+    contested = reveal_sector(cur, finder, 2, 0, 0)
+    cur.execute("UPDATE sectors SET energy_capacity=40.0 WHERE id=?", (contested,))
+    conn.commit(); conn.close()
+
+    home = seed_sector(0, 0, 0)
+    ship = seed_ship(traveller, home, name="Latecomer")
+    confirm_move("U_TRAV", ship, 2, 0, 0)
+    end_of_turn(); end_of_turn(); end_of_turn()   # distance 2, resolved once turn >= 2
+
+    conn = get_connection()
+    landed = conn.execute("SELECT sector_id FROM organizations WHERE id=?",
+                          (ship,)).fetchone()["sector_id"]
+    energy = conn.execute("SELECT energy_capacity AS e FROM sectors WHERE id=?",
+                          (landed,)).fetchone()["e"]
+    conn.close()
+    assert landed == contested        # joined the existing row, didn't make a new one
+    assert energy == 40.0             # inherited the depleted state

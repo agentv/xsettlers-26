@@ -73,7 +73,14 @@ different things and the game uses different words for them deliberately.)
 | `scan` | Looks at a nearby sector and reports what's there. Costs energy and food — a scanner that runs out of energy goes blind. |
 | `idle` | Does nothing, and costs nothing. |
 
-Two things worth understanding early, because they shape everything:
+Three things worth understanding early, because they shape everything:
+
+**Sectors are not all the same.** Every sector holds somewhere between 700
+and 1200 energy, decided the moment it is first discovered and fixed from then
+on. You cannot know which you have found until you look — but nowhere is
+barren, so a poor roll costs you upside, not survival. And what you see is
+what is genuinely there: if a rival got to a sector before you, you inherit
+whatever they have already drained out of it.
 
 **Only energy comes from the map.** Food and goods are manufactured out of
 what you already hold. Energy is therefore the input to your whole economy —

@@ -110,21 +110,30 @@ because only one of them exists:
   of 9 strips a sector in roughly five turns. Urgency-to-move is therefore
   already in the engine, unbuilt only in the sense that nothing makes the
   player feel it yet.
-* **Variation does not exist.** `db/sectors.py`'s `DEFAULT_SECTOR_RESOURCE_UNITS`
-  is a flat 1000 for every sector, so there is *fresh* soil but never *better*
-  soil. Until sectors differ, "look around and pick a good spot" has nothing
-  to look at — moving is a refuel run, not a judgment call. Variation, not
-  scarcity, is what turns the map into a decision surface, and it is the
-  prerequisite for transit stress being interesting rather than merely
-  punishing. Rolled **at discovery**, per the existing `# TODO: randomize
-  per-sector later` note in `db/sectors.py`. Player's stated preference
-  (2026-07-30): the distribution should centre **meaner than the current flat
-  1000** — a rich sector should be a find, not the baseline.
+* ~~**Variation does not exist.**~~ Built 2026-08-02: `roll_sector_energy()`
+  rolls **600 + d6 × 100** at discovery — 700 to 1200, flat odds, mean 950.
+  Open follow-up: **variation does not yet change outcomes.** Measured across
+  five map seeds on Outbreak, the spread moved the final margin by ~8 points
+  in ~2750, and the passive player's score was byte-identical on every map.
+  The reason is that at 20 turns almost nothing runs dry, so how much a sector
+  holds never binds — only *whether* you are on one does. Richness will start
+  to matter when depletion does: longer games, more colonies (which draw at
+  1.5×), or a leaner band. Do not conclude the roll is mistuned until
+  depletion actually bites; the thing to change first is probably the horizon,
+  not the dice.
 
-Also noted: `sectors.food_capacity` and `sectors.goods_capacity` exist and are
-seeded, but nothing reads them — only energy is sector-sourced. Vestigial
-under the current recipe model; decide whether they become real (multi-resource
-soil) or get dropped when this work happens.
+Resolved 2026-08-02: `sectors.food_capacity`/`goods_capacity` are **dropped**,
+not made real. Food and goods are manufactured from held stock, so a per-sector
+pool of them had nothing to mean — and being displayed to players, they
+actively misrepresented what a sector was worth. Sector variation therefore has
+exactly one axis to vary: `energy_capacity`.
+
+Contention is already settled and needs no new mechanism: `reveal_sector()` is
+the single get-or-create entry point for scans, ship arrivals, and bootstrap
+placement alike, so whoever reveals a sector first establishes its value and
+every later look by anyone — rival included — reads the established (and
+possibly already depleted) figure. Randomizing at discovery is therefore safe
+as-is; no player can re-roll another's find.
 
 ### 3. Combat — **direction**, phase three
 

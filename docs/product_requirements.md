@@ -19,10 +19,11 @@ XSettlers is a multiplayer, turn-based space strategy game played through any MC
 # The Map
 
 * The game world is a 3D grid of **sectors**, each with integer coordinates `(x, y, z)`.
-* Sectors have resource capacities: **energy**, **food**, and **goods**.
-* Sector layout and resource values are defined in `game_config.yaml` and seeded at bootstrap.
-* A **sentinel sector** (`id = -1`, coords `(-1,-1,-1)`) serves as the transit state for ships currently moving between sectors. Players are informed when their ship is in the sentinel sector — it is not hidden.
-* **Origin sector:** `(0,0,0)` is the origin and is extraordinarily resource-rich.
+* A sector has exactly one resource capacity: **energy**. Food and goods are manufactured from stock an organization already holds, never harvested from the map, so there is no per-sector pool of them (`food_capacity`/`goods_capacity` dropped 2026-08-02).
+* **Sectors are lazily instantiated and their richness is rolled at discovery** (2026-08-02). No sector row exists until a scan, a ship arrival, or bootstrap placement reveals it via `db/sectors.py`'s `reveal_sector()`. On that first reveal — and only then — its energy is rolled as **600 + d6 × 100**, giving 700 / 800 / 900 / 1000 / 1100 / 1200 at flat 1-in-6 odds, mean 950. The floor is deliberate: every sector is worth working, so an unlucky roll costs a player upside rather than viability.
+* **The roll belongs to the sector, not to the finder.** Because `reveal_sector()` is a single get-or-create and the sole path for every reveal, whoever discovers a sector first fixes its value, and every later look by anyone — rivals included — reads that established figure, depletion and all. A rival arriving later cannot re-roll your find or refill what you have drawn down. Set `SECTOR_ROLL_SEED` to make discovery reproducible for experiments and tests.
+* A **sentinel sector** (`id = -1`, coords `(-1,-1,-1)`) serves as the transit state for ships currently moving between sectors. It has 0 energy capacity, which is *how* transit suppresses energy harvesting — there is no special-case branch. Players are informed when their ship is in the sentinel sector — it is not hidden.
+* **Origin sector:** `(0,0,0)` is intended to be extraordinarily resource-rich. **Not implemented** — it currently takes the same d6 roll as anywhere else.
 * **Energy barrier / playable boundary:** all sectors with any negative coordinate are inaccessible. The energy barrier is defined by the origin — only sectors where `x ≥ 0`, `y ≥ 0`, and `z ≥ 0` are playable. Ships and colonies cannot be placed in negative-coordinate space.
 
 ---

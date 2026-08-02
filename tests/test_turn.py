@@ -1,6 +1,6 @@
 import json
 from db.connection import get_connection
-from db.sectors import (DEFAULT_SECTOR_RESOURCE_UNITS, CONFIDENCE_DECAY_PER_TURN,
+from db.sectors import (MIN_SECTOR_ENERGY, MAX_SECTOR_ENERGY, CONFIDENCE_DECAY_PER_TURN,
                         TURNS_TO_BLINK_OUT)
 from engine.turn import (end_of_turn, check_consensus_acceleration,
                          _calculate_final_scores, get_next_tick_at)
@@ -108,7 +108,8 @@ def test_arrival_reveals_destination_and_stamps_visibility():
     conn = get_connection()
     sector = conn.execute("SELECT id,energy_capacity FROM sectors "
                           "WHERE coord_x=1 AND coord_y=0 AND coord_z=0").fetchone()
-    assert sector is not None and sector["energy_capacity"] == DEFAULT_SECTOR_RESOURCE_UNITS
+    assert sector is not None
+    assert MIN_SECTOR_ENERGY <= sector["energy_capacity"] <= MAX_SECTOR_ENERGY
     org = conn.execute("SELECT sector_id FROM organizations WHERE id=?", (sid,)).fetchone()
     assert org["sector_id"] == sector["id"]
     ps = conn.execute("SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",

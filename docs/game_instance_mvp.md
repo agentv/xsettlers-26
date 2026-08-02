@@ -13,7 +13,7 @@ This canvas defines the first playable MVP instance of XSettlers. It is a self-c
 * **Config flag:** `z_locked: true` in `game_config.yaml`. Set to `false` in a future game type to activate full 3D play — no code changes required.
 * **Energy barrier:** all sectors with any negative coordinate are inaccessible. Only `x ≥ 0`, `y ≥ 0`, `z ≥ 0` are playable.
 * **Sentinel sector:** `id = -1`, coords `(-1, -1, -1)` always, regardless of map dimensionality. Used as the transit parking state for ships in motion. Players are informed when their ship is here.
-* **Resource distribution:** each sector has `energy_capacity`, `food_capacity`, and `goods_capacity` values seeded at bootstrap from `game_config.yaml`.
+* **Resource distribution:** each sector carries a single `energy_capacity`, rolled on first reveal as **600 + d6 × 100** (700–1200, mean 950 — `db/sectors.py`'s `roll_sector_energy()`). Energy is the only resource harvested from the map — food and goods are manufactured from stock already held — so there are no food/goods pools per sector (`food_capacity`/`goods_capacity` dropped 2026-08-02).
 
 ---
 
@@ -57,8 +57,8 @@ Each ship carries **6 pods**:
 Three pod types are **active in this game instance**. The full pod roster (including deferred types) is documented in the [Product Requirements](product_requirements.md).
 
 * **`energy`** — produces energy each turn. Energy powers other pods and contributes to movement capacity. Future: energy deficit will throttle production.
-* **`factory`** — produces goods each turn based on sector `goods_capacity` and task assignment.
-* **`farm`** — produces food each turn based on sector `food_capacity` and task assignment.
+* **`factory`** — manufactures goods each turn from resources the organization already holds (energy + food). Not sector-sourced: a factory works the same anywhere.
+* **`farm`** — manufactures food each turn from resources the organization already holds (energy + goods). Not sector-sourced either.
 
 **Deferred pod types** (not active in this instance): `crew`, `cargo`, `defense`, `attack`, `ship`, `sensor`. These are recognized in the data model but not instantiated. See the [Product Requirements](product_requirements.md) for the full roster with descriptions.
 

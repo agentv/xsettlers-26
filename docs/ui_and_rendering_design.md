@@ -182,9 +182,7 @@ Each `build_*_view()` function returns a plain dict. The renderer decides how to
   "coords": [x, y, z],
   "confidence": int,                          # 0–100; None in debug mode (unfiltered)
   "is_occupied_by_player": bool,               # True if player has an org here
-  "energy_capacity": float,
-  "food_capacity": float,
-  "goods_capacity": float,
+  "energy_capacity": float,                    # the only sector-sourced resource
   "own_orgs": [                                 # orgs belonging to this player
     { "org_id": int, "name": str, "org_type": str, "mission": str }
   ],

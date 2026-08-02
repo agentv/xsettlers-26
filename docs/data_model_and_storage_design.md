@@ -97,9 +97,7 @@ CREATE TABLE sectors (
     coord_x INTEGER NOT NULL,
     coord_y INTEGER NOT NULL,
     coord_z INTEGER NOT NULL DEFAULT 0,
-    energy_capacity REAL,
-    food_capacity REAL,
-    goods_capacity REAL,
+    energy_capacity REAL,  -- the ONLY resource drawn from the map
     discovered_by INTEGER  -- player_id
 );
 SELECT AddGeometryColumn('sectors', 'location', -1, 'POINTZ', 'XYZ');

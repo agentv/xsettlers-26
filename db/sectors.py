@@ -1,7 +1,39 @@
 import math
 import os
+import random
 
-DEFAULT_SECTOR_RESOURCE_UNITS = 1000.0  # flat for now; TODO: randomize per-sector later
+# --- Sector richness ----------------------------------------------------------
+# Energy in a newly discovered sector is 600 guaranteed plus a d6 worth of
+# hundreds: 700, 800, 900, 1000, 1100 or 1200, flat 1-in-6 each, mean 950.
+# Replaced the flat 1000 on 2026-08-02.
+#
+# The floor matters as much as the spread. Every sector is worth taking --
+# 700 is a living, not a death sentence -- so a bad roll costs you upside
+# rather than viability, and the decision a player faces is "is this one good
+# enough to plant a colony on, or do I keep looking?" rather than "did I get
+# a habitable one?". The ceiling is only 1.7x the floor for the same reason:
+# discovery should reward a good find without making an unlucky start
+# unrecoverable.
+#
+# Rolled once, at first discovery, inside reveal_sector() -- see its docstring
+# for why that is safe with rivals in play.
+SECTOR_ENERGY_BASE = 600.0
+SECTOR_ENERGY_DIE_SIDES = 6        # a d6...
+SECTOR_ENERGY_DIE_UNIT = 100.0     # ...counted in hundreds
+MIN_SECTOR_ENERGY = SECTOR_ENERGY_BASE + SECTOR_ENERGY_DIE_UNIT
+MAX_SECTOR_ENERGY = SECTOR_ENERGY_BASE + SECTOR_ENERGY_DIE_SIDES * SECTOR_ENERGY_DIE_UNIT
+
+# Set SECTOR_ROLL_SEED to make discovery reproducible. Without it every game
+# rolls its own map, which is the point; with it, an A/B experiment can hold
+# the map fixed and vary only the strategy under test, and a failing test can
+# be re-run on the same terrain.
+_seed = os.getenv("SECTOR_ROLL_SEED")
+_rng = random.Random(int(_seed)) if _seed is not None else random.Random()
+
+
+def roll_sector_energy() -> float:
+    """Energy for a newly discovered sector: 600 + d6 x 100, so 700..1200."""
+    return SECTOR_ENERGY_BASE + _rng.randint(1, SECTOR_ENERGY_DIE_SIDES) * SECTOR_ENERGY_DIE_UNIT
 
 # --- Fog of war ---------------------------------------------------------------
 # Confidence decays by a fixed number of points per turn, NOT by a fraction of
@@ -30,8 +62,18 @@ def reveal_sector(cur, player_id: int, coord_x: int, coord_y: int, coord_z: int)
     function does not commit; callers (bootstrap_game(), end_of_turn())
     commit as part of their own transaction.
 
-    An already-revealed sector's resource capacities are left untouched --
-    only the first reveal sets them. Returns the sector's id either way.
+    An already-revealed sector's energy capacity is left untouched -- the
+    richness roll happens once, on first reveal, whoever that reveal belongs
+    to, and every later look (by any player, by any means) reads the
+    established value. That is what makes a sector's richness a property of
+    the sector rather than of who found it: this same function is the sole
+    path for a scan, a ship arrival, and bootstrap placement alike, so two
+    rivals discovering the same sector cannot be told two different things
+    about it, and a rival arriving later cannot re-roll your find or refill
+    what you have already drawn down. Returns the sector's id either way.
+
+    Energy is the only capacity a sector carries: food and goods are
+    manufactured from stock already held, never harvested from the map.
     """
     cur.execute("SELECT id FROM sectors WHERE coord_x=? AND coord_y=? AND coord_z=?",
                 (coord_x, coord_y, coord_z))
@@ -40,10 +82,8 @@ def reveal_sector(cur, player_id: int, coord_x: int, coord_y: int, coord_z: int)
         sector_id = row["id"]
     else:
         cur.execute("""INSERT INTO sectors
-            (coord_x,coord_y,coord_z,energy_capacity,food_capacity,goods_capacity)
-            VALUES (?,?,?,?,?,?)""",
-            (coord_x, coord_y, coord_z, DEFAULT_SECTOR_RESOURCE_UNITS,
-             DEFAULT_SECTOR_RESOURCE_UNITS, DEFAULT_SECTOR_RESOURCE_UNITS))
+            (coord_x,coord_y,coord_z,energy_capacity) VALUES (?,?,?,?)""",
+            (coord_x, coord_y, coord_z, roll_sector_energy()))
         sector_id = cur.lastrowid
         cur.execute("UPDATE sectors SET location=MakePointZ(?,?,?,-1) WHERE id=?",
                     (coord_x, coord_y, coord_z, sector_id))

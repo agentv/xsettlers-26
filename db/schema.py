@@ -121,6 +121,22 @@ def init_schema():
         cols = {row[1] for row in cur.execute("PRAGMA table_info(game_state)").fetchall()}
         if "next_tick_at" not in cols:
             cur.execute("ALTER TABLE game_state ADD COLUMN next_tick_at TEXT")
+    # One-time migration: drop sectors.food_capacity/goods_capacity (2026-08-02).
+    # Only energy is drawn from the map -- food and goods are manufactured out
+    # of resources already held (see engine/production.py's
+    # RESOURCE_CAPACITY_COLUMN, which has only ever mapped energy). These two
+    # columns were seeded to the same 1000 as energy on every reveal and then
+    # never read or decremented by anything, so they were not merely unused:
+    # show_sector_neighborhood displayed them, telling players a sector held
+    # 1000 food and 1000 goods that could not be harvested from it. Dropping
+    # them removes the lie at the source rather than hiding it in the view.
+    # No data is lost that anything ever consulted.
+    cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sectors'")
+    if cur.fetchone()[0] > 0:
+        cols = {row[1] for row in cur.execute("PRAGMA table_info(sectors)").fetchall()}
+        for col in ("food_capacity", "goods_capacity"):
+            if col in cols:
+                cur.execute(f"ALTER TABLE sectors DROP COLUMN {col}")
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS players (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,9 +151,12 @@ def init_schema():
             coord_x         INTEGER NOT NULL,
             coord_y         INTEGER NOT NULL,
             coord_z         INTEGER NOT NULL DEFAULT 0,
-            energy_capacity REAL DEFAULT 0,
-            food_capacity   REAL DEFAULT 0,
-            goods_capacity  REAL DEFAULT 0
+            -- Energy is the ONLY resource drawn from the map; food and goods
+            -- are manufactured from resources already held, so a sector has
+            -- no food/goods pool to deplete (see engine/production.py's
+            -- RESOURCE_CAPACITY_COLUMN). food_capacity/goods_capacity were
+            -- dropped 2026-08-02.
+            energy_capacity REAL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sector_coords ON sectors(coord_x, coord_y, coord_z);
         CREATE TABLE IF NOT EXISTS game_state (
@@ -203,9 +222,8 @@ def init_schema():
             config        TEXT NOT NULL DEFAULT '{}',
             memory        TEXT NOT NULL DEFAULT '{}'
         );
-        INSERT OR IGNORE INTO sectors (id, coord_x, coord_y, coord_z,
-                                       energy_capacity, food_capacity, goods_capacity)
-        VALUES (-1, -1, -1, -1, 0, 0, 0);
+        INSERT OR IGNORE INTO sectors (id, coord_x, coord_y, coord_z, energy_capacity)
+        VALUES (-1, -1, -1, -1, 0);
         CREATE TABLE IF NOT EXISTS arrival_queue (
             arrival_turn     INTEGER NOT NULL,
             org_id           INTEGER REFERENCES organizations(id),

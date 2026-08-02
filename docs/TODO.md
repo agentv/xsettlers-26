@@ -137,6 +137,51 @@ every later look by anyone — rival included — reads the established (and
 possibly already depleted) figure. Randomizing at discovery is therefore safe
 as-is; no player can re-roll another's find.
 
+#### Open questions, raised 2026-08-02 — **not decided**
+
+Three things the player flagged while setting the current levels. Recorded so
+the reasoning survives the gap; none of them is a decision yet, and the
+current numbers are explicitly "good enough until we look again."
+
+* **Is `HOME_SECTOR_ENERGY = 100,000` higher than it needs to be?** Suspected
+  yes. It was sized as ~600 turns of maximum plausible draw, which is far more
+  headroom than "does not deplete" actually requires. Nothing depends on the
+  magnitude — the only property that matters is that home outlasts any real
+  game — so this can come down a long way without changing behaviour. Purely
+  a question of what reads honestly to someone opening the scenario file.
+
+* **Should a sector ever deplete to *zero*?** Currently it can, and does:
+  measured over 60 turns, five frontier sectors reached exactly 0 and became
+  permanently dead ground (there is no regeneration). Whether total exhaustion
+  is meant to be part of the game at all is unsettled. Alternatives not
+  explored: a floor below which a sector cannot be drawn, slow regeneration,
+  or diminishing returns that asymptote rather than terminate. Note the
+  interaction with the abrupt-failure mode already documented under Rates —
+  upkeep is drawn before production, so a fleet on dead ground stops
+  completely rather than tapering.
+
+* **Richness is a reserve, not a rate — and that may be why it doesn't
+  matter.** This is the most substantive of the three. `energy_capacity` is
+  purely a depletion budget: a 1000-energy sector and a 500-energy one are
+  *identical to work* until the poorer one runs out. Nothing about a rich
+  sector makes a pod more productive while it lasts. That is very likely why
+  two separate experiments failed to show variation affecting outcomes —
+  richness can only express itself through the horizon, and no game so far has
+  run long enough for the horizon to bind. The idea raised: let richness
+  drive **production rate** as well as duration, so a good find pays
+  immediately rather than eventually. Undesigned — whether that is a
+  multiplier on pod output, a cap on how fast a sector can be drawn, or
+  something else, and how it interacts with `COLONY_PRODUCTION_MULTIPLIER`
+  (which is already a rate multiplier and would compound with it).
+
+Also unresolved from the colony work, and relevant here because it is the
+other place a rate meets a ceiling: **storage capacity does not scale with the
+colony multiplier.** At 60 turns both home colonies finished at 99.5% and 100%
+of capacity, so their 1.5× output became pure waste and the passive player
+overtook the colonizer on turn 47. Decide this before retuning the multiplier
+— the problem is not that 1.5× is too strong or too weak, it is that the extra
+output has nowhere to go.
+
 ### 3. Combat — **direction**, phase three
 
 The long-game discovery the player is aiming at: growing resources and

@@ -20,6 +20,7 @@ from xsettlers_mcp.tools.organization_tools import (
 )
 from db.schema import init_schema
 from engine.clock import run_clock
+from views.render import render_status
 
 app = Server("xsettlers")
 
@@ -181,7 +182,33 @@ async def call_tool(name: str, arguments: dict):
     if not fn:
         return [types.TextContent(type="text",
                                   text=json.dumps({"error": f"Unknown tool: {name}"}))]
-    return [types.TextContent(type="text", text=_as_json(fn(**arguments)))]
+
+    # response_format is a dispatch-level convention, not a per-tool schema
+    # property -- none of the inputSchemas above declare it, and none need to,
+    # since jsonschema.validate() (in the SDK's call_tool wrapper) only rejects
+    # extra properties when a schema sets additionalProperties: false, which
+    # none of these do. Popped here so it never reaches a tool function.
+    arguments = dict(arguments)
+    response_format = arguments.pop("response_format", "markdown_view")
+    result = fn(**arguments)
+
+    content = [types.TextContent(type="text", text=_as_json(result))]
+    if response_format != "data_only":
+        content.append(types.TextContent(type="text", text=_as_markdown(result)))
+    return content
+
+
+def _as_markdown(result) -> str:
+    """
+    Render a tool's result as a markdown table, following the display-hints
+    convention in views/render.py. Tools that return a bare list rather than a
+    dict (get_sector_map, list_scenarios) have no `display` block to key off,
+    so they fall back to a plain notice instead of crashing render_status's
+    dict-only `.get()` calls.
+    """
+    if not isinstance(result, dict):
+        return "(no table view for this tool's response shape)"
+    return render_status(result)
 
 
 def _as_json(result) -> str:

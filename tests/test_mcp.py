@@ -61,3 +61,42 @@ def test_booleans_and_nulls_serialize_as_json_literals():
     text = _as_json({"ok": True, "winner": None})
     assert '"ok": true' in text and '"winner": null' in text
     assert json.loads(text) == {"ok": True, "winner": None}
+
+# --- response_format toggle (see xsettlers_mcp/server.py call_tool) ---
+
+def test_as_markdown_renders_a_display_hinted_dict():
+    from xsettlers_mcp.server import _as_markdown
+    data = {"widgets": [{"name": "a"}], "display": {"rows_key": "widgets", "columns": ["name"]}}
+    assert "| a |" in _as_markdown(data)
+
+def test_as_markdown_falls_back_for_non_dict_results():
+    from xsettlers_mcp.server import _as_markdown
+    assert _as_markdown(["not", "a", "dict"]) == "(no table view for this tool's response shape)"
+
+def test_call_tool_default_markdown_view_returns_json_and_markdown():
+    import asyncio, json
+    from xsettlers_mcp.server import call_tool
+    content = asyncio.run(call_tool("get_player_state", {"player_token": "U_TEST_001"}))
+    assert len(content) == 2
+    parsed = json.loads(content[0].text)
+    assert parsed["player"]["email"] == "p1@test.com"
+    # get_player_state has no `display` block (yet), so render_status's
+    # no-rows fallback is the correct markdown output here, not a crash.
+    assert content[1].text == "(no rows)"
+
+def test_call_tool_data_only_returns_json_alone():
+    import asyncio, json
+    from xsettlers_mcp.server import call_tool
+    content = asyncio.run(call_tool("get_player_state",
+                                     {"player_token": "U_TEST_001", "response_format": "data_only"}))
+    assert len(content) == 1
+    assert json.loads(content[0].text)["player"]["email"] == "p1@test.com"
+
+def test_call_tool_response_format_never_reaches_the_tool_function():
+    import asyncio
+    from xsettlers_mcp.server import call_tool
+    # get_player_state(player_token) takes no response_format kwarg -- a TypeError
+    # here means the pop in call_tool() failed to strip it before dispatch.
+    content = asyncio.run(call_tool("get_player_state",
+                                     {"player_token": "U_TEST_001", "response_format": "data_only"}))
+    assert len(content) == 1

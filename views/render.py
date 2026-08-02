@@ -11,8 +11,12 @@ def render_status(data: dict) -> str:
     """
     Generic renderer for any tool that follows the display-hints convention:
     a top-level `display` dict naming `rows_key` (which field holds the list of
-    row-dicts to render), `columns` (which fields to show, in order), and an
-    optional `header` line. Covers the status tools in
+    row-dicts to render), `columns` (which fields to show, in order), an
+    optional `header` line, and an optional `column_labels` dict overriding a
+    column's header text (keyed by field name) when the raw field name isn't
+    what a human should read -- e.g. `task_display` -> "Task". Columns with no
+    entry in `column_labels` header as the field name itself, same as always.
+    Covers the status tools in
     xsettlers_mcp/tools/organization_tools.py (show_game_status,
     show_civilization_status, show_organization).
 
@@ -35,6 +39,7 @@ def render_status(data: dict) -> str:
         return render_map(data)
     rows = data.get(display.get("rows_key"), [])
     columns = display.get("columns") or []
+    labels = display.get("column_labels") or {}
 
     lines = []
     if display.get("header"):
@@ -45,7 +50,8 @@ def render_status(data: dict) -> str:
         lines.append("(no rows)")
         return "\n".join(lines)
 
-    lines.extend(_markdown_table(columns, [[str(r.get(c, "")) for c in columns] for r in rows]))
+    headers = [labels.get(c, c) for c in columns]
+    lines.extend(_markdown_table(headers, [[str(r.get(c, "")) for c in columns] for r in rows]))
     return "\n".join(lines)
 
 
@@ -101,6 +107,8 @@ def render_map(data: dict) -> str:
     rows = data.get(display.get("rows_key"), [])
     columns = display.get("columns") or []
     if rows and columns:
+        labels = display.get("column_labels") or {}
+        headers = [labels.get(c, c) for c in columns]
         lines.append("")
-        lines.extend(_markdown_table(columns, [[str(r.get(c, "")) for c in columns] for r in rows]))
+        lines.extend(_markdown_table(headers, [[str(r.get(c, "")) for c in columns] for r in rows]))
     return "\n".join(lines)

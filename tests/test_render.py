@@ -32,6 +32,30 @@ def test_render_status_show_organization_includes_header_line():
     assert text.startswith(f"**{status['display']['header']}**")
     assert "Energy" in text                # task_display for produce_energy
 
+def test_render_status_applies_column_labels_override():
+    """show_organization's column_labels overrides task_display/capacity_display
+    header text to "Task"/"Utilization" while row lookups still key off the
+    raw field names."""
+    pid = seed_player(); sid = seed_sector(3, 3, 0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    status = show_organization("U_P1", oid)
+    text = render_status(status)
+    header_line = text.splitlines()[2]
+    assert "| Task |" in header_line
+    assert "| Utilization |" in header_line
+    assert "task_display" not in header_line
+    assert "capacity_display" not in header_line
+
+def test_render_status_columns_without_labels_header_as_field_name():
+    """Unrelated tools that never set column_labels keep the old behavior --
+    header text is just the field name."""
+    data = {
+        "widgets": [{"name": "a", "count": 3}],
+        "display": {"rows_key": "widgets", "columns": ["name", "count"]},
+    }
+    text = render_status(data)
+    assert "| name | count |" in text
+
 def test_render_status_no_special_casing_by_tool_name():
     """The whole point: an arbitrary dict following the same display-hints
     shape renders correctly with no changes to render_status() itself."""

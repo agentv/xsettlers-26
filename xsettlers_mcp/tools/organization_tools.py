@@ -504,6 +504,7 @@ def show_organization(player_token: str, org_id: int) -> dict:
         "resource_abbrev": RESOURCE_ABBREV,
         "rows_key": "tasks",
         "columns": ["task_display", "count", "energy", "food", "goods", "capacity_display"],
+        "column_labels": {"task_display": "Task", "capacity_display": "Utilization"},
     }
     conn.close()
     return result

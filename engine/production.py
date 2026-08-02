@@ -1,7 +1,7 @@
 POD_PRODUCTION = {
     "produce_energy": {"energy": 6.0},
     "produce_food":   {"food":   5.0},
-    "produce_goods":  {"goods":  3.0},
+    "produce_goods":  {"goods":  2.0},
     # Non-producing tasks
     "idle": {}, "scan": {},
 }
@@ -25,7 +25,7 @@ RESOURCE_CAPACITY_COLUMN = {
 # all-or-nothing gate.
 POD_CONSUMPTION_RECIPE = {
     "produce_energy": {"food": 1.0},
-    "produce_goods":  {"energy": 2.0, "food": 1.0},
+    "produce_goods":  {"energy": 3.0, "food": 1.0},
     "produce_food":   {"energy": 1.0, "goods": 1.0},
     "scan":           {"food": 1.0, "energy": 2.0},
     # idle costs nothing -- a pod not doing anything has no upkeep of its own.
@@ -33,9 +33,11 @@ POD_CONSUMPTION_RECIPE = {
 
 # Per-organization upkeep, once per turn (not per pod) -- every ship/colony
 # costs this to keep running at all, on top of whatever its individual pods
-# cost. Applies regardless of transit state, same pooled/prorated draw as
+# cost. Energy raised 1 -> 3 on 2026-08-02: energy supply comfortably
+# outran demand, so a stripped sector cost a player nothing and territory
+# was worth nothing to fight over. Applies regardless of transit state, same pooled/prorated draw as
 # pod recipes (see engine/turn.py's _apply_org_upkeep).
-ORG_UPKEEP_COST = {"food": 5.0, "energy": 1.0}
+ORG_UPKEEP_COST = {"food": 5.0, "energy": 3.0}
 
 # Which pod column holds a resource's stock. Storage is per-pod but generic
 # -- a pod can hold a mix of resource types regardless of its current

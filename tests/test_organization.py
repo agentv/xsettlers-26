@@ -169,12 +169,12 @@ def test_production_floors_at_zero_and_stops_once_depleted():
     conn.close()
     assert sector["energy_capacity"] == 0.0
     assert pod_row["energy_stored"] == 2.0  # capped by what the sector had left
-    end_of_turn()  # sector is now empty -- no further production gain, but org
-                   # upkeep (1 energy/turn) still draws down the 2.0 already banked
+    end_of_turn()  # sector is now empty -- no further production gain, and org
+                   # upkeep (3 energy/turn) exhausts the 2.0 banked, prorated
     conn = get_connection()
     pod_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()
     conn.close()
-    assert pod_row["energy_stored"] == 1.0
+    assert pod_row["energy_stored"] == 0.0
 
 def test_energy_production_stops_during_transit():
     """produce_energy harvests from the sector it's sitting in -- a ship in
@@ -234,12 +234,12 @@ def test_production_overflow_spills_into_sibling_pod():
     full_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (full_pod,)).fetchone()
     empty_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (empty_pod,)).fetchone()
     conn.close()
-    # Org upkeep (1 energy/turn) runs first and drains 1 from full_pod (the
-    # only energy source), opening 1 unit of free space there; production
-    # then makes 6 more, refills full_pod's freed unit first (back to its
-    # 10 capacity), and the remaining 5 spills into empty_pod.
+    # Org upkeep (3 energy/turn) runs first and drains 3 from full_pod (the
+    # only energy source), opening 3 units of free space there; production
+    # then makes 6 more, refills full_pod's freed units first (back to its
+    # 10 capacity), and the remaining 3 spills into empty_pod.
     assert full_row["energy_stored"] == 10.0  # topped back up to its own capacity
-    assert empty_row["energy_stored"] == 5.0  # the rest spilled over here
+    assert empty_row["energy_stored"] == 3.0  # the rest spilled over here
 
 def test_production_overflow_lost_when_org_fully_saturated():
     """If every pod in the org is completely full, excess production is

@@ -89,14 +89,25 @@ def test_starting_fill_falls_back_to_the_project_default_when_unstated(tmp_path)
     assert sc.starting_fill == DEFAULT_STARTING_FILL == 0.3
     assert sc.pods_per_ship[0].starting_fill == 0.3
 
-def test_a_scenario_may_still_declare_a_full_start():
-    """game0/game1 keep their original balance by saying so explicitly."""
-    sc = load_starting_configuration("config/game0.yaml")
-    assert sc.starting_fill == 1.0
-    assert all(p.starting_fill == 1.0 for p in sc.pods_per_ship)
+def test_every_shipped_scenario_declares_its_own_fill():
+    """Per-scenario by design: each states its value rather than inheriting
+    one silently, so changing the project default can never quietly rebalance
+    an existing game. All three sit at 0.3 today; that is a coincidence of
+    tuning, not a rule."""
+    for name in ("game0", "game1", "game_solo"):
+        sc = load_starting_configuration(f"config/{name}.yaml")
+        assert sc.starting_fill == 0.3, name
+        assert all(p.starting_fill == 0.3 for p in sc.pods_per_ship), name
 
-def test_solo_scenario_starts_lean():
-    assert load_starting_configuration("config/game_solo.yaml").starting_fill == 0.3
+def test_a_scenario_may_still_declare_a_full_start(tmp_path):
+    """Nothing prevents a rich variant -- the dial goes all the way up."""
+    rich = tmp_path / "game_rich.yaml"
+    rich.write_text(
+        'name: "Rich"\ndescription: "d"\nstarting_fill: 1.0\n'
+        'participants:\n  - {player: "vincent@example.com", home_sector: [0, 0, 0]}\n'
+        'ships_per_player: 1\n'
+        'pods_per_ship:\n  - {task: produce_energy, count: 1, storage_capacity: 100.0}\n')
+    assert load_starting_configuration(str(rich)).starting_fill == 1.0
 
 def test_scenario_starting_fill_cascades_to_every_pod_template(tmp_path):
     lean = tmp_path / "game_lean.yaml"

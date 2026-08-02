@@ -23,11 +23,15 @@ ships_per_player: 8
 
 # How full every pod starts, as a fraction of its storage_capacity. Stated
 # explicitly rather than left to the default, because how rich a game begins
-# is a scenario decision. 1.0 preserves this scenario's original balance --
-# note that a fleet starting at capacity cannot accumulate anything, so its
-# production is waste until something is spent. Individual pod templates below
-# may override this.
-starting_fill: 1.0
+# is a scenario decision -- every scenario declares its own, and none inherits
+# one silently.
+#
+# Lowered 1.0 -> 0.3 on 2026-08-02. At 1.0 the fleet begins at capacity, which
+# hid every economic pressure this scenario exists to exercise: production had
+# nowhere to go so it was pure waste, and the starting energy stockpile was
+# large enough to coast all 20 turns, so a player who stripped their sector
+# bare never actually paid for it. Pod templates below may still override this.
+starting_fill: 0.3
 
 # Each ship receives one pod per entry below, repeated `count` times.
 # Mission values are the canonical pod missions (see Product Requirements /

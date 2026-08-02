@@ -20,9 +20,9 @@ participants:
 ships_per_player: 8
 
 # How full every pod starts, as a fraction of its storage_capacity. See
-# config/game0.yaml for the full note; 1.0 preserves this scenario's original
-# balance.
-starting_fill: 1.0
+# config/game0.yaml for why this dropped from 1.0 to 0.3 on 2026-08-02.
+# Per-scenario by design -- a future variant is free to start rich again.
+starting_fill: 0.3
 
 # Same 6-pod loadout as game0's Diaspora, applied to every ship AND
 # to the home colony (see home_colony below and db/bootstrap.py).

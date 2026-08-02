@@ -240,8 +240,7 @@ makes this much the best scenario for learning the game or testing a client.
 ### Diaspora (`game0`)
 
 Two players, 8 ships each, **no starting colony** — everyone begins mobile and
-picks their own moment to plant roots. Home sectors are 25 sectors apart. Holds
-start full.
+picks their own moment to plant roots. Home sectors are 25 sectors apart.
 
 ### Outbreak (`game1`)
 
@@ -258,9 +257,10 @@ One foothold, and a fleet to expand from it.
   for a real exploration phase, close enough that contact is likely mid-game.
 - **Length:** 20 turns, then scores are tallied.
 
-Holds start full in Outbreak, which has a consequence worth knowing: a fleet
-at capacity can't accumulate anything, so early production is wasted until you
-spend something. Solo starts lean deliberately to avoid that.
+All three scenarios currently start holds at 30% of capacity. That is a
+scenario setting rather than a rule of the game — a future variant is free to
+start you rich — but starting lean is what makes production matter from turn 1
+instead of being wasted against a hold that is already full.
 
 > *Naming note: Outbreak was originally sketched under the name "Diaspora"
 > before either scenario file existed. That name now belongs to `game0`.*

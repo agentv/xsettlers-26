@@ -15,11 +15,11 @@ def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
     per-resource waste (produced - consumed - actual delta).
 
     Hand-verified saturated org. Two energy pods and a food pod, all full at
-    10/10. Org upkeep runs first and takes 5 food + 1 energy; the two energy
+    10/10. Org upkeep runs first and takes 5 food + 3 energy; the two energy
     pods then make 12 between them, of which only 7 finds anywhere to go and
-    4 is lost (1 unit is also spent as the pods' own food input). The food pod
-    produces nothing at all -- its recipe needs goods, and the org holds none
-    -- which is why energy is the only resource that wastes anything.
+    2 is lost. The food pod produces nothing at all -- its recipe needs goods,
+    and the org holds none -- which is why energy is the only resource that
+    wastes anything.
 
     Note the org ends at 30/30 either way: it is capacity-bound, so raising
     production raises waste rather than holdings. That is the behaviour this
@@ -42,7 +42,7 @@ def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
     assert payload["energy"] == 27.0
     assert payload["food"] == 3.0
     assert payload["goods"] == 0.0
-    assert payload["energy_wasted"] == 4.0   # 12 produced - 1 upkeep - 7 actually stored
+    assert payload["energy_wasted"] == 2.0   # 12 produced - 3 upkeep - 7 actually stored
     assert payload["food_wasted"] == 0.0
     assert payload["goods_wasted"] == 0.0
     assert payload["score"] == 3.0  # 27*0 (energy) + 3*1 (food) + 0*2 (goods)
@@ -186,7 +186,7 @@ def test_org_upkeep_drains_pooled_food_and_energy():
     energy = conn.execute("SELECT SUM(energy_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
     conn.close()
     assert food == 95.0    # 100 - 5 upkeep (no producing pod there to add any back)
-    assert energy == 99.0  # 100 - 1 upkeep
+    assert energy == 97.0  # 100 - 3 upkeep
 
 def test_org_upkeep_prorated_when_insufficient():
     """Only 2 food and 0 energy on hand against a 5-food/1-energy cost --

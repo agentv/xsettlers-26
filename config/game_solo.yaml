@@ -21,8 +21,8 @@ participants:
 ships_per_player: 8
 
 # How full every pod starts, as a fraction of its storage_capacity. 0.3 --
-# the project default (config/loader.py's DEFAULT_STARTING_FILL), stated
-# explicitly here because it is a scenario decision, not an engine constant.
+# the same level every shipped scenario uses, stated explicitly here because
+# it is a scenario decision, not an engine constant.
 # Replaced the original 1.0 on 2026-07-30: a fleet starting at capacity cannot
 # accumulate, so its production is waste and only spending moves the score.
 # Starting lean makes production the game.

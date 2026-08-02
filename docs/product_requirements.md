@@ -84,13 +84,16 @@ convenience.
 |---|---|---|
 | `produce_energy` | 6 energy | 1 food |
 | `produce_food` | 5 food | 1 energy, 1 goods |
-| `produce_goods` | 3 goods | 2 energy, 1 food |
+| `produce_goods` | 2 goods | 3 energy, 1 food |
 | `scan` | — | 2 energy, 1 food |
 | `idle` | — | — |
 
-Plus **organization upkeep of 5 food + 1 energy per org per turn**, charged
+Plus **organization upkeep of 5 food + 3 energy per org per turn**, charged
 once regardless of pod count or transit state, and drawn *before* pods run —
-so upkeep gets first claim on the stock.
+so upkeep gets first claim on the stock. That ordering matters at the margin:
+once energy is thin enough that upkeep alone consumes it, production stops
+outright rather than tapering, so a fleet that runs its sector dry fails
+abruptly rather than gradually.
 
 Inputs are drawn from the organization's pooled stock across all its pods, and
 output is **prorated** to whatever fraction of the required input is actually

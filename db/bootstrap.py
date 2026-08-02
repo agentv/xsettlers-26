@@ -100,6 +100,16 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
     sc = cfg.starting_configuration
     for idx, (player_id, seat) in enumerate(zip(player_id_list, seats)):
         home_sector_id = reveal_sector(cur, player_id, *tuple(seat.home_sector))
+        # Home does not take the ordinary discovery roll -- it is seeded flat
+        # and effectively bottomless (see loader.HOME_SECTOR_ENERGY), so a
+        # player's own ground is never what runs out from under them. Written
+        # after reveal_sector rather than inside it because richness-at-home is
+        # a scenario decision, not a property of discovery: reveal_sector must
+        # stay the one place that rolls, and must roll the same way for
+        # everyone. Idempotent -- re-running for the home colony below sets the
+        # same value.
+        cur.execute("UPDATE sectors SET energy_capacity=? WHERE id=?",
+                    (sc.home_sector_energy, home_sector_id))
         for ship_num in range(sc.ships_per_player):
             # Short by default: a player says "S3", not "Ship-P1-03".
             # Unique per player, which is what makes a name referenceable.

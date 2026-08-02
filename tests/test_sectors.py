@@ -5,14 +5,15 @@ from db.sectors import (reveal_sector, roll_sector_energy, SECTOR_ENERGY_BASE,
 from tests.conftest import seed_player, seed_sector
 
 def test_roll_sector_energy_covers_exactly_the_six_faces():
-    """600 + d6 x 100 -- six discrete outcomes, 700 through 1200, nothing
+    """400 + d6 x 100 -- six discrete outcomes, 500 through 1000, nothing
     between and nothing outside. The floor is the load-bearing part: every
     sector is worth working, so a bad roll costs upside rather than
-    viability."""
+    viability. Home sectors are exempt entirely -- see
+    tests/test_bootstrap.py."""
     faces = {SECTOR_ENERGY_BASE + n * SECTOR_ENERGY_DIE_UNIT
              for n in range(1, SECTOR_ENERGY_DIE_SIDES + 1)}
-    assert faces == {700, 800, 900, 1000, 1100, 1200}
-    assert (MIN_SECTOR_ENERGY, MAX_SECTOR_ENERGY) == (700, 1200)
+    assert faces == {500, 600, 700, 800, 900, 1000}
+    assert (MIN_SECTOR_ENERGY, MAX_SECTOR_ENERGY) == (500, 1000)
     rolled = {roll_sector_energy() for _ in range(400)}
     assert rolled == faces      # every face reachable, no value off the die
 

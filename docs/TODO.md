@@ -111,7 +111,9 @@ because only one of them exists:
   already in the engine, unbuilt only in the sense that nothing makes the
   player feel it yet.
 * ~~**Variation does not exist.**~~ Built 2026-08-02: `roll_sector_energy()`
-  rolls **600 + d6 × 100** at discovery — 700 to 1200, flat odds, mean 950.
+  rolls **400 + d6 × 100** at discovery — 500 to 1000, flat odds, mean 750 —
+  while home sectors are seeded bottomless (`HOME_SECTOR_ENERGY`) so the lean
+  frontier costs a player their expansion, not their footing.
   Open follow-up: **variation does not yet change outcomes.** Measured across
   five map seeds on Outbreak, the spread moved the final margin by ~8 points
   in ~2750, and the passive player's score was byte-identical on every map.

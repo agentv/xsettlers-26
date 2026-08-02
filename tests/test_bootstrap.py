@@ -1,6 +1,7 @@
 from db.connection import get_connection
 from db.bootstrap import bootstrap_game
 from db.sectors import MIN_SECTOR_ENERGY, MAX_SECTOR_ENERGY
+from config.loader import HOME_SECTOR_ENERGY
 
 def _bootstrap(scenario_file="config/game0.yaml", scenario_name="game0"):
     bootstrap_game(scenario_file=scenario_file, scenario_name=scenario_name,
@@ -144,7 +145,9 @@ def test_bootstrap_requires_a_scenario():
 def test_bootstrap_seeds_only_home_sectors_not_full_grid():
     """Sectors are lazily instantiated (see db/sectors.py's reveal_sector) --
     bootstrap should only reveal the two players' home sectors, not a
-    pre-seeded grid, and each should get a rolled energy capacity in the legal band."""
+    pre-seeded grid. Home sectors are exempt from the discovery roll and
+    seeded flat and bottomless instead (HOME_SECTOR_ENERGY) -- a player's own
+    footing should never be what runs out from under them."""
     _bootstrap()
     conn = get_connection()
     sectors = conn.execute("""SELECT coord_x,coord_y,coord_z,energy_capacity
@@ -152,4 +155,28 @@ def test_bootstrap_seeds_only_home_sectors_not_full_grid():
     conn.close()
     assert len(sectors) == 2
     for s in sectors:
-        assert MIN_SECTOR_ENERGY <= s["energy_capacity"] <= MAX_SECTOR_ENERGY
+        assert s["energy_capacity"] == HOME_SECTOR_ENERGY
+        # Emphatically not a lucky roll: home is far above the richest
+        # possible discovery, so this cannot pass by coincidence.
+        assert s["energy_capacity"] > MAX_SECTOR_ENERGY
+
+
+def test_home_sector_is_rich_but_the_transit_sentinel_stays_at_zero():
+    """Two different things that are easy to conflate by name.
+
+    The HOME sector is the scenario's starting coordinates, where the first
+    colony sits; it is seeded bottomless so a player's footing never fails.
+    The SENTINEL sector (id = -1) is the parking slot for ships in transit,
+    and its 0 energy capacity is the entire mechanism suppressing energy
+    harvesting mid-flight -- there is no other branch doing it. Enriching the
+    sentinel by mistake would silently delete transit stress from the game.
+    """
+    _bootstrap()
+    conn = get_connection()
+    sentinel = conn.execute(
+        "SELECT energy_capacity AS e FROM sectors WHERE id=-1").fetchone()
+    homes = conn.execute(
+        "SELECT energy_capacity AS e FROM sectors WHERE id!=-1").fetchall()
+    conn.close()
+    assert sentinel["e"] == 0.0
+    assert all(h["e"] == HOME_SECTOR_ENERGY for h in homes)

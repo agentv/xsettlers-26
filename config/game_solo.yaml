@@ -28,6 +28,15 @@ ships_per_player: 8
 # Starting lean makes production the game.
 starting_fill: 0.3
 
+# Energy in each player's home sector, overriding the ordinary discovery roll
+# (db/sectors.py rolls 400 + d6 x 100 -- 500 to 1000 -- for everywhere else).
+# Deliberately bottomless rather than merely generous: a player's own footing
+# should never be the thing that runs out from under them, which is what lets
+# the frontier be lean. Per-scenario by design -- a survival variant is free to
+# make home as poor as anywhere else. NOTE: this is the home sector, not the
+# "sentinel sector" (id = -1), which parks ships in transit and stays at 0.
+home_sector_energy: 100000
+
 pods_per_ship:
   - {task: produce_energy, count: 2, storage_capacity: 100.0}
   - {task: produce_goods,  count: 2, storage_capacity: 100.0}

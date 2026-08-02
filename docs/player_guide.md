@@ -75,12 +75,17 @@ different things and the game uses different words for them deliberately.)
 
 Three things worth understanding early, because they shape everything:
 
-**Sectors are not all the same.** Every sector holds somewhere between 700
-and 1200 energy, decided the moment it is first discovered and fixed from then
-on. You cannot know which you have found until you look — but nowhere is
-barren, so a poor roll costs you upside, not survival. And what you see is
-what is genuinely there: if a rival got to a sector before you, you inherit
+**Sectors are not all the same.** Every sector you discover holds somewhere
+between 500 and 1000 energy, decided the moment it is first found and fixed
+from then on. You cannot know which you have until you look — but nowhere is
+barren, so a poor find costs you upside, not survival. And what you see is
+what is genuinely there: if a rival got somewhere before you, you inherit
 whatever they have already drained out of it.
+
+**Your home sector is the exception.** It is deep enough that you will never
+exhaust it, no matter how long the game runs or how much you park there. Home
+is a refuge, not a prize — the ground you can always fall back on. Everywhere
+else is finite, which is what makes where you go a decision.
 
 **Only energy comes from the map.** Food and goods are manufactured out of
 what you already hold. Energy is therefore the input to your whole economy —

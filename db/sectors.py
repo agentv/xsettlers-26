@@ -3,21 +3,25 @@ import os
 import random
 
 # --- Sector richness ----------------------------------------------------------
-# Energy in a newly discovered sector is 600 guaranteed plus a d6 worth of
-# hundreds: 700, 800, 900, 1000, 1100 or 1200, flat 1-in-6 each, mean 950.
-# Replaced the flat 1000 on 2026-08-02.
+# Energy in a newly discovered sector is 400 guaranteed plus a d6 worth of
+# hundreds: 500, 600, 700, 800, 900 or 1000, flat 1-in-6 each, mean 750.
+# Replaced the flat 1000 on 2026-08-02; base lowered 600 -> 400 the same day,
+# once home sectors stopped depleting (see HOME_SECTOR_ENERGY in
+# config/loader.py). Those two go together: the frontier can be lean because
+# home is not, so a thin roll out in the field costs a player their expansion,
+# not their footing.
 #
-# The floor matters as much as the spread. Every sector is worth taking --
-# 700 is a living, not a death sentence -- so a bad roll costs you upside
+# The floor still matters as much as the spread. Every sector is worth taking
+# -- 500 is a living, not a death sentence -- so a bad roll costs you upside
 # rather than viability, and the decision a player faces is "is this one good
 # enough to plant a colony on, or do I keep looking?" rather than "did I get
-# a habitable one?". The ceiling is only 1.7x the floor for the same reason:
+# a habitable one?". The ceiling is only 2x the floor for the same reason:
 # discovery should reward a good find without making an unlucky start
 # unrecoverable.
 #
 # Rolled once, at first discovery, inside reveal_sector() -- see its docstring
 # for why that is safe with rivals in play.
-SECTOR_ENERGY_BASE = 600.0
+SECTOR_ENERGY_BASE = 400.0
 SECTOR_ENERGY_DIE_SIDES = 6        # a d6...
 SECTOR_ENERGY_DIE_UNIT = 100.0     # ...counted in hundreds
 MIN_SECTOR_ENERGY = SECTOR_ENERGY_BASE + SECTOR_ENERGY_DIE_UNIT
@@ -32,7 +36,12 @@ _rng = random.Random(int(_seed)) if _seed is not None else random.Random()
 
 
 def roll_sector_energy() -> float:
-    """Energy for a newly discovered sector: 600 + d6 x 100, so 700..1200."""
+    """Energy for a newly discovered sector: 400 + d6 x 100, so 500..1000.
+
+    Home sectors do not use this -- they are seeded flat and rich by
+    db/bootstrap.py so that a player's footing never runs out from under
+    them (see HOME_SECTOR_ENERGY).
+    """
     return SECTOR_ENERGY_BASE + _rng.randint(1, SECTOR_ENERGY_DIE_SIDES) * SECTOR_ENERGY_DIE_UNIT
 
 # --- Fog of war ---------------------------------------------------------------

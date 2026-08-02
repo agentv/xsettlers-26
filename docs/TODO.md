@@ -197,20 +197,13 @@ expects to shape the game with.
   starts stronger than the NPCs. Not designed: whether a participant
   overrides the whole loadout or patches individual fields.
 
-* **Colonies should out-produce ships.** Stability should pay: a colony's
-  production advantage is what makes staying put correct *as long as the
-  sector still yields*, which is the counterweight to transit stress. Today
-  they are mechanically identical — same 6-pod loadout, same E:20/F:20/G:10,
-  measured in the play-test. The `is_mobile` vs `org_type` split already
-  exists to hang this on (`is_mobile` is the behavioural flag, `org_type` the
-  semantic label), so the modifier has a natural home without new schema.
-
-* **Goods should demand heavier inputs.** Direction: making goods — the
-  scoring resource — should get materially more expensive in raw resources.
-  Current baseline in `engine/production.py`: goods produce 5/turn against
-  energy and food at 10, and cost 2 energy + 1 food to run, so goods are
-  already the expensive, slow one. The intent is to widen that gap, not
-  introduce it.
+* ~~**Colonies should out-produce ships.**~~ Done 2026-08-02:
+  `COLONY_PRODUCTION_MULTIPLIER = 1.5`, output-only, plus a 30-energy
+  conversion charge. Open follow-up: **both numbers are provisional.** 1.5×
+  gross roughly triples a 6-pod org's net score rate because costs are fixed,
+  which may prove too strong once several colonies compound; and 30 energy was
+  picked to establish that conversion has a price at all, not sized against
+  what a colony is worth. Retune against play data, not analysis.
 
 * **Resource transfer between organizations** — no such tool exists today; an
   org's stock is reachable only by its own pods. The play this enables:

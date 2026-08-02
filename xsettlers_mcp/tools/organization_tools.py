@@ -1,8 +1,14 @@
 from config.loader import load_config
 from db.connection import get_connection
 from db.events import record_event
-from engine.production import POD_PRODUCTION
-from engine.turn import get_current_turn, get_next_tick_at, get_final_scores
+from engine.production import (POD_PRODUCTION, get_production_multiplier,
+                               COLONIZATION_ENERGY_COST)
+# _available_org_resource/_drain_org_resource are engine internals, imported
+# here so the colonization charge draws from an org's pooled stock by exactly
+# the same rule the turn engine uses for every other cost -- a second
+# implementation would be a second place for the pooling rule to drift.
+from engine.turn import (get_current_turn, get_next_tick_at, get_final_scores,
+                         _available_org_resource, _drain_org_resource)
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.sector_tools import (
     get_scan_range, resolve_bearing, bearing_name, SCAN_BEARINGS)
@@ -52,26 +58,30 @@ def _resource_summary(values: dict) -> str:
     production breakdown) rather than a mission-keyed one."""
     return ", ".join(f"{RESOURCE_ABBREV[r]}:{v:g}" for r, v in values.items() if r in RESOURCE_ABBREV)
 
-def _org_production(tasking: dict, in_transit: bool) -> dict:
+def _org_production(tasking: dict, in_transit: bool, org_type: str = "ship") -> dict:
     """
     Gross per-turn production an org's current pod deployment would yield at
     full input availability -- i.e. POD_PRODUCTION's base rate times how many
-    pods are tasked to each producing task. This is the "nameplate" figure,
-    not a prediction of what end_of_turn() will actually credit: it does not
-    account for POD_CONSUMPTION_RECIPE input costs, org upkeep, or storage
-    caps, all of which can prorate the real output down (see engine/turn.py).
+    pods are tasked to each producing task, times the org-type multiplier
+    (see get_production_multiplier: colonies out-produce ships). This is the
+    "nameplate" figure, not a prediction of what end_of_turn() will actually
+    credit: it does not account for POD_CONSUMPTION_RECIPE input costs, org
+    upkeep, or storage caps, all of which can prorate the real output down
+    (see engine/turn.py).
     One real-world exception is applied here: an org in transit is parked at
     the sentinel sector (id=-1, permanently 0 energy_capacity), so its energy
     production is always 0 regardless of tasking, matching engine/turn.py's
     sector-capacity cap -- food/goods aren't sector-sourced and are unaffected.
     """
+    multiplier = get_production_multiplier(org_type)
     production = {}
     for task, outputs in POD_PRODUCTION.items():
         count = tasking.get(task, 0)
         if not count:
             continue
         for resource, base_amount in outputs.items():
-            amount = 0.0 if (resource == "energy" and in_transit) else base_amount * count
+            amount = (0.0 if (resource == "energy" and in_transit)
+                      else base_amount * count * multiplier)
             production[resource] = production.get(resource, 0.0) + amount
     return production
 
@@ -134,8 +144,11 @@ def set_mission(player_token: str, org_id: int, mission: str, params: dict = Non
       - colony: locked against 'move' only — defend/attack/idle remain assignable
       - mid-colonization (ship, is_mobile == 0, not in transit): locked entirely,
         committed for the 3-turn transition window
-    Setting mission='colonize' flips is_mobile to 0 immediately and schedules a
-    colonize_complete event 3 turns out for engine/turn.py to resolve.
+    Setting mission='colonize' costs COLONIZATION_ENERGY_COST energy, drawn
+    from the ship's pooled stock and charged in full at commitment; a ship
+    that cannot pay is refused outright and left untouched. On payment it
+    flips is_mobile to 0 immediately and schedules a colonize_complete event
+    3 turns out for engine/turn.py to resolve.
     Setting mission='move' delegates entirely to navigation_tools.confirm_move
     (params must include dest_x/dest_y/dest_z, optionally jump_range_per_turn)
     rather than writing mission='move' onto the row directly -- confirm_move is
@@ -172,6 +185,17 @@ def set_mission(player_token: str, org_id: int, mission: str, params: dict = Non
             return {"error": f"mission='move' requires params: {', '.join(missing)}"}
         return confirm_move(player_token, org_id, params["dest_x"], params["dest_y"],
                              params["dest_z"], params.get("jump_range_per_turn", 1))
+    # Colonization is bought, not merely ordered. Checked before any event is
+    # recorded so a refused conversion leaves no trace at all -- the ship is
+    # untouched and the player can try again once it has fuelled up.
+    if mission == "colonize":
+        available_energy = _available_org_resource(cur, org_id, "energy")
+        if available_energy < COLONIZATION_ENERGY_COST:
+            conn.close()
+            return {"error": f"Colonizing costs {COLONIZATION_ENERGY_COST:g} energy; "
+                             f"this ship has {available_energy:g}",
+                    "required_energy": COLONIZATION_ENERGY_COST,
+                    "available_energy": available_energy}
     record_event(
         event_type="mission.set",
         payload={"org_id": org_id, "mission": mission, "params": params or {}},
@@ -180,16 +204,30 @@ def set_mission(player_token: str, org_id: int, mission: str, params: dict = Non
         resolve_turn = get_current_turn() + 3
         record_event(
             event_type="colonize_complete",
-            payload={"org_id": org_id, "sector_id": org["sector_id"]},
+            payload={"org_id": org_id, "sector_id": org["sector_id"],
+                     "energy_cost": COLONIZATION_ENERGY_COST},
             actor_id=player["id"], subject_id=org_id, subject_type="organization",
             resolve_at_turn=resolve_turn)
+        # Charge the whole conversion cost up front, at commitment rather than
+        # at completion. The ship is locked for the 3-turn transition with no
+        # cancel path, so there is nothing to refund and no way to dodge the
+        # bill by changing your mind -- and paying now means the player sees
+        # the hit while they can still reason about what caused it.
+        # Drained after the record_event calls, not before: record_event opens
+        # its own connection and commits, so an uncommitted write held on this
+        # one would collide with it.
+        _drain_org_resource(cur, org_id, "energy", COLONIZATION_ENERGY_COST)
         cur.execute("UPDATE organizations SET mission=?, mission_params=?, is_mobile=0 WHERE id=?",
                     (mission, json.dumps(params) if params else None, org_id))
     else:
         cur.execute("UPDATE organizations SET mission=?, mission_params=? WHERE id=?",
                     (mission, json.dumps(params) if params else None, org_id))
     conn.commit(); conn.close()
-    return {"ok": True, "org_id": org_id, "mission": mission}
+    result = {"ok": True, "org_id": org_id, "mission": mission}
+    if mission == "colonize":
+        result["energy_spent"] = COLONIZATION_ENERGY_COST
+        result["completes_at_turn"] = resolve_turn
+    return result
 
 def set_pod_task(player_token: str, pod_id: int, task: str,
                  bearing: str = None,
@@ -549,7 +587,7 @@ def show_civilization_status(player_token: str) -> dict:
                            (o["id"],)).fetchall()
         tasking = {t["task"]: t["n"] for t in tasks}
         in_transit = o["sector_id"] == -1
-        production = _org_production(tasking, in_transit)
+        production = _org_production(tasking, in_transit, o["org_type"])
         entry = {
             "id": o["id"],
             "name": o["name"],

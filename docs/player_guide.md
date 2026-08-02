@@ -119,12 +119,23 @@ back to where it started, with no credit for the distance covered.
 
 Any ship can be ordered to colonize the sector it's sitting in. Once that
 completes the ship becomes a permanent colony there: it loses the ability to
-move, but you gain a foothold you can build around. Colonies produce through
-their pods exactly like ships do. Committing a ship to colonize locks it for
-a short transition window before the conversion finishes.
+move, but everything it produces goes up by **half again**. Every pod aboard
+a colony works at 1.5× a ship's rate, for exactly the same running costs.
 
-Choose the ground carefully. A colony can never relocate, so it lives or dies
-on the sector you left it in — and that sector depletes like any other.
+That is worth more than it sounds. Your costs don't change, so the whole
+bonus lands on the margin — an organization barely breaking even as a ship
+can be comfortably profitable as a colony.
+
+**Colonizing costs 30 energy**, taken from the ship's holds the moment you
+give the order. A ship without it is simply refused — this is the one cost
+in the game with no partial credit, because there's no such thing as half a
+colony. The ship is then locked for a short transition window before the
+conversion finishes, and it works at the old ship rate until it does.
+
+Choose the ground carefully, twice over. A colony can never relocate, so it
+lives or dies on the sector you left it in — and it draws that sector down
+1.5× as fast as a ship would. The bonus is real, but it spends the ground
+underneath it quicker.
 
 ---
 

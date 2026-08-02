@@ -2,7 +2,8 @@ import collections, os, json, math
 from config.loader import load_config
 from db.connection import get_connection
 from db.sectors import reveal_sector, CONFIDENCE_DECAY_PER_TURN
-from engine.production import (get_production, get_consumption_recipe, ORG_UPKEEP_COST,
+from engine.production import (get_production, get_consumption_recipe,
+                               get_production_multiplier, ORG_UPKEEP_COST,
                                RESOURCE_CAPACITY_COLUMN, RESOURCE_STORAGE_COLUMN)
 from xsettlers_mcp.tools.sector_tools import get_scan_range
 
@@ -129,8 +130,10 @@ def _record_event_direct(cur, turn: int, event_type: str, actor_id=None,
 def _apply_org_upkeep(cur, consumption: dict):
     """
     Per-organization upkeep, once per turn (not per pod) -- every ship/colony
-    costs ORG_UPKEEP_COST (5 food + 1 energy) to keep running at all, on top
-    of whatever its individual pods cost. Applies regardless of transit state.
+    costs ORG_UPKEEP_COST to keep running at all, on top of whatever its
+    individual pods cost. Applies regardless of transit state, and is not
+    discounted or surcharged by org type: the colony advantage is purely on
+    the output side (see COLONY_PRODUCTION_MULTIPLIER).
     Prorated the same way as pod recipes: not enough on hand means a partial
     (not all-or-nothing) draw of whatever's actually available.
     Runs before the per-pod production pass, so upkeep gets first claim on
@@ -216,7 +219,7 @@ def end_of_turn():
     _apply_org_upkeep(cur, consumption)
 
     cur.execute("""SELECT p.id,p.task,p.task_params,p.org_id,
-                o.sector_id AS org_sector_id, o.player_id
+                o.sector_id AS org_sector_id, o.player_id, o.org_type
         FROM pods p JOIN organizations o ON o.id = p.org_id
         ORDER BY p.id""")
     for pod in cur.fetchall():
@@ -225,7 +228,7 @@ def end_of_turn():
 
         # 3a/b. Production, gated by input cost.
         #    Each producing task (plus scan) costs some other resource(s)
-        #    to run (e.g. produce_goods costs 2 energy + 1 food) -- drawn
+        #    to run (see POD_CONSUMPTION_RECIPE) -- drawn
         #    from the org's own pooled stock of that resource (see
         #    _available_org_resource/_drain_org_resource above). idle costs
         #    nothing. Output is prorated to whatever fraction of the required
@@ -241,7 +244,16 @@ def end_of_turn():
         #    sector, whoever's pod processes first (by pod id) gets first
         #    claim on what's left that turn -- no fair-split model yet.
         if task in ("produce_energy", "produce_food", "produce_goods"):
-            base_production = get_production(task)
+            # Colony bonus (see COLONY_PRODUCTION_MULTIPLIER): applied to the
+            # output side only -- `recipe` below is left at the base rate, so
+            # a colony pays a ship's costs and gets 1.5x back. Folded into the
+            # amounts here rather than at the point of storage so that every
+            # downstream consequence follows automatically: the sector cap is
+            # measured against what will actually be taken, and the sector is
+            # drained by that same larger figure.
+            multiplier = get_production_multiplier(pod["org_type"])
+            base_production = {resource: amount * multiplier
+                               for resource, amount in get_production(task).items()}
             recipe = get_consumption_recipe(task)
             org_id = pod["org_id"]
 

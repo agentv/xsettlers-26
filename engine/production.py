@@ -6,6 +6,32 @@ POD_PRODUCTION = {
     "idle": {}, "scan": {},
 }
 
+# What a colony gains over a ship: every pod aboard a colony produces this
+# multiple of its base rate (added 2026-08-02). Ships get 1.0. This is the
+# entire mechanical payoff for colonizing -- until now a colony was a ship
+# that had thrown away its mobility for nothing, so planting one was never
+# correct. Stability pays; that advantage is the counterweight to the
+# transit stress a mobile fleet lives with.
+#
+# Deliberately output-only: POD_CONSUMPTION_RECIPE and ORG_UPKEEP_COST are
+# untouched, so a colony pays exactly what a ship pays for the same tasking
+# and simply gets more back. The multiplier applies to the sector draw too
+# (see engine/turn.py) -- a colony harvesting energy strips its sector 1.5x
+# as fast, so the reward carries its own clock.
+COLONY_PRODUCTION_MULTIPLIER = 1.5
+
+# One-time energy price to convert a ship into a colony, charged in full at
+# the moment the player commits (see organization_tools.set_mission), not
+# spread across the 3-turn transition. Unlike every other cost in the
+# economy this is an all-or-nothing gate rather than a prorated draw: an org
+# cannot half-become a colony, so a partial payment has nothing to buy.
+# A ship without this much energy pooled across its pods is refused.
+#
+# 30 is an explicitly provisional starting figure, not a tuned one -- it was
+# picked to establish that colonizing has a price at all, and is expected to
+# move once there is play data on how much a colony is actually worth.
+COLONIZATION_ENERGY_COST = 30.0
+
 # Only energy is harvested from a sector -- produce_energy is capped by
 # whatever the sector has left (see engine/turn.py's production step), not
 # just the pod's own storage_capacity. Food/goods are no longer sector-
@@ -62,6 +88,13 @@ RESOURCE_PRODUCING_TASK = {
 
 def get_production(task: str) -> dict:
     return POD_PRODUCTION.get(task, {})
+
+def get_production_multiplier(org_type: str) -> float:
+    """Output multiplier for a pod aboard an org of this type -- the single
+    place the colony bonus is decided, so the live engine (engine/turn.py)
+    and the nameplate figure players see (organization_tools._org_production)
+    can never drift apart."""
+    return COLONY_PRODUCTION_MULTIPLIER if org_type == "colony" else 1.0
 
 def get_consumption_recipe(task: str) -> dict:
     return POD_CONSUMPTION_RECIPE.get(task, {})

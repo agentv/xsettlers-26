@@ -8,6 +8,8 @@ from xsettlers_mcp.tools.organization_tools import (
     rename_organization, set_org_scan_bearing, set_pod_scan_bearing,
     show_organization
 )
+from engine.production import (POD_PRODUCTION, COLONY_PRODUCTION_MULTIPLIER,
+                               COLONIZATION_ENERGY_COST)
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
 
 # --- set_mission happy path ---
@@ -21,8 +23,17 @@ def test_set_mission_idle():
                         (oid,)).fetchone()["mission"] == "idle"
     conn.close()
 
-def test_set_mission_colonize_locks_immediately_but_does_not_convert_yet():
+def _seed_colonizer(storage_current=200.0):
+    """A ship that can afford to colonize. Colonizing costs
+    COLONIZATION_ENERGY_COST energy up front (see set_mission), so a ship
+    with empty pods is refused outright -- every colonize test needs fuel
+    aboard before the order will even be accepted."""
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_current=storage_current)
+    return pid, sid, oid
+
+def test_set_mission_colonize_locks_immediately_but_does_not_convert_yet():
+    pid, sid, oid = _seed_colonizer()
     set_mission("U_P1", oid, "colonize")
     conn = get_connection()
     org = conn.execute("SELECT org_type,is_mobile,mission FROM organizations WHERE id=?",
@@ -33,7 +44,7 @@ def test_set_mission_colonize_locks_immediately_but_does_not_convert_yet():
     assert org["mission"] == "colonize"
 
 def test_set_mission_colonize_converts_after_three_turns():
-    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    pid, sid, oid = _seed_colonizer()
     set_mission("U_P1", oid, "colonize")   # scheduled for current_turn(0) + 3
     end_of_turn(); end_of_turn()           # turns 1, 2 -- not resolved yet
     conn = get_connection()
@@ -50,6 +61,110 @@ def test_set_mission_colonize_converts_after_three_turns():
     assert org["is_mobile"] == 0
     assert org["mission"] == "idle"
 
+def test_set_mission_colonize_charges_energy_up_front():
+    """The charge lands at commitment, not at resolution three turns later."""
+    pid, sid, oid = _seed_colonizer(storage_current=200.0)
+    result = set_mission("U_P1", oid, "colonize")
+    assert result.get("ok") is True
+    assert result["energy_spent"] == COLONIZATION_ENERGY_COST
+    conn = get_connection()
+    energy = conn.execute("SELECT SUM(energy_stored) AS e FROM pods WHERE org_id=?",
+                          (oid,)).fetchone()["e"]
+    conn.close()
+    assert energy == 200.0 - COLONIZATION_ENERGY_COST
+
+def test_set_mission_colonize_refused_when_energy_short():
+    """All-or-nothing, unlike every prorated cost in the economy: a ship that
+    cannot pay in full is left completely untouched -- not locked, not
+    partially charged, free to try again after fuelling up."""
+    pid, sid, oid = _seed_colonizer(storage_current=COLONIZATION_ENERGY_COST - 1)
+    result = set_mission("U_P1", oid, "colonize")
+    assert "error" in result
+    conn = get_connection()
+    org = conn.execute("SELECT mission,is_mobile FROM organizations WHERE id=?",
+                       (oid,)).fetchone()
+    energy = conn.execute("SELECT SUM(energy_stored) AS e FROM pods WHERE org_id=?",
+                          (oid,)).fetchone()["e"]
+    conn.close()
+    assert org["mission"] != "colonize"
+    assert org["is_mobile"] == 1                      # never locked
+    assert energy == COLONIZATION_ENERGY_COST - 1     # never charged
+
+def test_colony_outproduces_ship_at_the_multiplier():
+    """A colony and a ship with identical pods on the same sector: same costs
+    paid, COLONY_PRODUCTION_MULTIPLIER times the output. Before this existed
+    the two were mechanically identical and colonizing bought nothing."""
+    pid = seed_player(); sid = seed_sector(energy=100000.0)
+    conn = get_connection()
+    orgs = {}
+    for org_type, is_mobile in (("ship", 1), ("colony", 0)):
+        conn.execute("""INSERT INTO organizations (org_type,name,player_id,sector_id,
+                        is_mobile,mission) VALUES (?,?,?,?,?,'idle')""",
+                     (org_type, org_type.upper(), pid, sid, is_mobile))
+        orgs[org_type] = conn.execute(
+            "SELECT id FROM organizations WHERE name=?", (org_type.upper(),)).fetchone()["id"]
+    conn.commit(); conn.close()
+    for oid in orgs.values():
+        seed_pod(oid, task="produce_energy", storage_capacity=10000.0, storage_current=500.0)
+        pod = seed_pod(oid, task="produce_food", storage_capacity=10000.0, storage_current=500.0)
+        # produce_food's recipe costs goods as well as energy, and nothing here
+        # makes goods -- without a stock on hand the ratio is 0 and neither org
+        # produces any food at all, which would make the comparison vacuous.
+        conn = get_connection()
+        conn.execute("UPDATE pods SET goods_stored=500.0 WHERE id=?", (pod,))
+        conn.commit(); conn.close()
+
+    def energy_and_food(oid):
+        conn = get_connection()
+        row = conn.execute("""SELECT SUM(energy_stored) AS e, SUM(food_stored) AS f
+                              FROM pods WHERE org_id=?""", (oid,)).fetchone()
+        conn.close(); return row["e"], row["f"]
+
+    before = {k: energy_and_food(v) for k, v in orgs.items()}
+    end_of_turn()
+    after = {k: energy_and_food(v) for k, v in orgs.items()}
+
+    # Gross production, backed out of the net change: both paid identical
+    # costs (upkeep + recipes are untouched by org type), so whatever extra
+    # the colony holds is the bonus and nothing else.
+    ship_energy_gain = after["ship"][0] - before["ship"][0]
+    colony_energy_gain = after["colony"][0] - before["colony"][0]
+    base_energy = POD_PRODUCTION["produce_energy"]["energy"]
+    assert colony_energy_gain - ship_energy_gain == pytest.approx(
+        base_energy * (COLONY_PRODUCTION_MULTIPLIER - 1))
+
+    base_food = POD_PRODUCTION["produce_food"]["food"]
+    assert (after["colony"][1] - before["colony"][1]) - (after["ship"][1] - before["ship"][1]) \
+        == pytest.approx(base_food * (COLONY_PRODUCTION_MULTIPLIER - 1))
+
+def test_colony_strips_its_sector_faster_than_a_ship():
+    """The bonus applies to the sector draw too, not just to what lands in
+    storage -- a colony's advantage burns through the ground it stands on
+    proportionally faster, so the reward carries its own clock."""
+    pid = seed_player()
+    ship_sector = seed_sector(x=1, energy=1000.0)
+    colony_sector = seed_sector(x=2, energy=1000.0)
+    conn = get_connection()
+    for org_type, is_mobile, sec in (("ship", 1, ship_sector), ("colony", 0, colony_sector)):
+        conn.execute("""INSERT INTO organizations (org_type,name,player_id,sector_id,
+                        is_mobile,mission) VALUES (?,?,?,?,?,'idle')""",
+                     (org_type, org_type.upper(), pid, sec, is_mobile))
+    conn.commit()
+    for name in ("SHIP", "COLONY"):
+        oid = conn.execute("SELECT id FROM organizations WHERE name=?", (name,)).fetchone()["id"]
+        seed_pod(oid, task="produce_energy", storage_capacity=10000.0, storage_current=500.0)
+        seed_pod(oid, task="produce_food", storage_capacity=10000.0, storage_current=500.0)
+    conn.close()
+    end_of_turn()
+    conn = get_connection()
+    drawn = {}
+    for label, sec in (("ship", ship_sector), ("colony", colony_sector)):
+        remaining = conn.execute("SELECT energy_capacity AS e FROM sectors WHERE id=?",
+                                 (sec,)).fetchone()["e"]
+        drawn[label] = 1000.0 - remaining
+    conn.close()
+    assert drawn["colony"] == pytest.approx(drawn["ship"] * COLONY_PRODUCTION_MULTIPLIER)
+
 # --- set_mission negative paths ---
 
 def test_set_mission_unknown_player():
@@ -60,7 +175,7 @@ def test_set_mission_invalid_type():
     assert "error" in set_mission("U_P1", oid, "dance")
 
 def test_set_mission_colony_cannot_move():
-    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    pid, sid, oid = _seed_colonizer()
     set_mission("U_P1", oid, "colonize"); end_of_turn()
     assert "error" in set_mission("U_P1", oid, "move")
 

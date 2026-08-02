@@ -44,8 +44,9 @@ Players control **organizations** — the fundamental unit of agency. Two types:
 ## Colonies
 
 * Stationary. Cannot move once established.
-* Produce resources each turn based on pod missions and sector capacities.
+* Produce resources each turn based on pod tasks and sector capacities, at **1.5× a ship's rate** (`COLONY_PRODUCTION_MULTIPLIER`) — see [Rates](#rates-per-pod-per-turn). This is the whole mechanical payoff for colonizing.
 * Created when a ship with org mission `colonize` completes its turn in a sector.
+* **Colonizing costs 30 energy** (`COLONIZATION_ENERGY_COST`), charged in full from the ship's pooled stock at the moment the mission is set — not spread over the 3-turn transition. Unlike every other cost in the economy this is an all-or-nothing gate rather than a prorated draw: a ship that cannot pay is refused and left untouched, since there is no such thing as half a conversion. The figure is provisional and expected to move with play data.
 
 ---
 
@@ -100,6 +101,15 @@ output is **prorated** to whatever fraction of the required input is actually
 available: half the energy on hand yields half the output, rather than an
 all-or-nothing gate. One consequence worth knowing: **a scanner needs energy**,
 so an organization that runs dry goes blind as well as idle.
+
+**Colonies multiply output by 1.5** (`COLONY_PRODUCTION_MULTIPLIER`, added
+2026-08-02). Every pod aboard a colony produces 1.5× its base rate; ships
+produce 1.0×. The multiplier applies to output only — costs and upkeep are
+identical to a ship's — and it applies to the sector draw as well as to what
+lands in storage, so a colony harvesting energy strips its sector 1.5× as
+fast. Because costs are fixed, the effect on the *margin* is much larger than
+1.5×: a 6-pod org netting +1 energy / +1 food / +2 goods a turn as a ship nets
++7 / +6 / +4 as a colony, roughly tripling its score rate.
 
 **POC active tasks:** `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. All other entries above are recognized in the data model but are not instantiated in any current game instance.
 

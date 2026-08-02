@@ -12,11 +12,24 @@ def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
     """turn.snapshot events (one per player per turn) persist what was
     previously print-only: after-state holdings, this turn's weighted score
     (same formula as show_game_status/_calculate_final_scores), and derived
-    per-resource waste (produced - consumed - actual delta). Hand-verified
-    scenario: a saturated 2-pod org where the food pod's own production is
-    blocked (no goods input available anywhere in the org), so only the
-    energy pod's overflow contributes any waste this turn."""
+    per-resource waste (produced - consumed - actual delta).
+
+    Hand-verified saturated org. Two energy pods and a food pod, all full at
+    10/10. Org upkeep runs first and takes 5 food + 1 energy; the two energy
+    pods then make 12 between them, of which only 7 finds anywhere to go and
+    4 is lost (1 unit is also spent as the pods' own food input). The food pod
+    produces nothing at all -- its recipe needs goods, and the org holds none
+    -- which is why energy is the only resource that wastes anything.
+
+    Note the org ends at 30/30 either way: it is capacity-bound, so raising
+    production raises waste rather than holdings. That is the behaviour this
+    test is really pinning.
+
+    Deliberately three pods rather than two: at the current production rates
+    a 2-pod version leaves enough headroom that nothing overflows, and a
+    waste test that never wastes anything is worse than no test."""
     pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_capacity=10.0, storage_current=10.0)
     seed_pod(oid, task="produce_energy", storage_capacity=10.0, storage_current=10.0)
     seed_pod(oid, task="produce_food", storage_capacity=10.0, storage_current=10.0)
     end_of_turn()
@@ -26,13 +39,13 @@ def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
         (pid,)).fetchone()
     conn.close()
     payload = json.loads(row["payload"])
-    assert payload["energy"] == 16.0
-    assert payload["food"] == 4.0
+    assert payload["energy"] == 27.0
+    assert payload["food"] == 3.0
     assert payload["goods"] == 0.0
-    assert payload["energy_wasted"] == 3.0
+    assert payload["energy_wasted"] == 4.0   # 12 produced - 1 upkeep - 7 actually stored
     assert payload["food_wasted"] == 0.0
     assert payload["goods_wasted"] == 0.0
-    assert payload["score"] == 4.0  # 16*0 (energy) + 4*1 (food) + 0*2 (goods)
+    assert payload["score"] == 3.0  # 27*0 (energy) + 3*1 (food) + 0*2 (goods)
 
 def test_get_next_tick_at_none_until_clock_has_run():
     """None means "clock has never ticked yet" -- distinct from a stale

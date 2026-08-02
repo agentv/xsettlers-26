@@ -70,7 +70,7 @@ different things and the game uses different words for them deliberately.)
 | `produce_energy` | Harvests energy from the sector the organization is sitting in. This is the only thing drawn from the map itself — and the sector runs down as you take it. |
 | `produce_food` | Manufactures food. Costs energy and goods to run. |
 | `produce_goods` | Manufactures goods. Costs energy and food to run. Slower than the other two, and the most valuable thing you can make. |
-| `scan` | Looks at a nearby sector and reports what's there. Costs food. |
+| `scan` | Looks at a nearby sector and reports what's there. Costs energy and food — a scanner that runs out of energy goes blind. |
 | `idle` | Does nothing, and costs nothing. |
 
 Two things worth understanding early, because they shape everything:
@@ -136,7 +136,8 @@ Space is unknown at the start. You only know what you have actually looked at.
 ship's bridge, a colony's headquarters — without dedicating a pod to it. Pods
 can *additionally* be put on the `scan` task for more coverage. The rules are
 identical either way; the only difference is what carries the equipment. Each
-scan costs food.
+scan costs energy and food, so scanning competes directly with production for
+the same stock.
 
 You aim a scan by **bearing** — a direction and distance relative to the
 scanner, not a fixed map coordinate:

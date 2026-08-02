@@ -1,7 +1,7 @@
 POD_PRODUCTION = {
-    "produce_energy": {"energy": 10.0},
-    "produce_food":   {"food":   10.0},
-    "produce_goods":  {"goods":   5.0},
+    "produce_energy": {"energy": 6.0},
+    "produce_food":   {"food":   5.0},
+    "produce_goods":  {"goods":  3.0},
     # Non-producing tasks
     "idle": {}, "scan": {},
 }
@@ -27,7 +27,7 @@ POD_CONSUMPTION_RECIPE = {
     "produce_energy": {"food": 1.0},
     "produce_goods":  {"energy": 2.0, "food": 1.0},
     "produce_food":   {"energy": 1.0, "goods": 1.0},
-    "scan":           {"food": 1.0},
+    "scan":           {"food": 1.0, "energy": 2.0},
     # idle costs nothing -- a pod not doing anything has no upkeep of its own.
 }
 

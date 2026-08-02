@@ -114,7 +114,8 @@ def test_set_pod_task_produce_energy():
 
 def test_storage_capped_at_capacity():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    pod = seed_pod(oid, storage_capacity=100.0, storage_current=95.0)
+    # 99 - 1 org upkeep = 98, + 5 produced = 103, capped back to 100.
+    pod = seed_pod(oid, storage_capacity=100.0, storage_current=99.0)
     seed_pod(oid, task="produce_food", storage_current=100.0)
     set_pod_task("U_P1", pod, "produce_energy"); end_of_turn()
     conn = get_connection()
@@ -153,11 +154,11 @@ def test_production_depletes_sector_capacity():
     sector = conn.execute("SELECT energy_capacity FROM sectors WHERE id=?", (sid,)).fetchone()
     pod_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()
     conn.close()
-    assert sector["energy_capacity"] == 40.0  # 50 - flat rate 10
-    assert pod_row["energy_stored"] == 10.0
+    assert sector["energy_capacity"] == 44.0  # 50 - flat rate 6
+    assert pod_row["energy_stored"] == 6.0
 
 def test_production_floors_at_zero_and_stops_once_depleted():
-    pid = seed_player(); sid = seed_sector(energy=5.0)  # less than the flat rate (10)
+    pid = seed_player(); sid = seed_sector(energy=2.0)  # less than the flat rate (6)
     oid = seed_ship(pid, sid)
     pod = seed_pod(oid, storage_capacity=100.0, storage_current=0.0)
     seed_pod(oid, task="produce_food", storage_current=100.0)
@@ -167,13 +168,13 @@ def test_production_floors_at_zero_and_stops_once_depleted():
     pod_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()
     conn.close()
     assert sector["energy_capacity"] == 0.0
-    assert pod_row["energy_stored"] == 5.0  # capped by what the sector had left
+    assert pod_row["energy_stored"] == 2.0  # capped by what the sector had left
     end_of_turn()  # sector is now empty -- no further production gain, but org
-                   # upkeep (1 energy/turn) still draws down the 5.0 already banked
+                   # upkeep (1 energy/turn) still draws down the 2.0 already banked
     conn = get_connection()
     pod_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()
     conn.close()
-    assert pod_row["energy_stored"] == 4.0
+    assert pod_row["energy_stored"] == 1.0
 
 def test_energy_production_stops_during_transit():
     """produce_energy harvests from the sector it's sitting in -- a ship in
@@ -235,10 +236,10 @@ def test_production_overflow_spills_into_sibling_pod():
     conn.close()
     # Org upkeep (1 energy/turn) runs first and drains 1 from full_pod (the
     # only energy source), opening 1 unit of free space there; production
-    # then makes 10 more, refills full_pod's freed unit first (back to its
-    # 10 capacity), and the remaining 9 spills into empty_pod.
+    # then makes 6 more, refills full_pod's freed unit first (back to its
+    # 10 capacity), and the remaining 5 spills into empty_pod.
     assert full_row["energy_stored"] == 10.0  # topped back up to its own capacity
-    assert empty_row["energy_stored"] == 9.0  # the rest spilled over here
+    assert empty_row["energy_stored"] == 5.0  # the rest spilled over here
 
 def test_production_overflow_lost_when_org_fully_saturated():
     """If every pod in the org is completely full, excess production is
@@ -408,6 +409,7 @@ def test_org_scan_reveals_its_target_without_any_scan_pod():
     """The whole point: no pod is dedicated to scanning here."""
     pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
     seed_pod(oid, task="produce_food", storage_current=100.0)
+    seed_pod(oid, task="produce_energy", storage_current=100.0)   # scanning costs energy
     set_org_scan_bearing("U_P1", oid, "E2")
     end_of_turn()
     conn = get_connection()
@@ -463,6 +465,7 @@ def test_scan_aim_is_relative_and_survives_a_move():
     from xsettlers_mcp.tools.navigation_tools import confirm_move
     pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
     seed_pod(oid, task="produce_food", storage_current=200.0)
+    seed_pod(oid, task="produce_energy", storage_current=200.0)   # scanning costs energy
     set_org_scan_bearing("U_P1", oid, "E")          # scans (1,0,0) from home
     end_of_turn()
     confirm_move("U_P1", oid, 5, 0, 0, jump_range_per_turn=5)

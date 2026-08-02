@@ -68,12 +68,35 @@ The following pod tasks are defined in the game model. Only a subset are active 
 | `idle` | — | **Active** | Pod does nothing. Default state. |
 | `produce_energy` | energy | **Active** | Harvests energy from the organization's current sector — the only resource drawn from the map, and the sector depletes as it is taken. Consumes food. |
 | `produce_food` | farm | **Active** | Manufactures food each turn from stored resources — **not** sector-sourced. Consumes energy and goods. |
-| `produce_goods` | factory | **Active** | Manufactures goods each turn from stored resources — **not** sector-sourced. Consumes energy and food, and produces at half the rate of the other two. The highest-scoring resource. |
+| `produce_goods` | factory | **Active** | Manufactures goods each turn from stored resources — **not** sector-sourced. Consumes energy and food. The slowest to produce and the highest-scoring. |
 | `scan` | scanner | **Active** | Scans one sector at end of turn, aimed by bearing via `set_pod_scan_bearing`. Consumes food. Suppressed (but still charged) while in transit. |
 | `crew` | crew | Deferred | General-purpose pod. Flexible but less productive than specialized pods. |
 | `cargo` | cargo | Deferred | Stores goods, energy, and food. Does not consume energy but consumes food for its crew. |
 | `defend` | defense | Deferred | Absorbs damage from attackers. Requires combat system. |
 | `attack` | attack | Deferred | Attacks other ships and colonies. Requires combat system. |
+
+### Rates (per pod, per turn)
+
+Retuned 2026-08-02. `engine/production.py` is authoritative; this table is a
+convenience.
+
+| Task | Produces | Costs |
+|---|---|---|
+| `produce_energy` | 6 energy | 1 food |
+| `produce_food` | 5 food | 1 energy, 1 goods |
+| `produce_goods` | 3 goods | 2 energy, 1 food |
+| `scan` | — | 2 energy, 1 food |
+| `idle` | — | — |
+
+Plus **organization upkeep of 5 food + 1 energy per org per turn**, charged
+once regardless of pod count or transit state, and drawn *before* pods run —
+so upkeep gets first claim on the stock.
+
+Inputs are drawn from the organization's pooled stock across all its pods, and
+output is **prorated** to whatever fraction of the required input is actually
+available: half the energy on hand yields half the output, rather than an
+all-or-nothing gate. One consequence worth knowing: **a scanner needs energy**,
+so an organization that runs dry goes blind as well as idle.
 
 **POC active tasks:** `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. All other entries above are recognized in the data model but are not instantiated in any current game instance.
 

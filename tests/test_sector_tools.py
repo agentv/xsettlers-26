@@ -22,6 +22,7 @@ def test_scan_within_range_reveals_target():
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, task="scan")
     seed_pod(sid, task="produce_food", storage_current=100.0)
+    seed_pod(sid, task="produce_energy", storage_current=100.0)   # scanning costs energy
     r = get_scan_range(sid)
     set_pod_task("U_P1", pod, "scan", offset_x=r, offset_y=0, offset_z=0)
     end_of_turn()
@@ -41,6 +42,7 @@ def test_scan_out_of_range_aim_is_rejected_at_set_time():
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, task="scan")
     seed_pod(sid, task="produce_food", storage_current=100.0)
+    seed_pod(sid, task="produce_energy", storage_current=100.0)   # scanning costs energy
     out_of_range = get_scan_range(sid) + 5
     result = set_pod_task("U_P1", pod, "scan", offset_x=out_of_range, offset_y=0, offset_z=0)
     assert "error" in result and result["in_range"] is False
@@ -60,6 +62,7 @@ def test_rescanning_known_sector_refreshes_confidence_without_altering_resources
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, task="scan")
     seed_pod(sid, task="produce_food", storage_current=100.0)
+    seed_pod(sid, task="produce_energy", storage_current=100.0)   # scanning costs energy
     set_pod_task("U_P1", pod, "scan", bearing="E")
     end_of_turn()  # first scan: reveals the sector, stamps then decays confidence
 
@@ -251,6 +254,7 @@ def test_scan_in_transit_still_costs_food_but_reveals_nothing():
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, task="scan")
     seed_pod(sid, task="produce_food", storage_current=100.0)
+    seed_pod(sid, task="produce_energy", storage_current=100.0)   # scanning costs energy
     set_pod_task("U_P1", pod, "scan", bearing="E")
     confirm_move("U_P1", sid, 4, 0, 0)          # in transit at end of turn
     end_of_turn()

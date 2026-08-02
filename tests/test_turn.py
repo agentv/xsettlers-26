@@ -57,6 +57,28 @@ def test_get_next_tick_at_none_until_clock_has_run():
     conn.commit(); conn.close()
     assert get_next_tick_at() == "2026-01-01T00:00:00.000Z"
 
+def test_show_game_status_countdown_is_dashes_when_clock_has_never_run():
+    """No scenario's clock has ticked yet in this test DB, so next_tick_at is
+    None and the countdown must show dashes rather than a stale/garbage time."""
+    from xsettlers_mcp.tools.organization_tools import show_game_status
+    seed_player()
+    status = show_game_status("U_P1")
+    assert status["next_tick_at"] is None
+    assert status["next_tick_countdown"] == "--:--"
+    assert status["display"]["header"] == "Turn 0 of 20 (--:--)"
+
+def test_show_game_status_countdown_formats_mmss_from_next_tick_at():
+    from datetime import datetime, timedelta, timezone
+    from xsettlers_mcp.tools.organization_tools import show_game_status
+    seed_player()
+    future = datetime.now(timezone.utc) + timedelta(minutes=4, seconds=30)
+    conn = get_connection()
+    conn.execute("UPDATE game_state SET next_tick_at=? WHERE id=1",
+                (future.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",))
+    conn.commit(); conn.close()
+    status = show_game_status("U_P1")
+    assert status["next_tick_countdown"] in ("04:30", "04:29")  # clock-skew tolerant
+
 def test_calculate_final_scores_applies_score_weights():
     """The actual game-over win condition, previously untested: score is a
     weighted sum (config/game_config.yaml's score_weights, as of 2026-07-30

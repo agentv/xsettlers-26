@@ -24,6 +24,17 @@ def test_render_status_game_status_uses_standings_rows_key():
     assert "rank" in text
     assert "Player One" in text            # default seed_player display_name
 
+def test_render_status_game_status_drops_decimals_and_utilization():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    status = show_game_status("U_P1")
+    text = render_status(status)
+    assert "utilization" not in text
+    header_line = text.splitlines()[2]
+    assert header_line == "| rank | Player | score | energy | food | goods |"
+    row_line = next(l for l in text.splitlines() if l.startswith("| 1 |"))
+    assert ".0" not in row_line              # whole numbers, no trailing decimal
+
 def test_render_status_show_organization_includes_header_line():
     pid = seed_player(); sid = seed_sector(3, 3, 0); oid = seed_ship(pid, sid)
     seed_pod(oid, task="produce_energy", storage_current=10.0)

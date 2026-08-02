@@ -12,7 +12,25 @@ from engine.turn import (get_current_turn, get_next_tick_at, get_final_scores,
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.sector_tools import (
     get_scan_range, resolve_bearing, bearing_name, SCAN_BEARINGS)
+from datetime import datetime, timezone
 import json, math
+
+def _tick_countdown_display(next_tick_at: str | None) -> str:
+    """
+    "MM:SS" until the next clock tick, or "--:--" when there's nothing
+    ticking -- next_tick_at is None before any scenario is selected or
+    whenever the clock process isn't the one refreshing it (see
+    get_next_tick_at's docstring). Unlike scripts/status.py's _clock_status,
+    this has no way to health-check a separate process -- it runs inside the
+    same process the clock does, so a None value here already means "not
+    currently running," no liveness probe needed.
+    """
+    if not next_tick_at:
+        return "--:--"
+    next_dt = datetime.strptime(next_tick_at, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+    remaining = max(0, round((next_dt - datetime.now(timezone.utc)).total_seconds()))
+    minutes, seconds = divmod(remaining, 60)
+    return f"{minutes:02d}:{seconds:02d}"
 
 VALID_ORG_MISSIONS = {"idle", "move", "colonize", "defend", "attack"}
 VALID_POD_TASKS = {"idle", "produce_energy", "produce_food", "produce_goods", "scan"}
@@ -691,7 +709,9 @@ def show_game_status(player_token: str) -> dict:
     """
     Return the public scoreboard -- turn context (including next_tick_at,
     see show_civilization_status's docstring for the caveat about a paused
-    clock) plus every player's aggregate resource totals, side by side.
+    clock, and next_tick_countdown -- the same value pre-formatted "MM:SS",
+    or "--:--" when next_tick_at is None) plus every player's aggregate
+    resource totals, side by side.
     Unlike show_civilization_status
     (or every other tool in this module), this is NOT ownership-gated to the
     caller's own data: aggregate totals are treated as public standing, the
@@ -772,13 +792,27 @@ def show_game_status(player_token: str) -> dict:
         for s in standings:
             s.setdefault("utilization",
                          round(s["total"] / s["capacity"] * 100, 1) if s.get("capacity") else 0.0)
+    next_tick_countdown = _tick_countdown_display(next_tick_at)
     header = (f"FINAL — game over at turn {final['final_turn']} of {final['turn_limit']}. "
               f"Winner: {final['winner']}" if game_over
-              else f"Turn {current_turn} of {turn_limit}")
+              else f"Turn {current_turn} of {turn_limit} ({next_tick_countdown})")
+
+    # Whole-number display variants -- score/energy/food/goods never carry a
+    # meaningful fraction (production and upkeep are integer per-turn amounts),
+    # so the raw rounded-to-2dp float is noise in a table meant for a phone
+    # screen. Additive, like every other _display field: the raw floats above
+    # are untouched for a client that wants to compute with them.
+    for s in standings:
+        s["score_display"] = f"{s['score']:.0f}"
+        s["energy_display"] = f"{s['energy']:.0f}"
+        s["food_display"] = f"{s['food']:.0f}"
+        s["goods_display"] = f"{s['goods']:.0f}"
+
     return {
         "turn": current_turn,
         "turn_limit": turn_limit,
         "next_tick_at": next_tick_at,
+        "next_tick_countdown": next_tick_countdown,
         "game_over": game_over,
         "is_final": game_over,
         "winner": final["winner"] if game_over else None,
@@ -788,6 +822,12 @@ def show_game_status(player_token: str) -> dict:
             "header": header,
             "resource_abbrev": RESOURCE_ABBREV,
             "rows_key": "standings",
-            "columns": ["rank", "display_name", "score", "energy", "food", "goods", "utilization"],
+            # utilization deliberately excluded from this report -- still a
+            # raw field on every standings row, just not part of the table.
+            "columns": ["rank", "display_name", "score_display", "energy_display",
+                        "food_display", "goods_display"],
+            "column_labels": {"display_name": "Player", "score_display": "score",
+                               "energy_display": "energy", "food_display": "food",
+                               "goods_display": "goods"},
         },
     }

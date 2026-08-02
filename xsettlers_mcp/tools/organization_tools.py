@@ -679,6 +679,11 @@ def show_civilization_status(player_token: str) -> dict:
             "rows_key": "organizations",
             "columns": ["short_name", "status", "cargo_display", "storage_summary",
                         "tasking_summary", "production_summary"],
+            "column_labels": {
+                "short_name": "Unit", "status": "Status", "cargo_display": "Cargo",
+                "storage_summary": "Storage", "tasking_summary": "Tasking",
+                "production_summary": "Production/turn",
+            },
         },
     }
 

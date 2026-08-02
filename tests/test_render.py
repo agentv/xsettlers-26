@@ -12,8 +12,8 @@ def test_render_status_civilization_status_is_hint_driven():
     seed_pod(oid, task="produce_energy", storage_current=10.0)
     status = show_civilization_status("U_P1")
     text = render_status(status)
-    assert "short_name" in text            # header row uses the API's own column names
-    assert "cargo_display" in text
+    assert "Unit" in text                  # column_labels overrides short_name -> "Unit"
+    assert "Cargo" in text                 # ...and cargo_display -> "Cargo"
     assert status["organizations"][0]["short_name"] in text
     assert status["organizations"][0]["cargo_display"] in text
 

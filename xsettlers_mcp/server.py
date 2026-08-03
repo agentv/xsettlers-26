@@ -188,14 +188,22 @@ async def call_tool(name: str, arguments: dict):
     # since jsonschema.validate() (in the SDK's call_tool wrapper) only rejects
     # extra properties when a schema sets additionalProperties: false, which
     # none of these do. Popped here so it never reaches a tool function.
+    #
+    # Three values:
+    #   markdown_view (default) -- JSON + markdown table, for a client showing both.
+    #   data_only               -- JSON alone, for a client that renders its own view.
+    #   html_svg                -- reserved for a future rendered-graphics response;
+    #                              not built yet, so it's treated as markdown_view
+    #                              (JSON + markdown table) until it exists, same as
+    #                              any other value that isn't data_only.
     arguments = dict(arguments)
     response_format = arguments.pop("response_format", "markdown_view")
     result = fn(**arguments)
 
-    content = [types.TextContent(type="text", text=_as_json(result))]
-    if response_format != "data_only":
-        content.append(types.TextContent(type="text", text=_as_markdown(result)))
-    return content
+    if response_format == "data_only":
+        return [types.TextContent(type="text", text=_as_json(result))]
+    return [types.TextContent(type="text", text=_as_json(result)),
+            types.TextContent(type="text", text=_as_markdown(result))]
 
 
 def _as_markdown(result) -> str:

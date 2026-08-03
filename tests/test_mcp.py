@@ -100,3 +100,15 @@ def test_call_tool_response_format_never_reaches_the_tool_function():
     content = asyncio.run(call_tool("get_player_state",
                                      {"player_token": "U_TEST_001", "response_format": "data_only"}))
     assert len(content) == 1
+
+def test_call_tool_html_svg_falls_back_to_default_json_and_markdown():
+    # html_svg is reserved for a future rendered-graphics response and isn't
+    # built yet -- until it exists it's treated the same as markdown_view
+    # (JSON + markdown table), not given special handling.
+    import asyncio, json
+    from xsettlers_mcp.server import call_tool
+    content = asyncio.run(call_tool("get_player_state",
+                                     {"player_token": "U_TEST_001", "response_format": "html_svg"}))
+    assert len(content) == 2
+    assert json.loads(content[0].text)["player"]["email"] == "p1@test.com"
+    assert content[1].text == "(no rows)"

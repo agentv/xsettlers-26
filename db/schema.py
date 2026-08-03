@@ -121,6 +121,13 @@ def init_schema():
         cols = {row[1] for row in cur.execute("PRAGMA table_info(game_state)").fetchall()}
         if "next_tick_at" not in cols:
             cur.execute("ALTER TABLE game_state ADD COLUMN next_tick_at TEXT")
+        # One-time migration: game_state gains frozen (2026-08-02) -- lets a
+        # developer halt end_of_turn() from firing (via scripts/clock.py)
+        # without killing the server process, e.g. mid-conversation testing
+        # where a tick landing unexpectedly would change state out from under
+        # the discussion. See engine/clock.py's run_clock().
+        if "frozen" not in cols:
+            cur.execute("ALTER TABLE game_state ADD COLUMN frozen INTEGER DEFAULT 0")
     # One-time migration: drop sectors.food_capacity/goods_capacity (2026-08-02).
     # Only energy is drawn from the map -- food and goods are manufactured out
     # of resources already held (see engine/production.py's
@@ -163,6 +170,7 @@ def init_schema():
             id            INTEGER PRIMARY KEY DEFAULT 1,
             current_turn  INTEGER DEFAULT 0,
             next_tick_at  TEXT,
+            frozen        INTEGER DEFAULT 0,
             CHECK (id = 1)
         );
         INSERT OR IGNORE INTO game_state (id, current_turn) VALUES (1, 0);

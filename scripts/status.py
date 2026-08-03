@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from engine.clock import is_frozen
 from views.render import render_status
 from xsettlers_mcp.tools.organization_tools import show_game_status, show_civilization_status
 
@@ -47,7 +48,14 @@ def _clock_status(next_tick_at: str | None) -> str:
     refreshing it, so trusting the timestamp alone would misreport an old
     countdown as if it were live (see engine.turn.get_next_tick_at's
     docstring). Only compute a real countdown once the server's confirmed up.
+
+    Distinct from "clock frozen": that's a deliberate hold set via
+    scripts/clock.py while the server keeps running (see engine/clock.py's
+    game_state.frozen flag) -- checked first since a frozen clock is still a
+    live, reachable server, just intentionally not ticking.
     """
+    if is_frozen():
+        return "clock frozen (testing)"
     if not _server_is_up() or not next_tick_at:
         return "clock paused"
     next_dt = datetime.strptime(next_tick_at, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)

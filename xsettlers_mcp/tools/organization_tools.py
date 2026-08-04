@@ -548,10 +548,12 @@ def show_civilization_status(player_token: str) -> dict:
       _org_production -- gross per-turn output at full input availability,
       not netted against consumption costs). Ships in
       transit are marked with in_transit=True, destination sector, expected
-      arrival turn, and turns_remaining as raw fields -- arrival_turn resolves
-      when end_of_turn() is called *for* that turn number, so a ship whose
-      arrival_turn equals the current turn hasn't landed yet (turns_remaining
-      == 0 means "lands when this turn ends," not "already landed"). The
+      arrival turn, and turns_remaining as raw fields -- arrival_turn is the
+      turn the ship is actually free to act, not the turn whose end_of_turn()
+      pass performs the landing (that happens one turn earlier; see
+      engine/turn.py's arrival resolution). turns_remaining counts down to
+      that same turn, so it only reaches 0 once the ship has actually landed
+      and can take a new mission. The
       display `status` string itself is intentionally terse -- just "in
       transit", full stop, no destination or ETA -- a player asked for this
       view to be that minimal; dest_sector/turns_remaining/arrival_turn are
@@ -636,16 +638,14 @@ def show_civilization_status(player_token: str) -> dict:
                     "coords": [aq["dest_x"], aq["dest_y"], aq["dest_z"]]
                 }
                 entry["arrival_turn"] = aq["arrival_turn"]
-                # arrival_turn resolves when end_of_turn() is called *for*
-                # that turn number -- so if arrival_turn == current_turn, the
-                # ship hasn't landed yet even though the player is already on
-                # that turn; it lands when this turn is ended, not before.
-                # turns_remaining makes that unambiguous instead of implying
-                # it already should have happened.
+                # arrival_turn is the turn the ship is actually free to act
+                # -- landing itself happens one turn earlier, during the
+                # end_of_turn() pass for arrival_turn-1 (see engine/turn.py).
+                # turns_remaining counts down to arrival_turn directly, so it
+                # reaches 0 exactly when the ship can take a new mission, not
+                # one turn before.
                 # turns_remaining/arrival_turn/dest_sector stay as raw fields
-                # (still the authority on when a ship whose arrival_turn ==
-                # current_turn actually lands -- see the note above) -- just
-                # no longer folded into the display string. A player asked
+                # -- no longer folded into the display string. A player asked
                 # for the display status to just say "in transit", full stop
                 # -- destination and ETA are still on the entry for a client
                 # that wants to build its own richer view from the raw data.

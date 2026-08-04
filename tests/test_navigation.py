@@ -12,7 +12,9 @@ def test_preview_move_returns_travel_time():
     result = preview_move("U_P1", sid, 3, 0, 0, jump_range_per_turn=1)
     assert result["preview"] is True
     assert result["turns_needed"] == 3
-    assert result["arrival_turn"] == get_current_turn() + 3
+    # arrival_turn is the turn the ship is free to act, one turn after the
+    # end_of_turn() pass that performs the landing (see engine/turn.py).
+    assert result["arrival_turn"] == get_current_turn() + 3 + 1
 
 def test_preview_move_no_db_write():
     """preview_move must not park the ship or create an arrival_queue row."""

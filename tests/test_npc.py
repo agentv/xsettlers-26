@@ -89,8 +89,8 @@ def test_fan_out_dispatches_opening_moves_for_eight_ships():
     assert memory["opening_dispatched"] is True
     assert memory["second_leg_dispatched"] is False
     assert set(memory["mover"].keys()) == {"north", "south", "east", "west"}
-    # arrival_turn (3, distance 3 at jump_range 1) + hold_turns (default 2)
-    assert memory["second_leg_turn"] == 5
+    # arrival_turn (distance 3 at jump_range 1 => turn 0+3+1=4) + hold_turns (default 2)
+    assert memory["second_leg_turn"] == 6
 
 def test_end_of_turn_automatically_drives_npc_through_both_legs():
     """
@@ -113,7 +113,7 @@ def test_end_of_turn_automatically_drives_npc_through_both_legs():
     conn.close()
     assert all(o["sector_id"] == -1 for o in orgs)  # all in transit
 
-    for _ in range(5):  # turns 1..5: arrival resolves, then hold_turns elapses, then second leg fires
+    for _ in range(6):  # turns 1..6: arrival resolves, then hold_turns elapses, then second leg fires
         end_of_turn()
 
     memory = _memory(pid)

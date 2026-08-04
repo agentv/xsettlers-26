@@ -10,6 +10,13 @@ def preview_move(player_token: str, ship_id: int,
     Returns turns_needed and arrival_turn. No DB writes, no event logged.
     Destination is any coordinate triple -- sectors are lazily instantiated
     (see db/sectors.py), so the destination need not exist yet.
+
+    arrival_turn is the turn number the ship is actually free to act again --
+    not the turn whose end_of_turn() pass performs the landing. Landing
+    happens one turn earlier than that (see engine/turn.py's arrival
+    resolution, which fires a turn ahead of the stored value for exactly this
+    reason), so a player reading "arrival_turn: 5" can plan the ship's turn-5
+    orders directly instead of accounting for a hidden one-turn lag.
     """
     conn = get_connection(); cur = conn.cursor()
     cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
@@ -35,7 +42,7 @@ def preview_move(player_token: str, ship_id: int,
     conn.close()
     return {"preview": True, "ship_id": ship_id, "from_sector_id": ship["sector_id"],
             "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z, "turns_needed": turns_needed,
-            "arrival_turn": current_turn + turns_needed}
+            "arrival_turn": current_turn + turns_needed + 1}
 
 def confirm_move(player_token: str, ship_id: int,
                  dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
@@ -69,7 +76,10 @@ def confirm_move(player_token: str, ship_id: int,
         (dest_z-ship["coord_z"])**2)
     turns_needed = max(1, math.ceil(distance / jump_range_per_turn))
     current_turn = get_current_turn()
-    arrival_turn = current_turn + turns_needed
+    # +1: arrival_turn names the turn the ship is free to act, one turn after
+    # the end_of_turn() pass that actually performs the landing (see
+    # engine/turn.py's arrival resolution query, which is offset to match).
+    arrival_turn = current_turn + turns_needed + 1
     # Write-ahead: log BEFORE mutating state
     record_event(
         event_type="ship.move_confirmed",

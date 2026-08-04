@@ -190,8 +190,12 @@ def end_of_turn():
     # 2. Resolve arrivals
     cur.execute("SELECT current_turn FROM game_state WHERE id=1")
     current_turn = cur.fetchone()[0]
+    # arrival_turn names the turn the ship becomes free to act (see
+    # navigation_tools.confirm_move), one turn after the landing pass itself
+    # -- so this end_of_turn() call (which is about to advance current_turn
+    # to current_turn+1) is the one that must perform the landing.
     cur.execute("SELECT org_id,dest_x,dest_y,dest_z FROM arrival_queue WHERE arrival_turn<=?",
-                (current_turn,))
+                (current_turn + 1,))
     for arrival in cur.fetchall():
         org = cur.execute("SELECT player_id FROM organizations WHERE id=?",
                           (arrival["org_id"],)).fetchone()
@@ -200,7 +204,7 @@ def end_of_turn():
                 arrival["dest_x"], arrival["dest_y"], arrival["dest_z"])
             cur.execute("""UPDATE organizations SET sector_id=?,mission='idle',mission_params=NULL,
                            is_mobile=1 WHERE id=?""", (dest_sector_id,arrival["org_id"]))
-    cur.execute("DELETE FROM arrival_queue WHERE arrival_turn<=?", (current_turn,))
+    cur.execute("DELETE FROM arrival_queue WHERE arrival_turn<=?", (current_turn + 1,))
 
     # 3. Org upkeep, then pod production (input-costed, see engine/production.py's
     #    POD_CONSUMPTION_RECIPE), then scan resolution.

@@ -273,6 +273,24 @@ expects to shape the game with.
 
 ## Design (Data Model canvas)
 
+* [ ] **Ship's log — free-form notes plus queued future-turn commands.** Raised
+  2026-08-04. The idea: a per-organization log a player can write into with
+  free-form text (reminders, context for themselves) and, more concretely,
+  conditional commands to execute automatically on a future trigger — e.g.
+  "on arrival, set scan pattern to NE" or "on arrival, begin mining" (mining
+  itself doesn't exist yet — see the ship-classes/pod-type backlog below).
+  Distinct from an event's payload (records what already happened) and from
+  `mission_params` (holds the current mission's own arguments) — this would
+  be a queue of *not-yet-executed* instructions attached to an org, most
+  naturally resolved by `engine/turn.py` at the same point arrivals resolve,
+  since "on arrival" is the trigger raised in conversation. Not designed:
+  schema shape (a new table keyed by org_id, closer to `arrival_queue`'s
+  shape than to `events`?), which triggers are supported beyond arrival, or
+  how a queued command differs from just calling the tool preemptively today.
+  Explicitly beyond MVP — noted because the fan-out NPC strategy
+  (`engine/npc.py`) already hand-rolls a private version of exactly this
+  (`memory["second_leg_turn"]`, a bespoke "do X once condition Y" pattern)
+  for lack of a general mechanism.
 * [ ] **Ship classes** — not built, not documented anywhere yet. Today every `org_type='ship'` row is a single undifferentiated archetype — `org_type` is a flat ship/colony binary with no stat variation within "ship," and the closest adjacent concept, `pod_type` (`crew`/`cargo`/`defense`/`attack`/`ship`/`sensor`), is about individual pod roles, not ship-level archetypes — deferred, not instantiated. The idea as raised:
   - **Ranger class** — mobile, fast, longer range/faster movement, traded off against thinner "skin" (durability/cargo, exact tradeoff not yet specified)
   - **Transit ability is a class-differentiating stat** (raised 2026-07-30). Today `jump_range_per_turn` is a per-call argument defaulting to 1, identical for every hull — so "fast ship" has nowhere to live. Once transit stress exists (see "Design direction" above), how far a class moves per turn and what that movement costs it become the natural axis distinguishing hulls: a Ranger buys range and pays in cargo, a Colony hull is the reverse. Sequence this after transit stress, since range only means something once movement has a price.

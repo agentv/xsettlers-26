@@ -613,3 +613,45 @@ def test_set_org_scan_target_clears_when_given_no_coordinates():
     row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
     conn.close()
     assert row["scan_offset_x"] is None
+
+# --- show_organization's scanner summary (see _scanner_summary) ---
+
+def test_show_organization_reports_no_scanners_when_none_are_active():
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    result = show_organization("U_P1", oid)
+    assert result["scanners"] == []
+    assert "footer" not in result["display"]
+
+def test_show_organization_lists_the_orgs_own_aimed_sensors():
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    set_org_scan_bearing("U_P1", oid, "N")
+    result = show_organization("U_P1", oid)
+    assert result["scanners"] == [{"source": "sensors", "bearing": "N", "aimed": True}]
+    assert result["display"]["footer"] == "Scans: North"
+
+def test_show_organization_lists_multiple_aimed_scan_pods_and_sensors():
+    """The user's own example: three scanners aimed at three different
+    bearings should read back as one comma-joined footer line."""
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    set_org_scan_bearing("U_P1", oid, "N")
+    p1 = seed_pod(oid, task="scan")
+    p2 = seed_pod(oid, task="scan")
+    set_pod_scan_bearing("U_P1", p1, "S")
+    set_pod_scan_bearing("U_P1", p2, "SE")
+    result = show_organization("U_P1", oid)
+    assert [s["bearing"] for s in result["scanners"]] == ["N", "S", "SE"]
+    assert result["display"]["footer"] == "Scans: North, South, Southeast"
+
+def test_show_organization_flags_an_unaimed_scan_pod_without_dropping_it():
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    pod_id = seed_pod(oid, task="scan")
+    result = show_organization("U_P1", oid)
+    assert result["scanners"] == [{"source": f"pod {pod_id}", "bearing": None, "aimed": False}]
+    assert result["display"]["footer"] == "Scans: none aimed (+1 unaimed)"
+
+def test_show_organization_notes_unaimed_pods_alongside_aimed_ones():
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    set_org_scan_bearing("U_P1", oid, "W")
+    seed_pod(oid, task="scan")
+    result = show_organization("U_P1", oid)
+    assert result["display"]["footer"] == "Scans: West (+1 unaimed)"

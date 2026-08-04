@@ -55,6 +55,54 @@ _NAME_PREFIXES_TO_STRIP = ("Ship-", "Colony-")
 _TASK_DISPLAY = {"produce_energy": "Energy", "produce_food": "Food",
                   "produce_goods": "Goods", "idle": "Idle", "scan": "Scan"}
 
+# Spelled-out compass names for the scanners footer (see _scanner_summary) --
+# distinct from the terse codes (SCAN_BEARINGS' "N"/"NE"/"N2") used everywhere
+# else, since this is a summary line meant to read in plain English rather
+# than a compact table cell.
+_BEARING_FULL_NAME = {
+    "N": "North", "NE": "Northeast", "E": "East", "SE": "Southeast",
+    "S": "South", "SW": "Southwest", "W": "West", "NW": "Northwest",
+    "N2": "North (2)", "E2": "East (2)", "S2": "South (2)", "W2": "West (2)",
+}
+
+def _scanner_summary(cur, org: dict) -> tuple[list, str | None]:
+    """
+    Every currently-active scanner on this org -- its own innate sensor (see
+    organizations.scan_offset_*) plus any pod on the scan task -- as a list of
+    {"source", "bearing", "aimed"} dicts, and a ready-to-render footer line
+    ("Scans: North, South, Southeast") for clients that just want the text.
+
+    An aimed scanner shows its compass name (or the raw offset if it doesn't
+    land on one of the 12 named bearings); an unaimed scan pod still costs its
+    food and reveals nothing, so it's counted and flagged rather than silently
+    dropped (see set_pod_task's docstring). Returns ([], None) when the org
+    has no scanning capacity in use at all -- nothing to show, not an empty
+    line.
+    """
+    scanners = []
+    if org["scan_offset_x"] is not None:
+        name = bearing_name(org["scan_offset_x"], org["scan_offset_y"], org["scan_offset_z"])
+        display = name or f"({org['scan_offset_x']},{org['scan_offset_y']},{org['scan_offset_z']})"
+        scanners.append({"source": "sensors", "bearing": display, "aimed": True})
+    cur.execute("SELECT id, task_params FROM pods WHERE org_id=? AND task='scan' ORDER BY id",
+                (org["id"],))
+    for pod in cur.fetchall():
+        if pod["task_params"]:
+            p = json.loads(pod["task_params"])
+            name = bearing_name(p["offset_x"], p["offset_y"], p["offset_z"])
+            display = name or f"({p['offset_x']},{p['offset_y']},{p['offset_z']})"
+            scanners.append({"source": f"pod {pod['id']}", "bearing": display, "aimed": True})
+        else:
+            scanners.append({"source": f"pod {pod['id']}", "bearing": None, "aimed": False})
+    if not scanners:
+        return [], None
+    aimed = [_BEARING_FULL_NAME.get(s["bearing"], s["bearing"]) for s in scanners if s["aimed"]]
+    unaimed = sum(1 for s in scanners if not s["aimed"])
+    footer = f"Scans: {', '.join(aimed)}" if aimed else "Scans: none aimed"
+    if unaimed:
+        footer += f" (+{unaimed} unaimed)"
+    return scanners, footer
+
 def _short_name(name: str) -> str:
     """"Ship-P1-01" -> "P1-01", "Colony-P1" -> "P1" -- a ready-to-display
     label so clients don't need their own name-shortening rule."""
@@ -483,6 +531,10 @@ def show_organization(player_token: str, org_id: int) -> dict:
     "200/200") alongside the raw fields -- all raw fields stay present, this
     is purely additive. `display.rows_key` ("tasks") names which top-level
     field holds the row list, for a generic renderer -- see views/render.py.
+    `scanners` (see _scanner_summary) lists every active scanner on this org
+    -- innate sensors plus scan-task pods -- and `display.footer`, when
+    present, is that same information as a ready-to-render line below the
+    table ("Scans: North, South, Southeast").
     Ownership-gated — only the calling player's orgs are accessible.
     """
     conn = get_connection(); cur = conn.cursor()
@@ -493,6 +545,7 @@ def show_organization(player_token: str, org_id: int) -> dict:
     cur.execute("""
         SELECT o.id, o.org_type, o.name, o.mission, o.mission_params,
                o.is_mobile, o.sector_id,
+               o.scan_offset_x, o.scan_offset_y, o.scan_offset_z,
                s.coord_x, s.coord_y, s.coord_z
         FROM organizations o
         LEFT JOIN sectors s ON s.id = o.sector_id
@@ -517,6 +570,8 @@ def show_organization(player_token: str, org_id: int) -> dict:
               if org["sector_id"] != -1 else "in transit")
     result["short_name"] = _short_name(org["name"])
     result["status"] = status
+    scanners, scanners_footer = _scanner_summary(cur, org)
+    result["scanners"] = scanners
     result["display"] = {
         "header": f"{org['name']} — {status}, {org['mission']}",
         "resource_abbrev": RESOURCE_ABBREV,
@@ -524,6 +579,8 @@ def show_organization(player_token: str, org_id: int) -> dict:
         "columns": ["task_display", "count", "energy", "food", "goods", "capacity_display"],
         "column_labels": {"task_display": "Task", "capacity_display": "Utilization"},
     }
+    if scanners_footer:
+        result["display"]["footer"] = scanners_footer
     conn.close()
     return result
 

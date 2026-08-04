@@ -1,6 +1,7 @@
 from views.render import render_status, render_map
 from xsettlers_mcp.tools.organization_tools import (
-    show_civilization_status, show_game_status, show_organization
+    show_civilization_status, show_game_status, show_organization,
+    set_org_scan_bearing
 )
 from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
 from tests.conftest import (
@@ -42,6 +43,23 @@ def test_render_status_show_organization_includes_header_line():
     text = render_status(status)
     assert text.startswith(f"**{status['display']['header']}**")
     assert "Energy" in text                # task_display for produce_energy
+
+def test_render_status_appends_the_scanner_footer_below_the_table():
+    pid = seed_player(); sid = seed_sector(3, 3, 0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    set_org_scan_bearing("U_P1", oid, "NE")
+    status = show_organization("U_P1", oid)
+    text = render_status(status)
+    lines = text.splitlines()
+    assert lines[-1] == "Scans: Northeast"
+    assert lines[-2] == ""                 # blank line separates footer from table
+
+def test_render_status_omits_footer_section_when_there_is_none():
+    pid = seed_player(); sid = seed_sector(3, 3, 0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    status = show_organization("U_P1", oid)
+    text = render_status(status)
+    assert "Scans:" not in text
 
 def test_render_status_applies_column_labels_override():
     """show_organization's column_labels overrides task_display/capacity_display

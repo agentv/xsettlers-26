@@ -12,9 +12,11 @@ def render_status(data: dict) -> str:
     Generic renderer for any tool that follows the display-hints convention:
     a top-level `display` dict naming `rows_key` (which field holds the list of
     row-dicts to render), `columns` (which fields to show, in order), an
-    optional `header` line, and an optional `column_labels` dict overriding a
+    optional `header` line, an optional `column_labels` dict overriding a
     column's header text (keyed by field name) when the raw field name isn't
-    what a human should read -- e.g. `task_display` -> "Task". Columns with no
+    what a human should read -- e.g. `task_display` -> "Task" -- and an
+    optional `footer` line (or list of lines) appended below the table, e.g.
+    show_organization's scanner summary. Columns with no
     entry in `column_labels` header as the field name itself, same as always.
     Covers the status tools in
     xsettlers_mcp/tools/organization_tools.py (show_game_status,
@@ -52,6 +54,11 @@ def render_status(data: dict) -> str:
 
     headers = [labels.get(c, c) for c in columns]
     lines.extend(_markdown_table(headers, [[str(r.get(c, "")) for c in columns] for r in rows]))
+
+    footer = display.get("footer")
+    if footer:
+        lines.append("")
+        lines.extend(footer if isinstance(footer, list) else [footer])
     return "\n".join(lines)
 
 

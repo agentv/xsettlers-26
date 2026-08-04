@@ -2,10 +2,10 @@ from db.connection import get_connection
 from db.sectors import TURNS_TO_BLINK_OUT
 
 # --- Neighborhood viewport ---------------------------------------------------
-# Radius 5 gives an 11x11 bounding square, which is about as wide as a markdown
+# Radius 4 gives a 9x9 bounding square, which is about as wide as a markdown
 # table stays readable on a phone -- the target client. MAX_ is a guard against
 # a caller asking for a viewport whose cell count explodes the response.
-NEIGHBORHOOD_RADIUS = 5
+NEIGHBORHOOD_RADIUS = 4
 MAX_NEIGHBORHOOD_RADIUS = 10
 
 # Cell vocabulary. Every marker is <= 3 characters so the grid stays narrow.
@@ -295,7 +295,7 @@ def show_sector_neighborhood(
         "off_plane_count": sum(1 for s in sectors if not s["in_plane"]),
         "display": {
             "kind": "map",
-            "header": f"Neighborhood of {origin} — radius {radius}, z-plane {cz}"
+            "header": f"Neighborhood of {origin}"
                       + (f", turn {current_turn}" if current_turn is not None else ""),
             "grid": {"corner": "y/x", "x_labels": [str(x) for x in x_range], "rows": rows},
             "legend": CELL_LEGEND,

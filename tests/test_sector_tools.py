@@ -90,9 +90,9 @@ def test_rescanning_known_sector_refreshes_confidence_without_altering_resources
 
 # --- neighborhood viewport (see show_sector_neighborhood) ---
 
-# Count of (dx,dy) with dx^2+dy^2 <= 25 over the 11x11 bounding square. The
-# remaining 121-81 cells are the out-of-range corners that render blank.
-IN_RANGE_CELLS_AT_R5 = 81
+# Count of (dx,dy) with dx^2+dy^2 <= 16 over the 9x9 bounding square. The
+# remaining 81-49 cells are the out-of-range corners that render blank.
+IN_RANGE_CELLS_AT_R4 = 49
 
 def _seed_colony(player_id, sector_id, name="Test Colony"):
     conn = get_connection()
@@ -118,27 +118,27 @@ def _cell_at(result, x, y):
 
 def test_show_sector_neighborhood_returns_full_lattice_around_an_org():
     """The grid is synthesized from center+radius, not from known sectors --
-    a player who has seen exactly one sector still gets a full 11x11."""
+    a player who has seen exactly one sector still gets a full 9x9."""
     pid, sid, oid = _home()
     result = show_sector_neighborhood("U_P1", org_id=oid)
     grid = result["display"]["grid"]
     assert result["center"] == {"x": 25, "y": 25, "z": 0}
-    assert result["radius"] == 5
-    assert len(grid["rows"]) == 11
-    assert grid["x_labels"] == [str(x) for x in range(20, 31)]
-    assert [r["label"] for r in grid["rows"]] == [str(y) for y in range(20, 31)]
+    assert result["radius"] == 4
+    assert len(grid["rows"]) == 9
+    assert grid["x_labels"] == [str(x) for x in range(21, 30)]
+    assert [r["label"] for r in grid["rows"]] == [str(y) for y in range(21, 30)]
     assert _cell_at(result, 25, 25) == "S1"
-    assert result["unknown_in_range"] == IN_RANGE_CELLS_AT_R5 - 1
+    assert result["unknown_in_range"] == IN_RANGE_CELLS_AT_R4 - 1
 
 def test_show_sector_neighborhood_blanks_out_of_range_and_dots_the_unseen():
     """The two states a player most needs to tell apart: 'outside my range'
     and 'in range, never looked'. Blank vs UNKNOWN_CELL, never both blank."""
     pid, sid, oid = _home()
     result = show_sector_neighborhood("U_P1", org_id=oid)
-    assert _cell_at(result, 20, 20) == EMPTY_CELL      # corner: 50 > 25
-    assert _cell_at(result, 30, 30) == EMPTY_CELL
-    assert _cell_at(result, 25, 20) == UNKNOWN_CELL    # straight up, exactly r=5
-    assert _cell_at(result, 24, 20) == EMPTY_CELL      # one step over: 26 > 25
+    assert _cell_at(result, 21, 21) == EMPTY_CELL      # corner: 32 > 16
+    assert _cell_at(result, 29, 29) == EMPTY_CELL
+    assert _cell_at(result, 25, 21) == UNKNOWN_CELL    # straight up, exactly r=4
+    assert _cell_at(result, 24, 21) == EMPTY_CELL      # one step over: 17 > 16
 
 def test_show_sector_neighborhood_marks_a_seen_empty_cell_without_its_confidence():
     """Confidence is a reporting number, not grid content -- a sector is

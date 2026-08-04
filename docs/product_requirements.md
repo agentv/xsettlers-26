@@ -254,7 +254,7 @@ Renders the neighborhood around a center point as a ready-to-draw map. The cente
 * an `org_id` — the neighborhood is centered on that organization's current sector (the normal way to call it: "show me what's around this ship")
 * a coordinate triple `(x, y, z)` — centered on an arbitrary point in space
 
-Default radius 5, giving an 11×11 bounding square (max 10). Ships in transit (at the sentinel sector) have no location and cannot serve as an `org_id` center — callers must supply explicit coordinates in that case.
+Default radius 4, giving a 9×9 bounding square (max 10). Ships in transit (at the sentinel sector) have no location and cannot serve as an `org_id` center — callers must supply explicit coordinates in that case.
 
 Unlike `get_sector_map`, which returns a bare list of what the player knows, this returns the **complete lattice** — every coordinate in range, including ones never visited. An unvisited cell has no `sectors` row at all under the lazy-reveal model, so the grid is synthesized from center and radius and known sectors are overlaid onto it. This is deliberate: a cell you have never seen is the most actionable thing on the map, since it is where a scan pod should go.
 

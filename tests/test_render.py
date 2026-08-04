@@ -92,7 +92,7 @@ def test_render_map_draws_a_grid_with_absolute_axis_labels():
     text = render_map(_neighborhood())
     lines = text.splitlines()
     header = next(i for i, l in enumerate(lines) if l.startswith("| y/x"))
-    assert lines[header].startswith("| y/x | 20 | 21 |")   # x across, absolute coords
+    assert lines[header].startswith("| y/x | 21 | 22 |")   # x across, absolute coords
     assert lines[header + 1].startswith("|---|")
     assert "| **25** |" in text                            # y down the side
     assert "S1" in text

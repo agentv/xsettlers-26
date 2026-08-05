@@ -273,24 +273,32 @@ expects to shape the game with.
 
 ## Design (Data Model canvas)
 
-* [ ] **Ship's log — free-form notes plus queued future-turn commands.** Raised
-  2026-08-04. The idea: a per-organization log a player can write into with
-  free-form text (reminders, context for themselves) and, more concretely,
-  conditional commands to execute automatically on a future trigger — e.g.
-  "on arrival, set scan pattern to NE" or "on arrival, begin mining" (mining
-  itself doesn't exist yet — see the ship-classes/pod-type backlog below).
-  Distinct from an event's payload (records what already happened) and from
-  `mission_params` (holds the current mission's own arguments) — this would
-  be a queue of *not-yet-executed* instructions attached to an org, most
-  naturally resolved by `engine/turn.py` at the same point arrivals resolve,
-  since "on arrival" is the trigger raised in conversation. Not designed:
-  schema shape (a new table keyed by org_id, closer to `arrival_queue`'s
-  shape than to `events`?), which triggers are supported beyond arrival, or
-  how a queued command differs from just calling the tool preemptively today.
-  Explicitly beyond MVP — noted because the fan-out NPC strategy
-  (`engine/npc.py`) already hand-rolls a private version of exactly this
-  (`memory["second_leg_turn"]`, a bespoke "do X once condition Y" pattern)
-  for lack of a general mechanism.
+* [x] ~~Ship's log — free-form notes plus queued future-turn commands.~~
+  **Built 2026-08-05** (commit `c0c3a89`). Queued commands only — free-form
+  notes still not built, deferred as a trivial low-risk add-on whenever
+  there's an actual use for them. Four fixed trigger primitives, not an
+  arbitrary N-turn delay: `during_transit` (event-triggered, fires the
+  instant an org departs — dispatched from `engine/movement.py`'s
+  `apply_confirm_move`, restricted to `action='set_pod_task'` since pod
+  tasking is the one thing not locked by departure), `before_arrival` (fires
+  the same `end_of_turn()` pass that lands the org), `after_arrival` (fires
+  exactly one pass later), and `at_turn` (an explicit absolute turn number,
+  independent of any move — for orders that don't fit the arrival-relative
+  model at all). New table `org_command_queue` (`db/schema.py`); dispatch
+  logic in `engine/ship_log.py`, called from `engine/turn.py`'s `end_of_turn()`
+  as step 2.5, right after arrival resolution and before production so a
+  chained action sees the org's just-landed state. New MCP tool
+  `queue_command` (`xsettlers_mcp/tools/organization_tools.py`). Action
+  whitelist: `move` and `set_pod_task`, each dispatched via a `cur`-based
+  core mutation helper (`engine/movement.py`, `engine/pod_tasking.py`) split
+  out from the player-facing tool specifically so dispatch can run inside
+  `engine/turn.py`'s own open transaction without a second self-connecting
+  call colliding with it ("database is locked" — `db/connection.py` sets no
+  `busy_timeout`). `engine/npc.py`'s `_fan_out_consolidate` — the strategy
+  that originally motivated this — migrated off its hand-rolled
+  `memory["second_leg_turn"]` poll onto `after_arrival`, deleting that
+  bespoke pattern entirely; its `hold_turns` config (previously 2) is gone,
+  since `after_arrival` is fixed at exactly one turn. See `tests/test_ship_log.py`.
 * [ ] **Ship classes** — not built, not documented anywhere yet. Today every `org_type='ship'` row is a single undifferentiated archetype — `org_type` is a flat ship/colony binary with no stat variation within "ship," and the closest adjacent concept, `pod_type` (`crew`/`cargo`/`defense`/`attack`/`ship`/`sensor`), is about individual pod roles, not ship-level archetypes — deferred, not instantiated. The idea as raised:
   - **Ranger class** — mobile, fast, longer range/faster movement, traded off against thinner "skin" (durability/cargo, exact tradeoff not yet specified)
   - **Transit ability is a class-differentiating stat** (raised 2026-07-30). Today `jump_range_per_turn` is a per-call argument defaulting to 1, identical for every hull — so "fast ship" has nowhere to live. Once transit stress exists (see "Design direction" above), how far a class moves per turn and what that movement costs it become the natural axis distinguishing hulls: a Ranger buys range and pays in cargo, a Colony hull is the reverse. Sequence this after transit stress, since range only means something once movement has a price.
@@ -328,7 +336,20 @@ The long-term vision (see `docs/dev_history.md` for the architectural groundwork
 
 ### NPC strategy profiles — remaining work
 
-Core system is built (see `docs/dev_history.md`'s 2026-07-30 entry: schema, registry, execution hook, `assign_npc_profile()`). Still open:
+Core system is built (see `docs/dev_history.md`'s 2026-07-30 entry: schema, registry, execution hook, `assign_npc_profile()`). `fan_out_consolidate` now runs on the ship's log (see above) rather than hand-rolled polling — the general dispatch mechanism these strategies actually need now exists. Still open:
 
-* [ ] Only one registered strategy (`fan_out_consolidate`) exists — no `set_mission`/`set_pod_task`-driven strategies yet; the registry supports them, nothing uses them.
+* [ ] Only one registered strategy (`fan_out_consolidate`) is actually implemented — the registry supports `set_mission`/`set_pod_task`-driven strategies, nothing else uses them yet.
 * [ ] No roster-time NPC assignment — still a manual `assign_npc_profile()` call, not wired into any lobby/bootstrap flow (see "Multi-game lobby" above).
+
+#### Fleet-strategy taxonomy — named 2026-08-05, not yet implemented
+
+A conversation (not a plan-mode design pass) named four behavioral archetypes and, more importantly, reframed what they attach to: **these are fleet strategies, not player strategies.** A player (NPC or, eventually, human) can run several fleets at once, each on its own strategy — e.g. one fleet turtling at the home colony while another fans out. `npc_profiles` today is `player_id`-keyed (one strategy/config/memory blob per player, see `db/npc_profiles.py`) — fleet-scoped assignment needs a `fleet_id` instead, and **fleets don't exist as a concept in the data model at all yet**: `organizations.player_id` is the only ownership link; there is no notion of a named subset of a player's organizations. **In the current MVP a player has exactly one implicit fleet — everything they own** — so `player_id`-keying happens to be correct today by coincidence, not by design; multi-fleet-per-player is explicitly future work, not a bug in the current model. Rollout: fleet strategies stay NPC-only until "advanced" versions of the game expose explicit fleet-strategy assignment to human players.
+
+The four named styles, as characterized in conversation (broad guidelines, not full specs):
+
+* **turtle** — hold still, take no actions, ever. Trivial to implement (`return memory` unchanged). Already has one real data point: this is exactly what "Player Two" did in the Diaspora mock-run comparison (see `docs/dev_history.md` if/when that session gets written up) — 2240 points, 14.9% behind a burst-and-colonize opponent.
+* **fan_out** — distribute outward *and find opportunity*. Not the same as today's `fan_out_consolidate`, which is a blind fixed-offset pattern (jump N sectors in 4 preset directions regardless of what's there). A true opportunity-seeking fan_out would need to scan first and let what's *found* — richer sectors, open territory — steer the second leg, rather than a hardcoded destination.
+* **burst-and-colonize** — fast, simultaneous multi-direction departure (claim ground before evaluating, unlike fan_out) plus committing a fixed fraction of the fleet to colonizing early, betting the 1.5x production multiplier compounding over the rest of the game beats staying fully mobile. Also has a real data point: this is what "Vincent" ran in the same Diaspora mock-run (6 ships fanned out, 2 colonized turn 1) — 2574 points, the winning side.
+* **frontier-map, stay-frosty** — continuous reconnaissance: ships never settle, they keep relocating and re-aiming scanners (org sensors and scan pods both) to maximize revealed territory and keep it from decaying back into fog. No colonizing — mobility is the identity. Real cost, not free: scanning charges food (`POD_CONSUMPTION_RECIPE`) and a moving ship doesn't produce energy in transit, so this strategy trades score for map coverage by design — its payoff is informational (and, once combat stops being a stub, early-warning), not economic.
+
+Not designed: the `fleet_id` schema itself, how a fleet is defined/assigned (all-or-nothing per player today via `is_npc`+`npc_profiles`), or concrete parameters for any of the four styles beyond the broad behavioral description above.

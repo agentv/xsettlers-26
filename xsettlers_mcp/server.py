@@ -15,7 +15,7 @@ from xsettlers_mcp.tools.sector_tools import get_sector, get_sector_map, show_se
 from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
 from xsettlers_mcp.tools.organization_tools import (
     set_mission, set_pod_task, set_pod_scan_bearing, show_organization,
-    rename_organization, set_org_scan_bearing,
+    rename_organization, set_org_scan_bearing, queue_command,
     show_civilization_status, show_game_status
 )
 from db.schema import init_schema
@@ -153,6 +153,25 @@ async def list_tools():
                 "player_token":{"type":"string"},"pod_id":{"type":"integer"},"bearing":{"type":"string"},
                 "offset_x":{"type":"integer"},"offset_y":{"type":"integer"},"offset_z":{"type":"integer"}},
                 "required":["player_token","pod_id"]}),
+        types.Tool(name="queue_command",
+            description="Queue a one-shot command for an organization, resolved automatically by the engine "
+                        "instead of you having to call the underlying tool again by hand. Four trigger_phase "
+                        "values: 'during_transit' fires the instant this org next enters transit (only "
+                        "action='set_pod_task' is legal here -- pod tasking is the one thing not locked by a "
+                        "departing org); 'before_arrival' fires the same tick this org's current move resolves; "
+                        "'after_arrival' fires exactly one turn later -- both require the org to already be in "
+                        "transit; 'at_turn' fires at an explicit absolute turn (pass `turn`), independent of any "
+                        "move, for orders that don't fit the arrival-relative phases (e.g. \"on turn 7, jump "
+                        "somewhere else\"). Action whitelist: 'move' (params: dest_x, dest_y, dest_z, optionally "
+                        "jump_range_per_turn -- same shape confirm_move takes) and 'set_pod_task' (params: "
+                        "pod_id, task, optionally bearing/offset_x/y/z -- same shape set_pod_task takes). If you "
+                        "give the org new orders before a before_arrival/after_arrival/at_turn command fires, "
+                        "the queued one is silently dropped rather than overriding your manual orders.",
+            inputSchema={"type":"object","properties":{
+                "player_token":{"type":"string"},"org_id":{"type":"integer"},
+                "trigger_phase":{"type":"string"},"action":{"type":"string"},"params":{"type":"object"},
+                "turn":{"type":"integer"}},
+                "required":["player_token","org_id","trigger_phase","action"]}),
     ]
 
 @app.call_tool()
@@ -177,6 +196,7 @@ async def call_tool(name: str, arguments: dict):
         "set_pod_scan_bearing":       set_pod_scan_bearing,
         "rename_organization":        rename_organization,
         "set_org_scan_bearing":       set_org_scan_bearing,
+        "queue_command":              queue_command,
     }
     fn = dispatch.get(name)
     if not fn:

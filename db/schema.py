@@ -241,6 +241,30 @@ def init_schema():
             origin_sector_id INTEGER REFERENCES sectors(id),
             PRIMARY KEY (arrival_turn, org_id)
         );
+        -- Ship's log (added 2026-08-05): one-shot deferred commands attached
+        -- to an org, resolved by engine/turn.py's dispatch_due_commands() at
+        -- the same point arrivals resolve. Four fixed trigger primitives
+        -- (see docs/TODO.md) -- during_transit fires the instant the
+        -- in-transit flag is applied (event-triggered, dispatched instead
+        -- from engine/movement.apply_confirm_move, not the resolve_turn
+        -- sweep); before_arrival fires the same tick the in-transit flag is
+        -- removed; after_arrival fires exactly one end_of_turn() pass later;
+        -- at_turn fires at a caller-specified absolute turn, independent of
+        -- any move. resolve_turn is NULL for during_transit (event-hooked,
+        -- not turn-hooked); for before_arrival/after_arrival it's computed
+        -- once at queue time from the org's current arrival_turn; for
+        -- at_turn it's exactly the caller-supplied turn number.
+        CREATE TABLE IF NOT EXISTS org_command_queue (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            org_id        INTEGER REFERENCES organizations(id),
+            trigger_phase TEXT NOT NULL
+                          CHECK(trigger_phase IN ('during_transit','before_arrival','after_arrival','at_turn')),
+            resolve_turn  INTEGER,
+            action        TEXT NOT NULL,
+            params        TEXT NOT NULL DEFAULT '{}',
+            created_turn  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_org_command_queue_resolve ON org_command_queue(resolve_turn);
         CREATE TABLE IF NOT EXISTS events (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             game_id         INTEGER,

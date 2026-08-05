@@ -87,24 +87,36 @@ def test_fan_out_dispatches_opening_moves_for_eight_ships():
     assert all(o["sector_id"] == -1 and o["mission"] == "move" for o in orgs)
     memory = _memory(pid)
     assert memory["opening_dispatched"] is True
-    assert memory["second_leg_dispatched"] is False
     assert set(memory["mover"].keys()) == {"north", "south", "east", "west"}
-    # arrival_turn (distance 3 at jump_range 1 => turn 0+3+1=4) + hold_turns (default 2)
-    assert memory["second_leg_turn"] == 6
+    # Second leg is now driven by the ship's log, not memory polling: each
+    # mover should have an after_arrival 'move' command queued for its
+    # second_dest, resolving one turn after arrival_turn (distance 3 at
+    # jump_range 1 => arrival_turn 0+3+1=4, so resolve_turn=5).
+    conn = get_connection()
+    queued = {r["org_id"]: r for r in conn.execute(
+        "SELECT org_id,trigger_phase,action,resolve_turn,params FROM org_command_queue").fetchall()}
+    conn.close()
+    mover_ids = set(memory["mover"].values())
+    assert set(queued.keys()) == mover_ids
+    for mover_id in mover_ids:
+        row = queued[mover_id]
+        assert row["trigger_phase"] == "after_arrival"
+        assert row["action"] == "move"
+        assert row["resolve_turn"] == 5
 
 def test_end_of_turn_automatically_drives_npc_through_both_legs():
     """
     The gap flagged in docs/TODO.md's NPC scoping note: player2_policy.py had
     to be invoked manually. Here nothing but end_of_turn() itself is called
     -- proving the strategy fires on its own, first for the opening moves and
-    later (once its own ships have actually arrived and hold_turns has
-    passed) for the second-leg jump.
+    later (once its own ships have actually arrived and the ship's log's
+    after_arrival phase fires, one turn later) for the second-leg jump.
     """
     pid = seed_player()
     sid = seed_sector(25, 25, 0)
     ship_ids = _seed_fleet(pid, sid, 8)
     assign_npc_profile(pid, "fan_out_consolidate",
-                       config={"leg_distance": 3, "jump_range_per_turn": 1, "hold_turns": 2})
+                       config={"leg_distance": 3, "jump_range_per_turn": 1})
 
     end_of_turn()  # turn 0: opening moves dispatched by the NPC step itself
     conn = get_connection()
@@ -113,15 +125,16 @@ def test_end_of_turn_automatically_drives_npc_through_both_legs():
     conn.close()
     assert all(o["sector_id"] == -1 for o in orgs)  # all in transit
 
-    for _ in range(6):  # turns 1..6: arrival resolves, then hold_turns elapses, then second leg fires
+    for _ in range(4):  # arrival resolves (turn 4), then after_arrival fires (turn 5)
         end_of_turn()
 
     memory = _memory(pid)
-    assert memory["second_leg_dispatched"] is True
     conn = get_connection()
+    queued = conn.execute("SELECT COUNT(*) AS n FROM org_command_queue").fetchone()
     aq = {r["org_id"]: (r["dest_x"], r["dest_y"], r["dest_z"])
           for r in conn.execute("SELECT org_id, dest_x, dest_y, dest_z FROM arrival_queue").fetchall()}
     conn.close()
+    assert queued["n"] == 0  # one-shot: dispatched and deleted, nothing left queued
     mover_ids = set(memory["mover"].values())
     assert mover_ids <= set(aq.keys())  # movers are in transit again, toward their second leg
     for name, mover_id in memory["mover"].items():

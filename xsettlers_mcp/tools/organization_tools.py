@@ -9,11 +9,12 @@ from engine.production import (POD_PRODUCTION, get_production_multiplier,
 # implementation would be a second place for the pooling rule to drift.
 from engine.turn import (get_current_turn, get_next_tick_at, get_final_scores,
                          _available_org_resource, _drain_org_resource)
+from engine.ship_log import ACTIONS as SHIP_LOG_ACTIONS
+from engine.pod_tasking import resolve_aim, aim_status, apply_set_pod_task
 from xsettlers_mcp.tools.navigation_tools import confirm_move
-from xsettlers_mcp.tools.sector_tools import (
-    get_scan_range, resolve_bearing, bearing_name, SCAN_BEARINGS)
+from xsettlers_mcp.tools.sector_tools import bearing_name
 from datetime import datetime, timezone
-import json, math
+import json
 
 def _tick_countdown_display(next_tick_at: str | None) -> str:
     """
@@ -34,6 +35,7 @@ def _tick_countdown_display(next_tick_at: str | None) -> str:
 
 VALID_ORG_MISSIONS = {"idle", "move", "colonize", "defend", "attack"}
 VALID_POD_TASKS = {"idle", "produce_energy", "produce_food", "produce_goods", "scan"}
+VALID_TRIGGER_PHASES = {"during_transit", "before_arrival", "after_arrival", "at_turn"}
 
 # Presentation hints for status-report tools (show_civilization_status,
 # show_game_status): offloads simple, repetitive formatting work onto the
@@ -151,46 +153,6 @@ def _org_production(tasking: dict, in_transit: bool, org_type: str = "ship") -> 
             production[resource] = production.get(resource, 0.0) + amount
     return production
 
-def _resolve_aim(bearing, offset_x, offset_y, offset_z):
-    """
-    Turn either a compass bearing ("NE") or an explicit offset into
-    (dx, dy, dz), or return an error dict. Exactly one form must be given.
-    """
-    named = bearing is not None
-    explicit = any(c is not None for c in (offset_x, offset_y, offset_z))
-    if named and explicit:
-        return None, {"error": "Give either a bearing or offset_x/y/z, not both"}
-    if named:
-        offset = resolve_bearing(bearing)
-        if offset is None:
-            return None, {"error": f"Unknown bearing '{bearing}'. Valid: {sorted(SCAN_BEARINGS)}"}
-        return offset, None
-    if not explicit:
-        return None, {"error": "Give a bearing (e.g. 'NE') or offset_x/offset_y/offset_z"}
-    if any(c is None for c in (offset_x, offset_y, offset_z)):
-        return None, {"error": "offset_x, offset_y, and offset_z must all be provided together"}
-    return (int(offset_x), int(offset_y), int(offset_z)), None
-
-
-def _aim_status(org_id: int, offset) -> dict:
-    """
-    Describe an aim: its offset, its compass name if it has one, the distance
-    it reaches, and whether that is within scan range.
-
-    Unlike the absolute targeting this replaced, range is a permanent property
-    of the offset -- it cannot silently stop being true because the scanner
-    moved -- so callers reject an out-of-range aim outright instead of
-    accepting it and warning.
-    """
-    dx, dy, dz = offset
-    distance = math.sqrt(dx*dx + dy*dy + dz*dz)
-    scan_range = get_scan_range(org_id)
-    return {"offset_x": dx, "offset_y": dy, "offset_z": dz,
-            "bearing": bearing_name(dx, dy, dz),
-            "distance": distance, "scan_range": scan_range,
-            "in_range": distance <= scan_range}
-
-
 def _aimed_sector(cur, org_id: int, offset):
     """Absolute coordinates an org's aim currently points at, or None if it
     is in transit (no position to offset from)."""
@@ -295,6 +257,78 @@ def set_mission(player_token: str, org_id: int, mission: str, params: dict = Non
         result["completes_at_turn"] = resolve_turn
     return result
 
+DURING_TRANSIT_ACTIONS = {"set_pod_task"}
+
+def queue_command(player_token: str, org_id: int, trigger_phase: str, action: str,
+                  params: dict = None, turn: int = None) -> dict:
+    """
+    Queue a one-shot command for this org, resolved automatically by the
+    engine rather than requiring the player to call the underlying tool
+    again by hand, at whichever of four fixed primitives is named:
+      - 'during_transit': fires the instant this org enters transit (event-
+        triggered by the next confirm_move on this org, not turn-based --
+        dispatched from engine.movement.apply_confirm_move, not the turn
+        sweep). Only 'set_pod_task' is a legal action here -- pod tasking is
+        the one thing not locked by an org entering transit, which is the
+        whole reason this phase exists.
+      - 'before_arrival': fires the same tick this org's current move
+        resolves. Requires the org to already be in transit -- there must be
+        a pending arrival_queue row to anchor the resolve turn to.
+      - 'after_arrival': fires exactly one end_of_turn() pass later. Same
+        in-transit requirement as before_arrival.
+      - 'at_turn': fires at an explicit absolute turn (the `turn` param,
+        required for this phase only) -- independent of any move, for orders
+        that don't fit the arrival-relative phases at all (e.g. "on turn 7,
+        jump somewhere else"). No in-transit requirement.
+    Action whitelist: 'move' (params: dest_x, dest_y, dest_z, optional
+    jump_range_per_turn -- same shape confirm_move itself takes) and
+    'set_pod_task' (params: pod_id, task, optionally bearing/offset_x/y/z --
+    same shape set_pod_task itself takes), valid for before_arrival/
+    after_arrival/at_turn; during_transit is restricted to set_pod_task only.
+    If a player gives the org new orders before a before_arrival/after_arrival/
+    at_turn command fires, the queued command is silently dropped rather than
+    clobbering them (see engine.ship_log.dispatch_due_commands).
+    """
+    if trigger_phase not in VALID_TRIGGER_PHASES:
+        return {"error": f"Invalid trigger_phase '{trigger_phase}'. Valid: {sorted(VALID_TRIGGER_PHASES)}"}
+    if action not in SHIP_LOG_ACTIONS:
+        return {"error": f"Invalid action '{action}'. Valid: {sorted(SHIP_LOG_ACTIONS)}"}
+    if trigger_phase == "during_transit" and action not in DURING_TRANSIT_ACTIONS:
+        return {"error": f"'during_transit' only supports: {sorted(DURING_TRANSIT_ACTIONS)}"}
+    if trigger_phase == "at_turn" and turn is None:
+        return {"error": "'at_turn' requires a turn parameter (the absolute turn number to fire on)"}
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
+    player = cur.fetchone()
+    if not player:
+        conn.close(); return {"error": "Player not found"}
+    cur.execute("SELECT id FROM organizations WHERE id=? AND player_id=?", (org_id, player["id"]))
+    if not cur.fetchone():
+        conn.close(); return {"error": "Organization not found or not owned by player"}
+
+    resolve_turn = None
+    if trigger_phase in ("before_arrival", "after_arrival"):
+        cur.execute("SELECT arrival_turn FROM arrival_queue WHERE org_id=?", (org_id,))
+        arrival = cur.fetchone()
+        if not arrival:
+            conn.close()
+            return {"error": f"'{trigger_phase}' requires the organization to currently be "
+                             f"in transit (no pending arrival found)"}
+        resolve_turn = arrival["arrival_turn"] + (0 if trigger_phase == "before_arrival" else 1)
+    elif trigger_phase == "at_turn":
+        resolve_turn = turn
+    # during_transit: resolve_turn stays None -- dispatched by org_id+phase
+    # lookup inside apply_confirm_move, not the resolve_turn sweep.
+
+    current_turn = get_current_turn()
+    cur.execute("""INSERT INTO org_command_queue (org_id,trigger_phase,resolve_turn,action,params,created_turn)
+                   VALUES (?,?,?,?,?,?)""",
+                (org_id, trigger_phase, resolve_turn, action, json.dumps(params or {}), current_turn))
+    command_id = cur.lastrowid
+    conn.commit(); conn.close()
+    return {"ok": True, "command_id": command_id, "org_id": org_id, "trigger_phase": trigger_phase,
+            "action": action, "resolve_turn": resolve_turn}
+
 def set_pod_task(player_token: str, pod_id: int, task: str,
                  bearing: str = None,
                  offset_x: int = None, offset_y: int = None, offset_z: int = None) -> dict:
@@ -320,7 +354,7 @@ def set_pod_task(player_token: str, pod_id: int, task: str,
     if aiming:
         if task != "scan":
             return {"error": f"Only the scan task takes an aim; '{task}' does not"}
-        offset, err = _resolve_aim(bearing, offset_x, offset_y, offset_z)
+        offset, err = resolve_aim(bearing, offset_x, offset_y, offset_z)
         if err:
             return err
     conn = get_connection(); cur = conn.cursor()
@@ -333,25 +367,12 @@ def set_pod_task(player_token: str, pod_id: int, task: str,
     pod = cur.fetchone()
     if not pod:
         conn.close(); return {"error": "Pod not found or not owned by player"}
-    status, params = {}, None
-    if offset is not None:
-        status = _aim_status(pod["org_id"], offset)
-        if not status["in_range"]:
-            conn.close()
-            return {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
-                             f"{status['scan_range']}", **status}
-        params = {"offset_x": offset[0], "offset_y": offset[1], "offset_z": offset[2]}
-    record_event(
-        event_type="pod.task_set",
-        payload={"pod_id": pod_id, "task": task, "params": params},
-        actor_id=player["id"], subject_id=pod_id, subject_type="pod")
-    if offset is not None:
-        cur.execute("UPDATE pods SET task=?, task_params=? WHERE id=?",
-                    (task, json.dumps(params), pod_id))
-    else:
-        cur.execute("UPDATE pods SET task=? WHERE id=?", (task, pod_id))
+    current_turn = get_current_turn()
+    result = apply_set_pod_task(cur, pod_id, pod["org_id"], player["id"], task, offset, current_turn)
+    if "error" in result:
+        conn.close(); return result
     conn.commit(); conn.close()
-    return {"ok": True, "pod_id": pod_id, "task": task, **status}
+    return result
 
 
 def set_pod_scan_bearing(player_token: str, pod_id: int, bearing: str = None,
@@ -369,7 +390,7 @@ def set_pod_scan_bearing(player_token: str, pod_id: int, bearing: str = None,
     clearing = bearing is None and all(c is None for c in (offset_x, offset_y, offset_z))
     offset = None
     if not clearing:
-        offset, err = _resolve_aim(bearing, offset_x, offset_y, offset_z)
+        offset, err = resolve_aim(bearing, offset_x, offset_y, offset_z)
         if err:
             return err
     conn = get_connection(); cur = conn.cursor()
@@ -388,7 +409,7 @@ def set_pod_scan_bearing(player_token: str, pod_id: int, bearing: str = None,
         cur.execute("UPDATE pods SET task_params=NULL WHERE id=?", (pod_id,))
         conn.commit(); conn.close()
         return {"ok": True, "pod_id": pod_id, "cleared": True}
-    status = _aim_status(pod["org_id"], offset)
+    status = aim_status(pod["org_id"], offset)
     if not status["in_range"]:
         conn.close()
         return {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
@@ -474,7 +495,7 @@ def set_org_scan_bearing(player_token: str, org_id: int, bearing: str = None,
     clearing = bearing is None and all(c is None for c in (offset_x, offset_y, offset_z))
     offset = None
     if not clearing:
-        offset, err = _resolve_aim(bearing, offset_x, offset_y, offset_z)
+        offset, err = resolve_aim(bearing, offset_x, offset_y, offset_z)
         if err:
             return err
     conn = get_connection(); cur = conn.cursor()
@@ -492,7 +513,7 @@ def set_org_scan_bearing(player_token: str, org_id: int, bearing: str = None,
             SET scan_offset_x=NULL, scan_offset_y=NULL, scan_offset_z=NULL WHERE id=?""", (org_id,))
         conn.commit(); conn.close()
         return {"ok": True, "org_id": org_id, "name": org["name"], "cleared": True}
-    status = _aim_status(org_id, offset)
+    status = aim_status(org_id, offset)
     if not status["in_range"]:
         conn.close()
         return {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "

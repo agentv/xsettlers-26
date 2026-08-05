@@ -1,6 +1,7 @@
 from db.connection import get_connection
 from db.events import record_event
 from engine.turn import get_current_turn
+from engine.movement import apply_confirm_move
 import math
 
 def preview_move(player_token: str, ship_id: int,
@@ -47,10 +48,12 @@ def preview_move(player_token: str, ship_id: int,
 def confirm_move(player_token: str, ship_id: int,
                  dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
     """
-    Commit a previewed move:
-    1. Write-ahead: log ship.move_confirmed BEFORE mutating state
-    2. Park ship at sentinel sector (-1)
-    3. Insert arrival_queue row with origin_sector_id for rubber-band cancel support
+    Commit a previewed move: validates ownership/mobility, then delegates the
+    actual mutation (write-ahead event, park at sentinel sector, queue
+    arrival) to engine.movement.apply_confirm_move -- the same core logic
+    engine/turn.py's ship's-log dispatch uses to fire a chained move from
+    inside its own open transaction (see that module's docstring for why the
+    mutation logic had to be split out rather than called directly).
     Destination is any coordinate triple -- it's only revealed (get-or-created
     as a real sectors row, see db/sectors.py) once the ship actually arrives.
     """
@@ -59,8 +62,7 @@ def confirm_move(player_token: str, ship_id: int,
     player = cur.fetchone()
     if not player:
         conn.close(); return {"error": "Player not found"}
-    cur.execute("""SELECT o.id,o.is_mobile,s.coord_x,s.coord_y,s.coord_z,s.id AS sector_id
-        FROM organizations o JOIN sectors s ON s.id=o.sector_id
+    cur.execute("""SELECT o.id,o.is_mobile FROM organizations o
         WHERE o.id=? AND o.player_id=? AND o.sector_id!=-1""", (ship_id, player["id"]))
     ship = cur.fetchone()
     if not ship:
@@ -69,35 +71,11 @@ def confirm_move(player_token: str, ship_id: int,
         conn.close(); return {"error": "This organization is locked (colony or mid-colonization) and cannot move"}
     if dest_x < 0 or dest_y < 0 or dest_z < 0:
         conn.close(); return {"error": "Destination coordinates cannot be negative -- space has no negative indices"}
-    origin_sector_id = ship["sector_id"]
-    distance = math.sqrt(
-        (dest_x-ship["coord_x"])**2 +
-        (dest_y-ship["coord_y"])**2 +
-        (dest_z-ship["coord_z"])**2)
-    turns_needed = max(1, math.ceil(distance / jump_range_per_turn))
     current_turn = get_current_turn()
-    # +1: arrival_turn names the turn the ship is free to act, one turn after
-    # the end_of_turn() pass that actually performs the landing (see
-    # engine/turn.py's arrival resolution query, which is offset to match).
-    arrival_turn = current_turn + turns_needed + 1
-    # Write-ahead: log BEFORE mutating state
-    record_event(
-        event_type="ship.move_confirmed",
-        payload={"org_id": ship_id, "from_sector_id": origin_sector_id,
-                 "to_x": dest_x, "to_y": dest_y, "to_z": dest_z, "arrival_turn": arrival_turn},
-        actor_id=player["id"], subject_id=ship_id, subject_type="organization")
-    # Park at sentinel, locking the org against reassignment until arrival/cancel
-    cur.execute("""UPDATE organizations SET sector_id=-1, mission='move', mission_params=?,
-        is_mobile=0 WHERE id=?""",
-        (f'{{"dest_x":{dest_x},"dest_y":{dest_y},"dest_z":{dest_z},"arrival_turn":{arrival_turn}}}', ship_id))
-    # Queue arrival
-    cur.execute("""INSERT OR REPLACE INTO arrival_queue
-        (arrival_turn,org_id,dest_x,dest_y,dest_z,origin_sector_id) VALUES (?,?,?,?,?,?)""",
-        (arrival_turn, ship_id, dest_x, dest_y, dest_z, origin_sector_id))
+    result = apply_confirm_move(cur, ship_id, player["id"], dest_x, dest_y, dest_z,
+                                jump_range_per_turn, current_turn)
     conn.commit(); conn.close()
-    return {"confirmed": True, "ship_id": ship_id, "from_sector_id": origin_sector_id,
-            "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z, "arrival_turn": arrival_turn,
-            "turns_needed": turns_needed}
+    return result
 
 def cancel_move(player_token: str, ship_id: int) -> dict:
     """

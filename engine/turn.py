@@ -2,6 +2,8 @@ import collections, os, json, math
 from config.loader import load_config
 from db.connection import get_connection
 from db.sectors import reveal_sector, CONFIDENCE_DECAY_PER_TURN
+from db.events import record_event_direct
+from engine.ship_log import dispatch_due_commands
 from engine.production import (get_production, get_consumption_recipe,
                                get_production_multiplier, ORG_UPKEEP_COST,
                                RESOURCE_CAPACITY_COLUMN, RESOURCE_STORAGE_COLUMN)
@@ -113,20 +115,6 @@ def _store_org_resource(cur, org_id: int, producing_pod_id: int, resource: str, 
             remaining -= add
     # Anything still remaining here means the whole org is full -- lost.
 
-def _record_event_direct(cur, turn: int, event_type: str, actor_id=None,
-                         subject_id=None, subject_type=None, payload=None):
-    """
-    Write an event directly via SQL rather than db.events.record_event --
-    db/events.py imports get_current_turn from this module, so calling it
-    from here would create a circular import (see _handle_colonize).
-    """
-    cur.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM events WHERE turn=?", (turn,))
-    seq = cur.fetchone()[0]
-    cur.execute("""
-        INSERT INTO events (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,payload)
-        VALUES (NULL,?,?,?,?,?,?,?)
-    """, (turn, seq, event_type, actor_id, subject_id, subject_type, json.dumps(payload or {})))
-
 def _apply_org_upkeep(cur, consumption: dict):
     """
     Per-organization upkeep, once per turn (not per pod) -- every ship/colony
@@ -205,6 +193,16 @@ def end_of_turn():
             cur.execute("""UPDATE organizations SET sector_id=?,mission='idle',mission_params=NULL,
                            is_mobile=1 WHERE id=?""", (dest_sector_id,arrival["org_id"]))
     cur.execute("DELETE FROM arrival_queue WHERE arrival_turn<=?", (current_turn + 1,))
+
+    # 2.5. Ship's log: dispatch any due before_arrival/after_arrival queued
+    #      commands (see engine/ship_log.py). Must run after the arrival loop
+    #      above (so a before_arrival chained move sees this org's just-landed
+    #      sector as its departure point) and before step 3's production pass
+    #      (so if that chained move re-parks the org at the sentinel sector,
+    #      this turn's production correctly shows zero energy for it -- same
+    #      in-transit-suppresses-energy rule already in effect below, no
+    #      special-casing needed here).
+    dispatch_due_commands(cur, current_turn)
 
     # 3. Org upkeep, then pod production (input-costed, see engine/production.py's
     #    POD_CONSUMPTION_RECIPE), then scan resolution.
@@ -338,7 +336,7 @@ def end_of_turn():
                         reveal_sector(cur, org["player_id"], tx, ty, tz)
                         # TODO: emit pod.scanned event; detect rivals
                     else:
-                        _record_event_direct(cur, current_turn, "alert.scan_out_of_range",
+                        record_event_direct(cur, current_turn, "alert.scan_out_of_range",
                             actor_id=org["player_id"], subject_id=pod["id"], subject_type="pod",
                             payload={"pod_id": pod["id"], "org_id": pod["org_id"],
                                      "target_x": tx, "target_y": ty, "target_z": tz,
@@ -385,7 +383,7 @@ def end_of_turn():
         if distance <= scan_range:
             reveal_sector(cur, org["player_id"], tx, ty, tz)
         else:
-            _record_event_direct(cur, current_turn, "alert.scan_out_of_range",
+            record_event_direct(cur, current_turn, "alert.scan_out_of_range",
                 actor_id=org["player_id"], subject_id=org["id"], subject_type="organization",
                 payload={"org_id": org["id"], "target_x": tx, "target_y": ty,
                          "target_z": tz, "distance": distance, "range": scan_range})
@@ -482,7 +480,7 @@ def _snapshot_holdings(cur, turn: int, before_holdings: dict, production: dict, 
                          - (after[r] - before[r])) for r in ("energy", "food", "goods")}
         score = (after["energy"] * weights.get("energy", 0) + after["food"] * weights.get("food", 0)
                  + after["goods"] * weights.get("goods", 0))
-        _record_event_direct(cur, turn, "turn.snapshot", actor_id=pid, subject_id=pid,
+        record_event_direct(cur, turn, "turn.snapshot", actor_id=pid, subject_id=pid,
             subject_type="player", payload={
                 "player_id": pid, "display_name": player["display_name"],
                 "energy": after["energy"], "food": after["food"], "goods": after["goods"],
@@ -547,7 +545,7 @@ def _calculate_final_scores() -> list:
         s["rank"] = rank
 
     final_turn = cur.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()["current_turn"]
-    _record_event_direct(cur, final_turn, FINAL_SCORES_EVENT,
+    record_event_direct(cur, final_turn, FINAL_SCORES_EVENT,
                          payload={"final_turn": final_turn, "turn_limit": TURN_LIMIT,
                                   "score_weights": dict(weights),
                                   "winner": standings[0]["display_name"] if standings else None,
@@ -575,7 +573,7 @@ def _handle_colonize(cur, org, current_turn):
     """Resolve a matured colonize_complete event: flip org_type to 'colony' and log ship.colonized."""
     if org["org_type"] != "ship":
         return
-    _record_event_direct(cur, current_turn, "ship.colonized", subject_id=org["id"],
+    record_event_direct(cur, current_turn, "ship.colonized", subject_id=org["id"],
         subject_type="organization", payload={"org_id": org["id"], "sector_id": org["sector_id"]})
     cur.execute("""UPDATE organizations
         SET org_type='colony',is_mobile=0,mission='idle',mission_params=NULL WHERE id=?""",

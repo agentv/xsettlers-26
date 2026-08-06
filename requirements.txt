@@ -1,4 +1,11 @@
-mcp>=1.0.0
+# Capped below 2.0 (2026-08-06): mcp 2.0.0 removed Server.list_tools as a
+# decorator method, which xsettlers_mcp/server.py's @app.list_tools() relies
+# on -- discovered when an unbounded ">=1.0.0" let a Fly build silently pull
+# 2.0.0 and crash on boot (AttributeError) while every local dev environment
+# stayed on 1.28.1 and never saw it. Revisit only alongside a deliberate
+# server.py migration to whatever 2.0's replacement API is, not by relaxing
+# this pin.
+mcp>=1.0.0,<2.0.0
 starlette
 uvicorn
 spatialite

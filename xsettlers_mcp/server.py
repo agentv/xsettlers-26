@@ -22,7 +22,29 @@ from db.schema import init_schema
 from engine.clock import run_clock
 from views.render import render_status
 
-app = Server("xsettlers")
+# Sent once at MCP initialize, before the client sees any tool response --
+# the strongest available lever for steering how an LLM client displays what
+# this server sends back, short of controlling the client itself (see the
+# "default display" design conversation this codebase settled on 2026-08-05).
+# Reinforced per-call by a matching directive block in call_tool()'s
+# markdown_view response (below) -- one nudge at session start, one on every
+# single call, since a long session can let a one-time instruction drift out
+# of a client's attention.
+SERVER_INSTRUCTIONS = (
+    "Every tool response defaults to response_format='markdown_view': you get back "
+    "a raw JSON block AND a pre-rendered markdown block (a table, or a map grid for "
+    "show_sector_neighborhood) built server-side by views/render.py, not assembled "
+    "by you. Render that markdown block to the user VERBATIM. Do not reconstruct, "
+    "reformat, re-summarize, or build your own table from the JSON instead -- the "
+    "JSON is there for your own reasoning and state-tracking (e.g. remembering an "
+    "org_id), not as an alternate source to design a display from. Only deviate "
+    "from the pre-rendered block if the player has explicitly asked for a "
+    "different presentation than what was returned. If you want JSON with no "
+    "markdown block at all (e.g. because you're only using the data internally and "
+    "showing nothing to the player), call the tool with response_format='data_only'."
+)
+
+app = Server("xsettlers", instructions=SERVER_INSTRUCTIONS)
 
 @app.list_tools()
 async def list_tools():
@@ -223,7 +245,21 @@ async def call_tool(name: str, arguments: dict):
     if response_format == "data_only":
         return [types.TextContent(type="text", text=_as_json(result))]
     return [types.TextContent(type="text", text=_as_json(result)),
-            types.TextContent(type="text", text=_as_markdown(result))]
+            types.TextContent(type="text", text=_as_markdown(result)),
+            types.TextContent(type="text", text=RENDER_DIRECTIVE)]
+
+
+# Reinforces SERVER_INSTRUCTIONS (sent once at initialize) on every single
+# markdown_view response -- a long session can let a one-time instruction
+# drift out of a client's attention, so this repeats the same directive right
+# next to the content it governs, on every call, not just at session start.
+RENDER_DIRECTIVE = (
+    "[Render the markdown block above verbatim to the player. Do not "
+    "reconstruct, reformat, or summarize a table from the JSON block instead "
+    "-- the JSON is for your own reasoning/state-tracking, not a display "
+    "source. Only deviate if the player explicitly asked for a different "
+    "presentation than what was returned.]"
+)
 
 
 def _as_markdown(result) -> str:

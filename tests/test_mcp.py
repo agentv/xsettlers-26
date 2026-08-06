@@ -62,6 +62,16 @@ def test_booleans_and_nulls_serialize_as_json_literals():
     assert '"ok": true' in text and '"winner": null' in text
     assert json.loads(text) == {"ok": True, "winner": None}
 
+# --- default-display steering (see xsettlers_mcp/server.py SERVER_INSTRUCTIONS/RENDER_DIRECTIVE) ---
+
+def test_server_sends_instructions_at_initialize():
+    # Sent once, before a client sees any tool response -- the strongest
+    # available lever for steering how an LLM client displays returned
+    # content, short of controlling the client itself.
+    from xsettlers_mcp.server import app, SERVER_INSTRUCTIONS
+    assert app.instructions == SERVER_INSTRUCTIONS
+    assert "VERBATIM" in SERVER_INSTRUCTIONS
+
 # --- response_format toggle (see xsettlers_mcp/server.py call_tool) ---
 
 def test_as_markdown_renders_a_display_hinted_dict():
@@ -75,14 +85,17 @@ def test_as_markdown_falls_back_for_non_dict_results():
 
 def test_call_tool_default_markdown_view_returns_json_and_markdown():
     import asyncio, json
-    from xsettlers_mcp.server import call_tool
+    from xsettlers_mcp.server import call_tool, RENDER_DIRECTIVE
     content = asyncio.run(call_tool("get_player_state", {"player_token": "U_TEST_001"}))
-    assert len(content) == 2
+    assert len(content) == 3
     parsed = json.loads(content[0].text)
     assert parsed["player"]["email"] == "p1@test.com"
     # get_player_state has no `display` block (yet), so render_status's
     # no-rows fallback is the correct markdown output here, not a crash.
     assert content[1].text == "(no rows)"
+    # Third block reinforces SERVER_INSTRUCTIONS on every call: render the
+    # markdown verbatim, don't reconstruct a display from the JSON instead.
+    assert content[2].text == RENDER_DIRECTIVE
 
 def test_call_tool_data_only_returns_json_alone():
     import asyncio, json
@@ -109,6 +122,6 @@ def test_call_tool_html_svg_falls_back_to_default_json_and_markdown():
     from xsettlers_mcp.server import call_tool
     content = asyncio.run(call_tool("get_player_state",
                                      {"player_token": "U_TEST_001", "response_format": "html_svg"}))
-    assert len(content) == 2
+    assert len(content) == 3
     assert json.loads(content[0].text)["player"]["email"] == "p1@test.com"
     assert content[1].text == "(no rows)"

@@ -3,7 +3,7 @@ from db.connection import get_connection
 from db.npc_profiles import assign_npc_profile
 from engine.npc import run_npc_decisions
 from engine.turn import end_of_turn
-from tests.conftest import seed_player, seed_sector, seed_ship
+from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
 
 def _seed_fleet(player_id, sector_id, n=8):
     return [seed_ship(player_id, sector_id, name=f"Ship-{i}") for i in range(n)]
@@ -141,3 +141,193 @@ def test_end_of_turn_automatically_drives_npc_through_both_legs():
         assert list(aq[mover_id]) == memory["second_dest"][name]
     stayer_ids = set(memory["stayer"].values())
     assert stayer_ids.isdisjoint(aq.keys())  # stayers were never re-dispatched
+
+# --- turtle ---
+
+def test_turtle_never_acts():
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    ship_ids = _seed_fleet(pid, sid, 4)
+    assign_npc_profile(pid, "turtle")
+    for _ in range(3):
+        run_npc_decisions()
+    conn = get_connection()
+    orgs = conn.execute("SELECT sector_id, mission FROM organizations WHERE player_id=?", (pid,)).fetchall()
+    conn.close()
+    assert all(o["sector_id"] == sid and o["mission"] == "idle" for o in orgs)
+
+# --- burst_and_colonize ---
+
+def test_burst_and_colonize_dispatches_and_colonizes_on_first_call():
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    ship_ids = _seed_fleet(pid, sid, 8)
+    for sid_ship in ship_ids:
+        seed_pod(sid_ship, task="produce_energy", storage_current=100.0)
+    assign_npc_profile(pid, "burst_and_colonize",
+                       config={"leg_distance": 3, "jump_range_per_turn": 1, "colonize_fraction": 0.25})
+    run_npc_decisions()
+
+    memory = _memory(pid)
+    assert memory["dispatched"] is True
+    assert len(memory["colonized"]) == 2  # round(8 * 0.25)
+    assert len(memory["fanned_out"]) == 6
+
+    conn = get_connection()
+    orgs = {r["id"]: r for r in conn.execute(
+        "SELECT id, sector_id, mission, is_mobile FROM organizations WHERE player_id=?", (pid,)).fetchall()}
+    conn.close()
+    for oid in memory["colonized"]:
+        assert orgs[oid]["mission"] == "colonize"
+        assert orgs[oid]["sector_id"] == sid  # colonizing ships never moved
+        assert orgs[oid]["is_mobile"] == 0
+    for oid in memory["fanned_out"]:
+        assert orgs[oid]["sector_id"] == -1  # in transit
+        assert orgs[oid]["mission"] == "move"
+
+def test_burst_and_colonize_only_dispatches_once():
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    ship_ids = _seed_fleet(pid, sid, 4)
+    for sid_ship in ship_ids:
+        seed_pod(sid_ship, task="produce_energy", storage_current=100.0)
+    assign_npc_profile(pid, "burst_and_colonize")
+    run_npc_decisions()
+    memory_after_first = _memory(pid)
+    run_npc_decisions()  # must be a no-op the second time
+    assert _memory(pid) == memory_after_first
+
+def test_burst_and_colonize_noop_fraction_with_a_single_ship():
+    """len(ship_ids) > 1 gates colonizing at all -- a lone ship always fans
+    out rather than being forced to colonize by round()."""
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    _seed_fleet(pid, sid, 1)
+    assign_npc_profile(pid, "burst_and_colonize")
+    run_npc_decisions()
+    memory = _memory(pid)
+    assert memory["colonized"] == []
+    assert len(memory["fanned_out"]) == 1
+
+# --- frontier_map_stay_frosty ---
+
+def test_frontier_map_stay_frosty_moves_idle_ships_and_aims_scanner_ahead():
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    ship_ids = _seed_fleet(pid, sid, 4)
+    assign_npc_profile(pid, "frontier_map_stay_frosty",
+                       config={"leg_distance": 3, "jump_range_per_turn": 1})
+    run_npc_decisions()
+
+    conn = get_connection()
+    orgs = {r["id"]: r for r in conn.execute(
+        """SELECT id, sector_id, mission, scan_offset_x, scan_offset_y, scan_offset_z
+           FROM organizations WHERE player_id=?""", (pid,)).fetchall()}
+    conn.close()
+    # Scan aim is always the "X2" bearing (distance 2, SCAN_RANGE's max),
+    # decoupled from leg_distance (3 here) -- movement has no range cap,
+    # scanning does.
+    scan_offsets = {"N": (0, -2, 0), "S": (0, 2, 0), "E": (2, 0, 0), "W": (-2, 0, 0)}
+    directions = _memory(pid)["directions"]
+    for oid in ship_ids:
+        org = orgs[oid]
+        assert org["sector_id"] == -1 and org["mission"] == "move"
+        bearing = directions[str(oid)]
+        assert (org["scan_offset_x"], org["scan_offset_y"], org["scan_offset_z"]) == scan_offsets[bearing]
+
+def test_frontier_map_stay_frosty_redirects_after_landing():
+    """No terminal state -- a ship that lands gets picked up and redirected
+    further out the same bearing on the NEXT NPC pass after landing (not the
+    same call as landing itself: run_npc_decisions is step 0, so it always
+    reads state as of the end of the PREVIOUS end_of_turn() call -- it can't
+    see this call's own later arrival-resolution step)."""
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    ship_ids = _seed_fleet(pid, sid, 1)
+    assign_npc_profile(pid, "frontier_map_stay_frosty",
+                       config={"leg_distance": 2, "jump_range_per_turn": 1})
+
+    def _org():
+        conn = get_connection()
+        row = conn.execute("SELECT sector_id, mission FROM organizations WHERE id=?",
+                           (ship_ids[0],)).fetchone()
+        conn.close()
+        return row
+
+    end_of_turn()  # call 1: opening dispatch, arrival_turn = 0+2+1 = 3
+    assert _org()["sector_id"] == -1
+
+    end_of_turn()  # call 2: still travelling
+    assert _org()["sector_id"] == -1
+
+    end_of_turn()  # call 3: lands (arrival resolves this call); NPC step0 ran before that, so no redirect yet
+    org = _org()
+    assert org["sector_id"] != -1 and org["mission"] == "idle"
+
+    end_of_turn()  # call 4: NPC step0 now sees the landed ship from call 3, redirects it
+    org = _org()
+    assert org["sector_id"] == -1
+    assert org["mission"] == "move"
+
+# --- fan_out (opportunity-seeking) ---
+
+def test_fan_out_dispatches_scouts_with_aimed_scan():
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    ship_ids = _seed_fleet(pid, sid, 4)
+    assign_npc_profile(pid, "fan_out", config={"scout_distance": 2, "jump_range_per_turn": 1})
+    run_npc_decisions()
+
+    memory = _memory(pid)
+    assert memory["opening_dispatched"] is True
+    assert len(memory["scouts"]) == 4
+    assert all(info["committed"] is False for info in memory["scouts"].values())
+
+    conn = get_connection()
+    orgs = {r["id"]: r for r in conn.execute(
+        """SELECT id, sector_id, mission, scan_offset_x, scan_offset_y, scan_offset_z
+           FROM organizations WHERE player_id=?""", (pid,)).fetchall()}
+    conn.close()
+    offsets = {"N": (0, -2, 0), "S": (0, 2, 0), "E": (2, 0, 0), "W": (-2, 0, 0)}
+    for oid in ship_ids:
+        org = orgs[oid]
+        assert org["sector_id"] == -1 and org["mission"] == "move"
+        bearing = memory["scouts"][str(oid)]["bearing"]
+        assert (org["scan_offset_x"], org["scan_offset_y"], org["scan_offset_z"]) == offsets[bearing]
+
+def test_fan_out_commits_to_the_revealed_sector_once_scan_resolves():
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    ship_ids = _seed_fleet(pid, sid, 1)
+    # Scan costs food+energy (POD_CONSUMPTION_RECIPE) -- a bare ship with no
+    # pods has nothing to pay with and the scan never resolves. Seed enough
+    # of both to cover it every turn for the life of the test.
+    seed_pod(ship_ids[0], task="produce_food", storage_current=100.0)
+    seed_pod(ship_ids[0], task="produce_energy", storage_current=100.0)
+    assign_npc_profile(pid, "fan_out", config={"scout_distance": 2, "jump_range_per_turn": 1})
+
+    end_of_turn()  # call 1: opening scout dispatch, arrival_turn = 0+2+1 = 3, aim = 2 further N
+    assert _memory(pid)["scouts"][str(ship_ids[0])]["committed"] is False
+
+    end_of_turn()  # call 2: still travelling
+    assert _memory(pid)["scouts"][str(ship_ids[0])]["committed"] is False
+
+    end_of_turn()  # call 3: lands AND its scan resolves in the same call; NPC step0 ran before that
+    assert _memory(pid)["scouts"][str(ship_ids[0])]["committed"] is False  # not yet observed by NPC step
+
+    end_of_turn()  # call 4: NPC step0 now sees the landed ship + resolved scan from call 3, commits
+    memory = _memory(pid)
+    assert memory["scouts"][str(ship_ids[0])]["committed"] is True
+    conn = get_connection()
+    org = conn.execute("SELECT sector_id, mission FROM organizations WHERE id=?", (ship_ids[0],)).fetchone()
+    aq = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?",
+                      (ship_ids[0],)).fetchone()
+    conn.close()
+    assert org["sector_id"] == -1 and org["mission"] == "move"  # committed to final move
+    assert (aq["dest_x"], aq["dest_y"], aq["dest_z"]) == (25, 21, 0)  # home(25,25) - 2(scout) - 2(reveal north)
+
+def test_fan_out_noop_with_no_ships():
+    pid = seed_player()
+    assign_npc_profile(pid, "fan_out")
+    run_npc_decisions()  # must not raise
+    assert _memory(pid)["opening_dispatched"] is True

@@ -43,3 +43,31 @@ pods_per_ship:
 # Unlike game0's Diaspora, Outbreak starts each player with an established
 # colony at their home sector -- a fixed foothold from turn 1.
 home_colony: true
+
+# GameHouse lobby template -- see config/game0.yaml for the full rationale
+# (min/max both fixed at len(participants), wait_window_seconds is a ported
+# guess not a tuned value, npc_profile_schema only lists strategies actually
+# registered in engine/npc.py's STRATEGIES dict today).
+lobby:
+  min_players: 2
+  max_players: 2
+  # Confirmed 2026-08-06: 120s is fine as a starting value (360s also
+  # acceptable if it ever needs lengthening).
+  wait_window_seconds: 120
+  # All five strategies registered in engine/npc.py's STRATEGIES dict --
+  # see docs/TODO.md's fleet-strategy taxonomy and config/game0.yaml for
+  # the fuller comment on this block.
+  npc_profile_schema:
+    type: object
+    required: [strategy_name]
+    properties:
+      strategy_name:
+        type: string
+        enum: [fan_out_consolidate, turtle, burst_and_colonize, frontier_map_stay_frosty, fan_out]
+      config:
+        type: object
+        properties:
+          leg_distance: {type: integer}
+          jump_range_per_turn: {type: integer}
+          colonize_fraction: {type: number}
+          scout_distance: {type: integer}

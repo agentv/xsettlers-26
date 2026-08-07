@@ -10,6 +10,7 @@ from mcp.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp import types
 from xsettlers_mcp.game_select import list_scenarios, select_scenario
+from xsettlers_mcp.gamehouse import start_session, register_with_gamehouse
 from xsettlers_mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
 from xsettlers_mcp.tools.sector_tools import get_sector, get_sector_map, show_sector_neighborhood
 from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
@@ -194,6 +195,20 @@ async def list_tools():
                 "trigger_phase":{"type":"string"},"action":{"type":"string"},"params":{"type":"object"},
                 "turn":{"type":"integer"}},
                 "required":["player_token","org_id","trigger_phase","action"]}),
+        types.Tool(name="start_session",
+            description="GameHouse handoff: called once GameHouse closes a lobby, to actually hand the game "
+                        "off. players is a list of {player_id, kind: 'person'|'npc', profile?} entries -- "
+                        "person player_ids are GameHouse's real person.id, npc player_ids are GameHouse-minted "
+                        "ephemeral labels with a profile.strategy_name matching the npc_profile_schema this "
+                        "game registered via register_game. Bootstraps the game and returns each entry's "
+                        "xsettlers_player_id, plus a freshly generated player_token for person-kind entries -- "
+                        "GameHouse is responsible for relaying that token back to the actual human player. "
+                        "Not something a player calls directly.",
+            inputSchema={"type":"object","properties":{
+                "session_token":{"type":"string"},
+                "scenario_key":{"type":["string","null"]},
+                "players":{"type":"array","items":{"type":"object"}}},
+                "required":["session_token","players"]}),
     ]
 
 @app.call_tool()
@@ -219,6 +234,7 @@ async def call_tool(name: str, arguments: dict):
         "rename_organization":        rename_organization,
         "set_org_scan_bearing":       set_org_scan_bearing,
         "queue_command":              queue_command,
+        "start_session":              start_session,
     }
     fn = dispatch.get(name)
     if not fn:
@@ -362,6 +378,16 @@ async def main():
     # by the first successful select_scenario() call. Until then, players is
     # empty and every gameplay tool naturally rejects with "Player not found".
     init_schema()
+    # Best-effort, not fatal: GAMEHOUSE_URL/XSETTLERS_PUBLIC_URL are both
+    # unset in most dev environments (nothing to register with, and that's a
+    # normal, supported case -- see xsettlers_mcp/gamehouse.py's
+    # register_with_gamehouse docstring), and even when set, GameHouse being
+    # unreachable shouldn't block xsettlers from serving players directly.
+    registration = await register_with_gamehouse()
+    if registration.get("ok"):
+        print(f"Registered with GameHouse: {registration.get('response')}")
+    else:
+        print(f"GameHouse registration skipped/failed: {registration.get('error')}")
     port = int(os.getenv("PORT", 8080))
     config = uvicorn.Config(starlette_app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(config)

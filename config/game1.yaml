@@ -45,12 +45,8 @@ pods_per_ship:
 home_colony: true
 
 # GameHouse lobby template -- see config/game0.yaml for the full rationale
-# (min/max both fixed at len(participants), wait_window_seconds is a ported
-# guess not a tuned value, npc_profile_schema only lists strategies actually
-# registered in engine/npc.py's STRATEGIES dict today).
+# (min/max derived from len(participants), not read from here).
 lobby:
-  min_players: 2
-  max_players: 2
   # Confirmed 2026-08-06: 120s is fine as a starting value (360s also
   # acceptable if it ever needs lengthening).
   wait_window_seconds: 120

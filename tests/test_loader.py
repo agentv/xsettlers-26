@@ -2,7 +2,7 @@ import pytest
 from config.loader import (
     DEFAULT_STARTING_FILL,
     load_config, load_starting_configuration, resolve_seats,
-    PlayerDef, ParticipantDef, StartingConfiguration,
+    PlayerDef, ParticipantDef, StartingConfiguration, LobbyDef,
 )
 
 DIRECTORY = [
@@ -13,7 +13,9 @@ DIRECTORY = [
 def _scenario(participants, name="Test Scenario"):
     return StartingConfiguration(
         name=name, description="d", participants=participants,
-        ships_per_player=1, pods_per_ship=[], home_colony=False)
+        ships_per_player=1, pods_per_ship=[], home_colony=False,
+        lobby=LobbyDef(min_players=len(participants), max_players=len(participants),
+                       wait_window_seconds=120, npc_profile_schema={}))
 
 # --- resolve_seats: pairing participants with directory identities ---
 

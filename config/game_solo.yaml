@@ -45,17 +45,15 @@ pods_per_ship:
 home_colony: true
 
 # GameHouse lobby template -- see config/game0.yaml for the general
-# rationale. Solo is the one scenario where min_players == max_players == 1
-# makes wait_window_seconds and npc_profile_schema structurally unreachable:
-# per GameHouse's own lobby logic ("if a lobby reaches the game's declared
-# max player count, it closes immediately"), a solo lobby always closes on
-# the first join -- there's never a gap to wait out or an NPC to backfill.
-# Both fields are still supplied (rather than omitted) since GameHouse's
-# describe_lobby contract expects them present; values are nominal, not
-# meaningful defaults to reuse if this scenario ever grows past 1 player.
+# rationale (min/max derived from len(participants), not read from here).
+# Solo is the one scenario where min_players == max_players == 1 makes
+# wait_window_seconds and npc_profile_schema structurally unreachable: per
+# GameHouse's own lobby logic ("if a lobby reaches the game's declared max
+# player count, it closes immediately"), a solo lobby always closes on the
+# first join -- there's never a gap to wait out or an NPC to backfill.
+# Values below are nominal, not meaningful defaults to reuse if this
+# scenario ever grows past 1 player.
 lobby:
-  min_players: 1
-  max_players: 1
   wait_window_seconds: 0
   npc_profile_schema:
     type: object

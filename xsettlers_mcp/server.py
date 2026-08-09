@@ -11,7 +11,9 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp import types
 from xsettlers_mcp.game_select import list_scenarios, select_scenario
 from xsettlers_mcp.gamehouse import start_session, register_with_gamehouse
-from xsettlers_mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
+from xsettlers_mcp.tools.player_tools import (
+    get_player_state, declare_end_turn, rescind_end_turn, set_display_name
+)
 from xsettlers_mcp.tools.sector_tools import get_sector, get_sector_map, show_sector_neighborhood
 from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
 from xsettlers_mcp.tools.organization_tools import (
@@ -77,6 +79,13 @@ async def list_tools():
             description="Player rescinds their end turn declaration",
             inputSchema={"type":"object","properties":{"player_token":{"type":"string"}},
                          "required":["player_token"]}),
+        types.Tool(name="set_display_name",
+            description="Choose your own in-game display name, shown to every player on the "
+                        "leaderboard -- independent of any name GameHouse or bootstrap supplied. "
+                        "Must be unique game-wide.",
+            inputSchema={"type":"object","properties":{
+                "player_token":{"type":"string"},"display_name":{"type":"string"}},
+                "required":["player_token","display_name"]}),
         types.Tool(name="get_sector",
             description="Get a specific sector (player-scoped visibility)",
             inputSchema={"type":"object","properties":{
@@ -219,6 +228,7 @@ async def call_tool(name: str, arguments: dict):
         "get_player_state":           get_player_state,
         "declare_end_turn":           declare_end_turn,
         "rescind_end_turn":           rescind_end_turn,
+        "set_display_name":           set_display_name,
         "get_sector":                 get_sector,
         "get_sector_map":             get_sector_map,
         "show_sector_neighborhood":   show_sector_neighborhood,

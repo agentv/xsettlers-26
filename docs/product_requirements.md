@@ -2,23 +2,23 @@
 
 # Overview
 
-XSettlers is a multiplayer, turn-based space strategy game played through any MCP-speaking client (Slack is the intended home, but nothing in the server is Slack-specific). Players manage organizations (ships and colonies) across a 3D sector map, competing to expand territory, produce resources, and outlast rivals.
+XSettlers is a multiplayer, turn-based space strategy game played through any MCP-speaking client (Slack is the intended home, but nothing in the server is Slack-specific). Players manage organizations (ships and colonies) across a sector map, competing to expand territory, produce resources, and outlast rivals. The map is 3D-capable — sector coordinates and distance math are `(x, y, z)` throughout — but every shipped scenario places everything at `z = 0`; nothing currently plays in three dimensions, only supports it. `game_config.yaml`'s `dimensions: 2` field looks like it governs this but doesn't — it's parsed and never read anywhere in the codebase.
 
 ---
 
 # Players & Game Instance
 
-* A game instance is defined by a single `game_config.yaml` file and a corresponding SQLite/SpatiaLite database.
-* The player roster is **fixed at bootstrap time**. There is no mechanism for joining a game already in session.
-* **The service is a library of games, not one game.** `config/game_config.yaml` holds a service-wide player *directory* (identity and credential, one entry per person); each scenario file declares its own `participants` — which directory players are seated in it, and where each starts. A player's token is an invitation to the specific games they are seated in, not to the whole library. Player count is therefore a property of the scenario: solo, two-player, and five-player games differ only in YAML.
-* Each player is identified by a Slack user ID. Authentication is handled at the MCP layer.
-* Roster size is per-scenario, bounded by the engine-wide `max_players` ceiling (currently 8). The shipped scenarios are two-player (`game0`, `game1`) and one-player (`game_solo`). Concurrent multi-game — several games live at once, rather than one per deployment — is still future scope.
+* A game instance is defined by a single scenario file (e.g. `config/game0.yaml`) and a corresponding SQLite/SpatiaLite database — one shared game per deployed instance.
+* The player roster is **fixed at bootstrap time**. There is no mechanism for joining a game already in session through xsettlers' own tools (see GameHouse below for the one exception).
+* Internally, xsettlers still supports several scenario files side by side (`config/game*.yaml`), each declaring its own `participants` against a service-wide player *directory* in `config/game_config.yaml` — player count is a property of the scenario, not the deployment, and a solo, two-player, or five-player game differs only in YAML. **What xsettlers is no longer responsible for is presenting itself as a browsable library to a person** — that role now belongs to a separate sibling service, **GameHouse** (`../gamehouse`), which owns Person-level identity and lobby matchmaking across potentially many hosted games, xsettlers being one of them. See `docs/TODO.md`'s "GameHouse handoff" section for the current integration. `list_scenarios`/`select_scenario` still work as xsettlers-internal tools and aren't being removed — they're just no longer the only, or the primary, way a game gets started.
+* Each player is identified by an opaque `player_token`, not a Slack-specific ID — nothing in the auth path is platform-specific (renamed from `slack_user_id` 2026-07-22). A GameHouse-driven session (see above) generates its own `player_token`s per handoff, entirely separate from `config/game_config.yaml`'s static roster; both paths are live and neither has been retired.
+* Roster size is per-scenario, bounded by the engine-wide `max_players` ceiling (currently 8). The shipped scenarios are two-player (`game0`, `game1`) and one-player (`game_solo`). Concurrent multi-game — several games live at once within one xsettlers deployment, rather than one per deployment — is still future scope; GameHouse orchestrates across separately-deployed games, it doesn't make any single xsettlers deployment itself multi-instance.
 
 ---
 
 # The Map
 
-* The game world is a 3D grid of **sectors**, each with integer coordinates `(x, y, z)`.
+* The game world is a grid of **sectors**, each with integer coordinates `(x, y, z)` — the schema and distance math are fully 3D, but every shipped scenario places its participants and their fleets at `z = 0` only (see Overview above).
 * A sector has exactly one resource capacity: **energy**. Food and goods are manufactured from stock an organization already holds, never harvested from the map, so there is no per-sector pool of them (`food_capacity`/`goods_capacity` dropped 2026-08-02).
 * **Sectors are lazily instantiated and their richness is rolled at discovery** (2026-08-02). No sector row exists until a scan, a ship arrival, or bootstrap placement reveals it via `db/sectors.py`'s `reveal_sector()`. On that first reveal — and only then — its energy is rolled as **400 + d6 × 100**, giving 500 / 600 / 700 / 800 / 900 / 1000 at flat 1-in-6 odds, mean 750. The floor is deliberate: every sector is worth working, so an unlucky roll costs a player upside rather than viability.
 * **Home sectors are exempt and effectively bottomless.** Each player's starting sector is seeded flat at `home_sector_energy` (default `HOME_SECTOR_ENERGY` = 100,000, a per-scenario setting) instead of taking the discovery roll — roughly 600 turns of maximum plausible draw, so it does not deplete in any game that will be played. A player's own footing should never be what runs out from under them, and that is precisely what allows the frontier to be lean. **This is the home sector, not the sentinel sector** — see below.
@@ -47,7 +47,7 @@ Players control **organizations** — the fundamental unit of agency. Two types:
 
 * Stationary. Cannot move once established.
 * Produce resources each turn based on pod tasks and sector capacities, at **1.5× a ship's rate** (`COLONY_PRODUCTION_MULTIPLIER`) — see [Rates](#rates-per-pod-per-turn). This is the whole mechanical payoff for colonizing.
-* Created when a ship with org mission `colonize` completes its turn in a sector.
+* Created 3 turns after a ship is given org mission `colonize` (scheduled via a `colonize_complete` event at the moment the mission is set, resolved by the engine 3 turns later) — not on the same turn the mission is set, which the sentence below's "3-turn transition" already implies but this line previously didn't state outright.
 * **Colonizing costs 30 energy** (`COLONIZATION_ENERGY_COST`), charged in full from the ship's pooled stock at the moment the mission is set — not spread over the 3-turn transition. Unlike every other cost in the economy this is an all-or-nothing gate rather than a prorated draw: a ship that cannot pay is refused and left untouched, since there is no such thing as half a conversion. The figure is provisional and expected to move with play data.
 
 ---
@@ -115,7 +115,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 
 **POC active tasks:** `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. All other entries above are recognized in the data model but are not instantiated in any current game instance.
 
-**Platform note:** The original XSettlers architecture (xsettlers-game-papi) was designed as a Mule application with a System/Process/Experience API layer and an HTML5/D3 front end. That architecture is superseded. The current stack is **Python · SpatiaLite · MCP SDK · Slack** — see [MCP Server Layer Design](mcp_server_layer_design.md) for the current design.
+**Platform note:** The original XSettlers architecture (xsettlers-game-papi) was designed as a Mule application with a System/Process/Experience API layer and an HTML5/D3 front end. That architecture is superseded. The current stack is **Python · SpatiaLite · MCP SDK**, served over streamable HTTP to any MCP-speaking client — Slack was the original intended client but identity and the transport are both client-agnostic (see [Overview](#overview)), not Slack-specific. See [MCP Server Layer Design](mcp_server_layer_design.md) for the current design.
 
 ---
 
@@ -134,7 +134,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 * **Occupation**: an org present in a sector pins confidence at 100. Full detail shown.
 * **Scan**: executed by a pod with `scan` mission at end of turn. Grants full detail for the targeted sector. Confidence decays from that point.
 * **Fog decay**: unoccupied sectors lose a flat number of confidence points each turn (`CONFIDENCE_DECAY_PER_TURN`, default 20 — see [Data Model & Storage Design](data_model_and_storage_design.md) for why it is subtractive rather than proportional). At confidence = 0 the sector **blinks out**: it leaves the player's map entirely, with no degraded "last known" indicator. The underlying row is retained as history, but nothing player-facing shows it. At the default rate, a sector you stop confirming is gone on the fifth turn.
-* **Rival detection**: if a rival org is present in the scanned sector at time of resolution, that information is surfaced with high priority in the player view.
+* **Rival detection**: if a rival org is present in the scanned sector at time of resolution, that information is surfaced with high priority in the player view. **Not implemented** — no `alert.rival_detected` (or equivalent) event exists anywhere in the codebase, verified by grep 2026-08-08. Presence at confidence 100 (occupation) does already surface rival orgs in `show_sector_neighborhood`; a *scan* specifically flagging a rival's presence with priority does not.
 
 ---
 
@@ -158,14 +158,17 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 * The game advances in **turns**. The current turn is stored in `game_state`.
 * A player **declares end of turn** when they have no further moves. Once all players have declared, the turn resolves (consensus acceleration).
 * Players may **rescind** their end-of-turn declaration before resolution.
-* End-of-turn engine actions (in order):
+* End-of-turn engine actions (in order — corrected 2026-08-08, this list had fallen behind two features built since it was last accurate):
+    * **NPC decisions** — every `is_npc=1` player's registered strategy (see `engine/npc.py`) acts, via the same tool functions a human player would call, before anything else this turn resolves
     * Player declarations reset
     * Arrivals processed
+    * **Ship's log dispatch** — any `queue_command`-deferred action due this turn (`before_arrival`/`after_arrival`/`at_turn`) fires here, right after arrivals so a chained action sees an org's just-landed state, and before production so a re-departing org's production is correctly suppressed that turn
     * Pod consumption then production (all pods: resources consumed first, then output produced; scan resolution for stationary orgs)
-    * Mission dispatch (colonize, defend, attack)
+    * Colonization resolution (matured `colonize_complete` events flip `org_type` ship → colony)
+    * Mission dispatch (`defend`/`attack` — still stubs)
     * Fog decayed
     * **Holdings calculated** — resource totals snapshotted across all orgs and pods
-    * Turn counter incremented
+    * Turn counter incremented; game-over/final-score check
 
 **Holdings are always calculated after all processing is complete** — never before. This ensures the snapshot reflects the true end state of the turn, including all production, arrivals, and mission outcomes.
 
@@ -173,7 +176,9 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 
 # Player Actions
 
-This section is the canonical design-authority inventory of every action a player can take within a game session. For implementation signatures, see `mcp/tools/`.
+This section is the canonical design-authority inventory of every action a player can take within a game session. For implementation signatures, see `xsettlers_mcp/tools/` (renamed from `mcp/tools/` 2026-07-22 — it collided with the third-party `mcp` SDK package).
+
+**Known gap, not yet reconciled:** this inventory predates several tools that now exist — `list_scenarios`, `select_scenario`, `get_player_state`, `get_sector`, `get_sector_map`, `show_civilization_status`, and `queue_command` (the ship's log — see `docs/TODO.md`'s "Design (Data Model canvas)" section) have no entries below. Left as a flagged gap rather than silently patched in, since closing it properly means either documenting each here or deciding this section's scope should narrow to something TODO.md/dev_history.md already cover better.
 
 ---
 
@@ -277,29 +282,30 @@ Ownership-gated — only the calling player's data is returned. Lives in `organi
 # Events (Write-Ahead Log)
 
 * Every state mutation is preceded by an event log entry. No exceptions.
-* **Player-action events** (deltas): `ship.move_previewed`, `ship.move_confirmed`, `ship.move_cancelled`, `mission.set`, `pod.mission_set`, `pod.scan_target_set`, `turn.declared`
-* **Engine events** (deltas): `ship.arrived`, `ship.colonized`, `pod.produced`, `pod.scanned`, `alert.rival_detected`, `alert.scan_out_of_range`, `fog.decayed`
-* **Snapshots**: `turn.snapshot` — full state written at end of each turn for replay and debug.
+* **Player-action events** (deltas): `ship.move_confirmed`, `ship.move_cancelled`, `mission.set`, `pod.task_set`, `organization.scan_bearing_set`, `pod.scan_bearing_set`, `organization.renamed`
+* **Engine events** (deltas): `ship.colonized`, `colonize_complete` (scheduled 3 turns ahead by `mission.set`, resolved by the engine), `alert.scan_out_of_range`
+* **Snapshots**: `turn.snapshot` — full state written at end of each turn for replay and debug; `game.final_scores` — the persisted, idempotent end-of-game scoreboard.
+* **Corrected 2026-08-08**: the previous version of this list (`ship.move_previewed`, `pod.mission_set`, `pod.scan_target_set`, `turn.declared`, `ship.arrived`, `pod.produced`, `pod.scanned`, `alert.rival_detected`, `fog.decayed`) had zero matches anywhere in the codebase, verified by grep — either renamed away (task/mission split, offset-based scan aiming) with this doc never updated, or never actually implemented in the first place. Rival detection specifically (`alert.rival_detected`) is a real gap: [Visibility & Fog of War](#visibility--fog-of-war) above still describes it as a feature, but no such event is ever written.
 
 ---
 
 # Rendering & Views
 
-Two view modes, one view model layer:
+**Rewritten 2026-08-08 — the previous version of this section described `views/cli_renderer.py`, `views/slack_renderer.py`, and `build_ship_view()`/`build_colony_view()`/`build_sector_view()`. None of that exists anywhere in the codebase (verified by grep); only `views/render.py` does.** Same category of staleness as `docs/mcp_server_layer_design.md`'s abandoned `gateway.py` sketch, per CLAUDE.md — a design that was written down and then superseded by what actually shipped, with this doc never catching up.
 
-* **Debug/Designer view** — unfiltered, full DB fidelity. Used during development and troubleshooting. CLI renderer (`views/cli_renderer.py`).
-* **Player view** — filtered by `player_id` and confidence. Fog-aware. Rival orgs show presence only, no internals. Slack MCP renderer (`views/slack_renderer.py`).
+What's actually built: every gameplay tool that has something worth displaying returns a `display` dict alongside its raw data — `rows_key`, `columns`, optional `header`/`column_labels`/`footer`, or `kind: "map"` for a grid (see `show_sector_neighborhood`). `views/render.py`'s `render_status()` (tables) and `render_map()` (grids) turn that into markdown, dispatching purely on the *shape* of the `display` block, never on which tool produced it — no per-tool-name branching, so any future tool returning either shape renders with zero changes here.
 
-Three view model types: `build_ship_view()`, `build_colony_view()`, `build_sector_view()`. Each returns an interface-agnostic dict. Renderers consume it independently.
+The response itself is controlled by a `response_format` argument on every tool call (`xsettlers_mcp/server.py`'s `call_tool`, not a per-tool schema property): `markdown_view` (default) returns both the raw JSON and the rendered markdown; `data_only` returns JSON alone; `html_svg` is reserved for a future graphics response and currently falls back to `markdown_view`. Two additional mechanisms steer an LLM client toward actually displaying the rendered markdown rather than reconstructing its own from the JSON — an MCP `instructions` string sent once at session `initialize`, and a repeated directive block appended to every `markdown_view` response — added 2026-08-05 after the alternative (hoping a client renders it verbatim) proved unenforceable by convention alone. See `docs/TODO.md`'s "default display" note if that's still there, or `xsettlers_mcp/server.py`'s `SERVER_INSTRUCTIONS`/`RENDER_DIRECTIVE` directly.
+
+There is no separate debug-vs-player view distinction at the rendering layer — every tool is already ownership-gated to the calling player at the data layer (ownership checks inline in each tool, not a rendering-time filter), so there's nothing left for a render step to additionally hide.
 
 ---
 
 # Out of Scope (POC)
 
 * Combat (`defend` / `attack` missions are stubs)
-* Resource consumption / deduction
-* Multi-game support
-* Runtime player join
+* Multi-game support within a single xsettlers deployment (concurrent games, not just switching scenarios) — see GameHouse note under [Players & Game Instance](#players--game-instance) for the orchestration layer that now exists *above* individual deployments instead
+* Runtime player join to an xsettlers-internal game already in session (GameHouse's lobby is a join-before-start flow, not mid-session join)
 * Variable scan range (sensor pods)
-* SVG map renderer
-* Authentication hardening
+* SVG map renderer (`response_format="html_svg"` is reserved as a value but falls back to markdown; nothing renders it yet)
+* Authentication hardening (the static player directory in `config/game_config.yaml` is still unhardened; GameHouse-issued sessions are a separate, additional path, not a replacement)

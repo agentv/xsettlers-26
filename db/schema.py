@@ -182,6 +182,19 @@ def init_schema():
             bootstrapped_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
             CHECK (id = 1)
         );
+        -- GameHouse handoff (added 2026-08-07): the session_token GameHouse
+        -- pushes via start_session() (see xsettlers_mcp/gamehouse.py), stored
+        -- so it exists locally ("the game verifies every request against its
+        -- own local copy" per GameHouse's docs/data_model.md) -- not yet
+        -- wired into any request-gating logic. The existing static-roster
+        -- auth (xsettlers_mcp/auth.py) is untouched and remains the only
+        -- thing that actually gates access today; this table is preparation,
+        -- not a replacement.
+        CREATE TABLE IF NOT EXISTS game_session (
+            id            INTEGER PRIMARY KEY DEFAULT 1,
+            session_token TEXT NOT NULL,
+            CHECK (id = 1)
+        );
         CREATE TABLE IF NOT EXISTS organizations (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             org_type       TEXT CHECK(org_type IN ('ship','colony')),

@@ -68,12 +68,42 @@ class ParticipantDef:
     is_npc: bool = False
 
 @dataclass
+class LobbyDef:
+    """
+    The shape a scenario reports to GameHouse via describe_lobby() (see
+    xsettlers_mcp/gamehouse.py) -- min/max player counts, how long GameHouse
+    should wait for a second human before backfilling with an NPC, and the
+    JSON schema an NPC profile must match for this scenario.
+
+    min_players/max_players are DERIVED from len(participants), never read
+    from YAML -- resolve_seats() already requires an exact roster match, not
+    a range, so a separately-authored number here could only ever drift out
+    of sync with the participants list it's supposed to describe. Restating
+    it in the file would be exactly the "changing a value in the YAML and
+    expecting it to take effect" trap this codebase already warns against
+    elsewhere (see CLAUDE.md on game_config.yaml's dead `game:` fields).
+
+    wait_window_seconds/npc_profile_schema ARE scenario-authored (nothing to
+    derive them from) but optional -- a scenario silent on `lobby:` entirely
+    gets sensible defaults (120s, no NPC support) rather than being unable to
+    load at all, so ad hoc/minimal scenarios (test fixtures included) don't
+    need to declare a GameHouse-specific block just to parse.
+    """
+    min_players: int
+    max_players: int
+    wait_window_seconds: int
+    npc_profile_schema: dict
+
+DEFAULT_LOBBY_WAIT_WINDOW_SECONDS = 120
+
+@dataclass
 class StartingConfiguration:
     name: str
     description: str
     participants: List[ParticipantDef]
     ships_per_player: int
     pods_per_ship: List[PodTemplateDef]
+    lobby: LobbyDef
     home_colony: bool = False
     # Scenario-wide default for how full every pod starts, 0.0-1.0. Individual
     # pod templates may override it. Falls back to DEFAULT_STARTING_FILL when
@@ -138,6 +168,14 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
     ) for p in _require(sc_raw, "participants", "participants")]
     if not participants:
         raise ValueError(f"Scenario {path} defines no participants")
+    lobby_raw = sc_raw.get("lobby", {})
+    lobby = LobbyDef(
+        min_players=len(participants),
+        max_players=len(participants),
+        wait_window_seconds=int(lobby_raw.get("wait_window_seconds",
+                                              DEFAULT_LOBBY_WAIT_WINDOW_SECONDS)),
+        npc_profile_schema=lobby_raw.get("npc_profile_schema", {}),
+    )
     return StartingConfiguration(
         name=_require(sc_raw, "name", "name"),
         description=_require(sc_raw, "description", "description"),
@@ -145,6 +183,7 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
         ships_per_player=int(_require(sc_raw, "ships_per_player",
                                       "ships_per_player")),
         pods_per_ship=pods_per_ship,
+        lobby=lobby,
         home_colony=bool(sc_raw.get("home_colony", False)),
         starting_fill=scenario_fill,
         home_sector_energy=float(sc_raw.get("home_sector_energy",

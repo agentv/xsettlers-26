@@ -55,3 +55,35 @@ pods_per_ship:
 
 # Set to true to spawn a starting colony at each player's home sector.
 home_colony: false
+
+# GameHouse lobby template (added 2026-08-06) -- the shape this scenario
+# reports via describe_lobby(), so GameHouse's catalog can register it as its
+# own entry rather than xsettlers exposing one lobby shape for all scenarios.
+# No min_players/max_players here -- config/loader.py derives both from
+# len(participants) above rather than reading them, since a separately
+# authored number here could only ever drift out of sync with the roster it's
+# supposed to describe.
+lobby:
+  # Confirmed 2026-08-06: 120s is fine as a starting value (360s also
+  # acceptable if it ever needs lengthening) -- how long GameHouse should
+  # wait for a second human before backfilling with an NPC.
+  wait_window_seconds: 120
+  # All five strategies registered in engine/npc.py's STRATEGIES dict --
+  # see docs/TODO.md's fleet-strategy taxonomy for what each one does.
+  # config's properties vary by strategy_name (e.g. colonize_fraction only
+  # means anything for burst_and_colonize) -- not modeled as a conditional
+  # schema here, just documented per-strategy in engine/npc.py's docstrings.
+  npc_profile_schema:
+    type: object
+    required: [strategy_name]
+    properties:
+      strategy_name:
+        type: string
+        enum: [fan_out_consolidate, turtle, burst_and_colonize, frontier_map_stay_frosty, fan_out]
+      config:
+        type: object
+        properties:
+          leg_distance: {type: integer}
+          jump_range_per_turn: {type: integer}
+          colonize_fraction: {type: number}
+          scout_distance: {type: integer}

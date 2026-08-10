@@ -8,61 +8,86 @@ appending — it's a snapshot, not a log. Safe to delete/ignore once its
 contents are stale and captured elsewhere; nothing here is authoritative that
 isn't also in TODO.md/dev_history.md or the code itself.
 
-## Where things stand (2026-08-05)
+## Where things stand (2026-08-07)
 
-`main` is at `c0c3a89` ("Add ship's log: queued commands tied to the clock"),
-pushed, working tree clean.
+Working on branch **`game-inception-authentication`** (`7594000`, pushed),
+branched off `main` at `85fe15a`. `main` itself has ship's log and the
+default-display steering work merged already — this branch is entirely
+GameHouse integration + fleet strategies on top of that.
 
-**Ship's log is built and merged** — see `docs/TODO.md`'s "Design (Data Model
-canvas)" section for the full technical rundown (schema, four trigger
-primitives, the `engine/movement.py`/`engine/pod_tasking.py` extraction and
-why). Short version: `queue_command` lets a player/NPC defer an action
-(`move` or `set_pod_task`) against an org to fire `during_transit` (on
-departure), `before_arrival`/`after_arrival` (relative to a move's
-`arrival_turn`), or `at_turn` (an explicit absolute turn). `fan_out_consolidate`
-migrated onto it, deleting its old hand-rolled polling. Live-verified on the
-local server as well as covered by `tests/test_ship_log.py` (212 tests total,
-all green as of this commit).
+**Fleet-strategy taxonomy is built, not just named** — all four (`turtle`,
+`fan_out`, `burst_and_colonize`, `frontier_map_stay_frosty`) are real,
+registered functions in `engine/npc.py`'s `STRATEGIES` dict. The fleet-vs-player
+schema question from the earlier version of this note (fleets don't exist as a
+data-model concept, `npc_profiles` is still `player_id`-keyed) is **still
+open** — nothing here changed that, these four are still assigned per-player,
+not per-fleet.
+
+**GameHouse handoff is built and live-verified across two real processes** —
+see `docs/TODO.md`'s "GameHouse handoff" subsection for the full technical
+rundown. Short version: a sibling repo `../gamehouse` is the identity/lobby
+orchestrator; xsettlers registers itself with it at startup
+(`register_with_gamehouse()`) and exposes `start_session()` for the actual
+handoff. **The existing static-roster auth (`xsettlers_mcp/auth.py`,
+`config/game_config.yaml`) is untouched** — this is an additional path, not a
+replacement; whether to ever retire the old one is undecided. Verified for
+real: `welcome`/`verify_code` login on GameHouse → `join_lobby` filling and
+closing a lobby → a genuine HTTP push of `start_session` to xsettlers →
+xsettlers bootstrapping real ships/pods → the returned `player_token` working
+against `get_player_state`. One real bug found and fixed on the way: the
+`start_session` tool's declared JSON Schema rejected `null` for `scenario_key`
+even though the Python function handled `None` fine — only the live round
+trip caught it, not any unit test, which is why
+`tests/test_gamehouse.py::test_start_session_tool_schema_permits_null_scenario_key`
+now checks the schema declaration itself.
 
 **Process state — not captured by git, check before assuming:**
-- Local server: running (`python -m xsettlers_mcp.server`, port 8080), DB is
-  whatever was last left from live ship's-log verification (Solo scenario,
-  a few ships mid-chain). Treat as scratch state, not a game in progress —
-  fine to `rm xsettlers.db` and restart clean.
-- Fly deployment (`xsettlers.fly.dev`): machine is up, but running the image
-  deployed 2026-08-01 — **predates ship's log entirely.** `queue_command`
-  and the `org_command_queue` table do not exist there yet. Needs `fly
-  deploy` before ship's log is usable through the public URL. See
-  `project_fly_deployment` memory for the redeploy command if the app/machine
-  state has changed since.
+- Local xsettlers server: running, port 8080, DB is whatever was last left
+  from the live GameHouse handoff test (a few `gamehouse-*@handoff` players
+  bootstrapped). Scratch state, fine to `rm xsettlers.db` and restart clean.
+- Local GameHouse server (`../gamehouse`, sibling repo): running, port 8090
+  (not its default 8080 — collides with xsettlers otherwise), its own
+  `gamehouse.db`. Started via `DB_PATH=gamehouse.db PORT=8090 .venv/bin/python3
+  -m gamehouse_mcp.server` from that repo's root. Both need
+  `GAMEHOUSE_URL=http://localhost:8090/mcp` and
+  `XSETTLERS_PUBLIC_URL=http://localhost:8080/mcp` set when starting
+  xsettlers, or registration silently no-ops (by design — see
+  `register_with_gamehouse`'s docstring).
+- **GameHouse's own contract has moved at least twice already** since first
+  read this session — `describe_lobby()` was fully removed (superseded by a
+  push-based `register_game` model) and `start_session` gained a
+  `scenario_key` field, mid-session, without warning. Don't trust anything
+  above about GameHouse's wire shape without re-reading `../gamehouse/docs/data_model.md`
+  fresh — it's a fast-moving sibling project, not a stable external dependency.
+- Fly deployment (`xsettlers.fly.dev`): last known state (2026-08-06) was
+  running and healthy at commit `85fe15a` — **predates this entire branch**,
+  including ship's log's pod-tasking/at_turn additions were already on it,
+  but none of the fleet-strategy or GameHouse work has been deployed.
+  Re-verify with `fly status --app xsettlers` before trusting this.
 
-## Open thread: fleet-strategy taxonomy (named, not built)
+## Open threads
 
-Mid-conversation, not yet a plan-mode design pass. Four NPC/fleet behavioral
-styles got named and loosely characterized — **turtle**, **fan_out**,
-**burst-and-colonize**, **frontier-map-stay-frosty** — full descriptions in
-`docs/TODO.md`'s new "Fleet-strategy taxonomy" subsection under "NPC strategy
-profiles." The one architecturally load-bearing point, easy to lose in a
-context reset: **these are meant to be fleet-scoped, not player-scoped** — a
-player runs multiple fleets, each on its own strategy — which `npc_profiles`
-(currently `player_id`-keyed) doesn't support, and fleets don't exist as a
-data-model concept at all yet. Don't start implementing any of the four
-styles without first resolving that schema question, or the work will need
-redoing once fleets exist.
-
-Two of the four already have real comparative data behind them, from an
-earlier mock 2-player Diaspora run this session (not yet written up in
-`docs/dev_history.md`): a burst-and-colonize-shaped strategy (fan out 6
-ships, colonize 2 at home turn 1) scored 2574 vs. a pure-turtle opponent's
-2240 — 14.9% ahead, over 20 turns.
+- **Fleet-vs-player schema** (carried over, still unresolved): `npc_profiles`
+  is `player_id`-keyed; a real fleet concept doesn't exist. Don't build
+  toward multiple fleets per player without resolving this first.
+- **GameHouse's own open items that create required xsettlers-side surface**
+  (named directly in their docs, not built on either side): a results-object
+  hand-back to GameHouse at game completion, and a run-state query GameHouse
+  can poll before offering a Person reconnect.
+- **Multi-scenario support** — xsettlers registered with GameHouse as
+  scenario-less (`scenarios=[]`); `start_session`'s `scenario_key` is accepted
+  but not branched on. Outbreak/Solo have no path to GameHouse yet.
+- **Old auth code's fate** — explicitly deferred, not decided: keep both
+  paths indefinitely, or retire the static roster once GameHouse-driven
+  sessions are the only real usage.
 
 ## If picking this up fresh, in order
 
 1. Check `fly apps list` / `fly status --app xsettlers` before trusting
-   anything above about deployment state — it's changed hands (destroyed,
-   redeployed, stopped, started) multiple times this project already.
-2. Read `docs/TODO.md`'s two updated sections (ship's log entry, NPC
-   strategy profiles) for the technical detail this file deliberately
-   doesn't repeat.
-3. If resuming the fleet-strategy work: the fleet-vs-player schema question
-   is the actual next decision, not which style to code first.
+   anything above about deployment state — it's changed hands multiple times
+   this project already.
+2. Re-read `../gamehouse/docs/data_model.md` before touching
+   `xsettlers_mcp/gamehouse.py` — that contract has already moved twice
+   without warning this session.
+3. Read `docs/TODO.md`'s "GameHouse handoff" and "Fleet-strategy taxonomy"
+   subsections for the technical detail this file deliberately doesn't repeat.

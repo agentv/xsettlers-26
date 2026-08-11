@@ -40,7 +40,8 @@ exist.
 
 ## Config
 
-* [ ] **`config/game_config.yaml`'s `game:` block is mostly dead, shadowed by env vars.** Only `max_players` and `score_weights` are consumed. `tick_seconds` (vs `GAME_TICK_SECONDS`), `turn_limit` (vs `TURN_LIMIT`), and `confidence_decay_per_turn` (vs `CONFIDENCE_DECAY_PER_TURN`) are each parsed into `GameSettings` by `config/loader.py` and then never read; `dimensions` and `feature_flags` are read by nothing anywhere. This is a live trap — editing a value in the YAML looks like it should work and silently does nothing. Fix is to pick a precedence rule (proposed: YAML supplies the default, env overrides it) and apply it to all of them at once, rather than wiring up one field and leaving the rest inconsistent. Raised 2026-07-30 while changing the fog decay model.
+* [ ] **`config/game_config.yaml`'s `game:` block is mostly dead, shadowed by env vars.** Only `max_players` and `score_weights` are consumed. `tick_seconds` (vs `GAME_TICK_SECONDS`), `turn_limit` (vs `TURN_LIMIT`), and `confidence_decay_per_turn` (vs `CONFIDENCE_DECAY_PER_TURN`) are each parsed into `GameSettings` by `config/loader.py` and then never read. This is a live trap — editing a value in the YAML looks like it should work and silently does nothing. Fix is to pick a precedence rule (proposed: YAML supplies the default, env overrides it) and apply it to all of them at once, rather than wiring up one field and leaving the rest inconsistent. Raised 2026-07-30 while changing the fog decay model.
+  * **Narrowed 2026-08-11** (complexity audit): `dimensions` and `feature_flags` are **gone** — deleted from `GameSettings` and from the YAML. They belonged to a different category than the three above: no env var shadowed them and no code read them anywhere, so there was no precedence rule to decide and nothing to reconcile. (`dimensions: 2` had been sitting in the YAML contradicting the loader's own default of `3`, with nothing to notice.) The three env-shadowed fields are deliberately **kept** pending the precedence decision — they are reserved, not dead. Re-add feature flags alongside the code that reads them.
 
 ## Infrastructure
 
@@ -312,7 +313,8 @@ expects to shape the game with.
 
 ## Models refactor
 
-* [ ] `models/` directory is stubbed; CRUD logic currently lives in tool files — refactor once POC is stable.
+* [ ] CRUD logic currently lives in tool files (`xsettlers_mcp/tools/*.py`) — pull it out into a model layer once the POC is stable.
+  * **2026-08-11** (complexity audit): the `models/` directory itself has been **deleted**. It held six 0-byte files and had no importer anywhere, so it advertised a layer that did not exist — a reader looking for model classes found an empty package rather than an honest absence. The refactor above is unaffected: recreate the package when there is something to put in it. Note that the natural first step is now item #1 of the audit (a shared auth/connection helper), which is where the per-tool CRUD boilerplate actually concentrates.
 
 ## TDD rule (standing policy — not a task, keep applying it)
 

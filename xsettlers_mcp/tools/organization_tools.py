@@ -15,6 +15,7 @@ from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.sector_tools import bearing_name
 from datetime import datetime, timezone
 import json
+import os
 
 def _tick_countdown_display(next_tick_at: str | None) -> str:
     """
@@ -660,7 +661,6 @@ def show_civilization_status(player_token: str) -> dict:
     # Turn context
     cur.execute("SELECT current_turn FROM game_state WHERE id=1")
     current_turn = cur.fetchone()["current_turn"]
-    import os
     turn_limit = int(os.getenv("TURN_LIMIT", 20))
     next_tick_at = get_next_tick_at()
 
@@ -819,7 +819,6 @@ def show_game_status(player_token: str) -> dict:
 
     cur.execute("SELECT current_turn FROM game_state WHERE id=1")
     current_turn = cur.fetchone()["current_turn"]
-    import os
     turn_limit = int(os.getenv("TURN_LIMIT", 20))
     next_tick_at = get_next_tick_at()
     weights = load_config().game.score_weights

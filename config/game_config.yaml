@@ -12,12 +12,13 @@ game:
   # scenario's participants list, not here.
   max_players: 8
   turn_limit: 20
-  dimensions: 2
 
-  feature_flags:
-    combat_enabled: false
-    sensor_pods_enabled: false
-    pod_reconfig_enabled: false
+  # (No `dimensions` or `feature_flags` keys -- both were removed 2026-08-11.
+  # Neither was read by any code anywhere, and unlike tick_seconds/turn_limit/
+  # confidence_decay_per_turn above there was no env var shadowing them either,
+  # so there was nothing to reconcile: `dimensions: 2` had sat here contradicting
+  # the loader's own default of 3 with nothing to notice. Re-add them alongside
+  # the code that consumes them, not before.)
 
   # Points per stored unit, applied to a player's total held energy/food/goods
   # to compute the game score (show_game_status's "score" field, and the

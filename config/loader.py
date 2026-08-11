@@ -37,13 +37,23 @@ HOME_SECTOR_ENERGY = 100_000.0
 
 @dataclass
 class GameSettings:
+    """
+    Engine-wide settings from config/game_config.yaml's `game:` block.
+
+    Only `max_players` and `score_weights` are actually consumed today.
+    `tick_seconds`/`turn_limit`/`confidence_decay_per_turn` are parsed but
+    then shadowed by GAME_TICK_SECONDS/TURN_LIMIT/CONFIDENCE_DECAY_PER_TURN
+    -- kept here deliberately, pending the precedence rule (YAML supplies the
+    default, env overrides it) that docs/TODO.md tracks applying to all three
+    at once. `dimensions` and `feature_flags` used to sit here too and were
+    removed on 2026-08-11: unlike the other three they had no env counterpart
+    and no consumer anywhere, so there was nothing to reconcile them with.
+    """
     name: str
     tick_seconds: int
     confidence_decay_per_turn: int
     max_players: int
     turn_limit: int
-    dimensions: int
-    feature_flags: dict
     score_weights: dict
 
 @dataclass
@@ -258,8 +268,6 @@ def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameC
                                                "game.confidence_decay_per_turn")),
         max_players=int(_require(g, "max_players", "game.max_players")),
         turn_limit=int(_require(g, "turn_limit", "game.turn_limit")),
-        dimensions=int(g.get("dimensions", 3)),
-        feature_flags=g.get("feature_flags", {}),
         score_weights=g.get("score_weights", {"energy": 1, "goods": 1, "food": 1}),
     )
     players = [PlayerDef(

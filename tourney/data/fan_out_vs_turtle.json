@@ -1,0 +1,443 @@
+{
+  "scenario": "game0",
+  "players": [
+    {
+      "id": 1,
+      "display_name": "Vincent",
+      "strategy": "fan_out"
+    },
+    {
+      "id": 2,
+      "display_name": "Player Two",
+      "strategy": "turtle"
+    }
+  ],
+  "turn_data": [
+    {
+      "turn": 0,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 376.0,
+      "food": 496.0,
+      "goods": 496.0,
+      "total": 1368.0,
+      "score": 1488.0
+    },
+    {
+      "turn": 0,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 488.0,
+      "food": 488.0,
+      "goods": 496.0,
+      "total": 1472.0,
+      "score": 1480.0
+    },
+    {
+      "turn": 1,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 272.0,
+      "food": 512.0,
+      "goods": 512.0,
+      "total": 1296.0,
+      "score": 1536.0
+    },
+    {
+      "turn": 1,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 496.0,
+      "food": 496.0,
+      "goods": 512.0,
+      "total": 1504.0,
+      "score": 1520.0
+    },
+    {
+      "turn": 2,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 264.0,
+      "food": 512.0,
+      "goods": 528.0,
+      "total": 1304.0,
+      "score": 1568.0
+    },
+    {
+      "turn": 2,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 504.0,
+      "food": 504.0,
+      "goods": 528.0,
+      "total": 1536.0,
+      "score": 1560.0
+    },
+    {
+      "turn": 3,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 160.0,
+      "food": 528.0,
+      "goods": 544.0,
+      "total": 1232.0,
+      "score": 1616.0
+    },
+    {
+      "turn": 3,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 512.0,
+      "food": 512.0,
+      "goods": 544.0,
+      "total": 1568.0,
+      "score": 1600.0
+    },
+    {
+      "turn": 4,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 56.0,
+      "food": 544.0,
+      "goods": 560.0,
+      "total": 1160.0,
+      "score": 1664.0
+    },
+    {
+      "turn": 4,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 520.0,
+      "food": 520.0,
+      "goods": 560.0,
+      "total": 1600.0,
+      "score": 1640.0
+    },
+    {
+      "turn": 5,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 48.0,
+      "food": 544.0,
+      "goods": 576.0,
+      "total": 1168.0,
+      "score": 1696.0
+    },
+    {
+      "turn": 5,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 528.0,
+      "food": 528.0,
+      "goods": 576.0,
+      "total": 1632.0,
+      "score": 1680.0
+    },
+    {
+      "turn": 6,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 40.0,
+      "food": 544.0,
+      "goods": 592.0,
+      "total": 1176.0,
+      "score": 1728.0
+    },
+    {
+      "turn": 6,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 536.0,
+      "food": 536.0,
+      "goods": 592.0,
+      "total": 1664.0,
+      "score": 1720.0
+    },
+    {
+      "turn": 7,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 32.0,
+      "food": 544.0,
+      "goods": 608.0,
+      "total": 1184.0,
+      "score": 1760.0
+    },
+    {
+      "turn": 7,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 544.0,
+      "food": 544.0,
+      "goods": 608.0,
+      "total": 1696.0,
+      "score": 1760.0
+    },
+    {
+      "turn": 8,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 24.0,
+      "food": 544.0,
+      "goods": 624.0,
+      "total": 1192.0,
+      "score": 1792.0
+    },
+    {
+      "turn": 8,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 552.0,
+      "food": 552.0,
+      "goods": 624.0,
+      "total": 1728.0,
+      "score": 1800.0
+    },
+    {
+      "turn": 9,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 544.0,
+      "goods": 640.0,
+      "total": 1200.0,
+      "score": 1824.0
+    },
+    {
+      "turn": 9,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 560.0,
+      "food": 560.0,
+      "goods": 640.0,
+      "total": 1760.0,
+      "score": 1840.0
+    },
+    {
+      "turn": 10,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 557.3333333333333,
+      "goods": 656.0,
+      "total": 1229.3333333333333,
+      "score": 1869.33
+    },
+    {
+      "turn": 10,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 568.0,
+      "food": 568.0,
+      "goods": 656.0,
+      "total": 1792.0,
+      "score": 1880.0
+    },
+    {
+      "turn": 11,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 570.6666666666666,
+      "goods": 672.0,
+      "total": 1258.6666666666665,
+      "score": 1914.67
+    },
+    {
+      "turn": 11,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 576.0,
+      "food": 576.0,
+      "goods": 672.0,
+      "total": 1824.0,
+      "score": 1920.0
+    },
+    {
+      "turn": 12,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 584.0,
+      "goods": 688.0,
+      "total": 1288.0,
+      "score": 1960.0
+    },
+    {
+      "turn": 12,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 584.0,
+      "food": 584.0,
+      "goods": 688.0,
+      "total": 1856.0,
+      "score": 1960.0
+    },
+    {
+      "turn": 13,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 597.3333333333334,
+      "goods": 704.0,
+      "total": 1317.3333333333335,
+      "score": 2005.33
+    },
+    {
+      "turn": 13,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 592.0,
+      "food": 592.0,
+      "goods": 704.0,
+      "total": 1888.0,
+      "score": 2000.0
+    },
+    {
+      "turn": 14,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 610.6666666666667,
+      "goods": 720.0,
+      "total": 1346.6666666666667,
+      "score": 2050.67
+    },
+    {
+      "turn": 14,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 600.0,
+      "food": 600.0,
+      "goods": 720.0,
+      "total": 1920.0,
+      "score": 2040.0
+    },
+    {
+      "turn": 15,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 624.0000000000001,
+      "goods": 736.0,
+      "total": 1376.0,
+      "score": 2096.0
+    },
+    {
+      "turn": 15,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 608.0,
+      "food": 608.0,
+      "goods": 736.0,
+      "total": 1952.0,
+      "score": 2080.0
+    },
+    {
+      "turn": 16,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 637.3333333333335,
+      "goods": 752.0,
+      "total": 1405.3333333333335,
+      "score": 2141.33
+    },
+    {
+      "turn": 16,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 616.0,
+      "food": 616.0,
+      "goods": 752.0,
+      "total": 1984.0,
+      "score": 2120.0
+    },
+    {
+      "turn": 17,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 650.6666666666669,
+      "goods": 768.0,
+      "total": 1434.666666666667,
+      "score": 2186.67
+    },
+    {
+      "turn": 17,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 624.0,
+      "food": 624.0,
+      "goods": 768.0,
+      "total": 2016.0,
+      "score": 2160.0
+    },
+    {
+      "turn": 18,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 664.0000000000002,
+      "goods": 784.0,
+      "total": 1464.0000000000002,
+      "score": 2232.0
+    },
+    {
+      "turn": 18,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 632.0,
+      "food": 632.0,
+      "goods": 784.0,
+      "total": 2048.0,
+      "score": 2200.0
+    },
+    {
+      "turn": 19,
+      "player_id": 1,
+      "strategy": "fan_out",
+      "energy": 16.0,
+      "food": 677.3333333333336,
+      "goods": 800.0,
+      "total": 1493.3333333333335,
+      "score": 2277.33
+    },
+    {
+      "turn": 19,
+      "player_id": 2,
+      "strategy": "turtle",
+      "energy": 640.0,
+      "food": 640.0,
+      "goods": 800.0,
+      "total": 2080.0,
+      "score": 2240.0
+    }
+  ],
+  "standings": [
+    {
+      "player_id": 1,
+      "display_name": "Vincent",
+      "score": 2277.3333333333335,
+      "energy": 16.0,
+      "food": 677.3333333333336,
+      "goods": 800.0,
+      "total": 1493.3333333333335,
+      "capacity": 4800.0,
+      "rank": 1,
+      "strategy": "fan_out"
+    },
+    {
+      "player_id": 2,
+      "display_name": "Player Two",
+      "score": 2240.0,
+      "energy": 640.0,
+      "food": 640.0,
+      "goods": 800.0,
+      "total": 2080.0,
+      "capacity": 4800.0,
+      "rank": 2,
+      "strategy": "turtle"
+    }
+  ]
+}

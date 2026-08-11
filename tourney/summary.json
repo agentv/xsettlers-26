@@ -1,0 +1,332 @@
+{
+  "scenario": "config/game0.yaml",
+  "strategies": [
+    "burst_and_colonize",
+    "fan_out",
+    "fan_out_consolidate",
+    "frontier_map_stay_frosty",
+    "turtle"
+  ],
+  "matchups": [
+    {
+      "matchup": "burst_and_colonize_vs_fan_out",
+      "strategy_1": "burst_and_colonize",
+      "strategy_2": "fan_out",
+      "standings": [
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 2582.0,
+          "energy": 568.0,
+          "food": 846.0,
+          "goods": 868.0,
+          "total": 2282.0,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "burst_and_colonize"
+        },
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 2277.3333333333335,
+          "energy": 16.0,
+          "food": 677.3333333333336,
+          "goods": 800.0,
+          "total": 1493.3333333333335,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "fan_out"
+        }
+      ],
+      "winner": "burst_and_colonize"
+    },
+    {
+      "matchup": "burst_and_colonize_vs_fan_out_consolidate",
+      "strategy_1": "burst_and_colonize",
+      "strategy_2": "fan_out_consolidate",
+      "standings": [
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 2582.0,
+          "energy": 568.0,
+          "food": 846.0,
+          "goods": 868.0,
+          "total": 2282.0,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "burst_and_colonize"
+        },
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 2296.0,
+          "energy": 240.0,
+          "food": 696.0,
+          "goods": 800.0,
+          "total": 1736.0,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "fan_out_consolidate"
+        }
+      ],
+      "winner": "burst_and_colonize"
+    },
+    {
+      "matchup": "burst_and_colonize_vs_frontier_map_stay_frosty",
+      "strategy_1": "burst_and_colonize",
+      "strategy_2": "frontier_map_stay_frosty",
+      "standings": [
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 2582.0,
+          "energy": 568.0,
+          "food": 846.0,
+          "goods": 868.0,
+          "total": 2282.0,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "burst_and_colonize"
+        },
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 1864.0,
+          "energy": 16.0,
+          "food": 573.3333333333335,
+          "goods": 645.3333333333333,
+          "total": 1234.6666666666667,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "frontier_map_stay_frosty"
+        }
+      ],
+      "winner": "burst_and_colonize"
+    },
+    {
+      "matchup": "burst_and_colonize_vs_turtle",
+      "strategy_1": "burst_and_colonize",
+      "strategy_2": "turtle",
+      "standings": [
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 2582.0,
+          "energy": 568.0,
+          "food": 846.0,
+          "goods": 868.0,
+          "total": 2282.0,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "burst_and_colonize"
+        },
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 2240.0,
+          "energy": 640.0,
+          "food": 640.0,
+          "goods": 800.0,
+          "total": 2080.0,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "turtle"
+        }
+      ],
+      "winner": "burst_and_colonize"
+    },
+    {
+      "matchup": "fan_out_vs_fan_out_consolidate",
+      "strategy_1": "fan_out",
+      "strategy_2": "fan_out_consolidate",
+      "standings": [
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 2296.0,
+          "energy": 240.0,
+          "food": 696.0,
+          "goods": 800.0,
+          "total": 1736.0,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "fan_out_consolidate"
+        },
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 2277.3333333333335,
+          "energy": 16.0,
+          "food": 677.3333333333336,
+          "goods": 800.0,
+          "total": 1493.3333333333335,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "fan_out"
+        }
+      ],
+      "winner": "fan_out_consolidate"
+    },
+    {
+      "matchup": "fan_out_vs_frontier_map_stay_frosty",
+      "strategy_1": "fan_out",
+      "strategy_2": "frontier_map_stay_frosty",
+      "standings": [
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 2277.3333333333335,
+          "energy": 16.0,
+          "food": 677.3333333333336,
+          "goods": 800.0,
+          "total": 1493.3333333333335,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "fan_out"
+        },
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 1864.0,
+          "energy": 16.0,
+          "food": 573.3333333333335,
+          "goods": 645.3333333333333,
+          "total": 1234.6666666666667,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "frontier_map_stay_frosty"
+        }
+      ],
+      "winner": "fan_out"
+    },
+    {
+      "matchup": "fan_out_vs_turtle",
+      "strategy_1": "fan_out",
+      "strategy_2": "turtle",
+      "standings": [
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 2277.3333333333335,
+          "energy": 16.0,
+          "food": 677.3333333333336,
+          "goods": 800.0,
+          "total": 1493.3333333333335,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "fan_out"
+        },
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 2240.0,
+          "energy": 640.0,
+          "food": 640.0,
+          "goods": 800.0,
+          "total": 2080.0,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "turtle"
+        }
+      ],
+      "winner": "fan_out"
+    },
+    {
+      "matchup": "fan_out_consolidate_vs_frontier_map_stay_frosty",
+      "strategy_1": "fan_out_consolidate",
+      "strategy_2": "frontier_map_stay_frosty",
+      "standings": [
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 2296.0,
+          "energy": 240.0,
+          "food": 696.0,
+          "goods": 800.0,
+          "total": 1736.0,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "fan_out_consolidate"
+        },
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 1864.0,
+          "energy": 16.0,
+          "food": 573.3333333333335,
+          "goods": 645.3333333333333,
+          "total": 1234.6666666666667,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "frontier_map_stay_frosty"
+        }
+      ],
+      "winner": "fan_out_consolidate"
+    },
+    {
+      "matchup": "fan_out_consolidate_vs_turtle",
+      "strategy_1": "fan_out_consolidate",
+      "strategy_2": "turtle",
+      "standings": [
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 2296.0,
+          "energy": 240.0,
+          "food": 696.0,
+          "goods": 800.0,
+          "total": 1736.0,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "fan_out_consolidate"
+        },
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 2240.0,
+          "energy": 640.0,
+          "food": 640.0,
+          "goods": 800.0,
+          "total": 2080.0,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "turtle"
+        }
+      ],
+      "winner": "fan_out_consolidate"
+    },
+    {
+      "matchup": "frontier_map_stay_frosty_vs_turtle",
+      "strategy_1": "frontier_map_stay_frosty",
+      "strategy_2": "turtle",
+      "standings": [
+        {
+          "player_id": 2,
+          "display_name": "Player Two",
+          "score": 2240.0,
+          "energy": 640.0,
+          "food": 640.0,
+          "goods": 800.0,
+          "total": 2080.0,
+          "capacity": 4800.0,
+          "rank": 1,
+          "strategy": "turtle"
+        },
+        {
+          "player_id": 1,
+          "display_name": "Vincent",
+          "score": 1864.0,
+          "energy": 16.0,
+          "food": 573.3333333333335,
+          "goods": 645.3333333333333,
+          "total": 1234.6666666666667,
+          "capacity": 4800.0,
+          "rank": 2,
+          "strategy": "frontier_map_stay_frosty"
+        }
+      ],
+      "winner": "turtle"
+    }
+  ]
+}

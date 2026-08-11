@@ -281,7 +281,7 @@ def test_fan_out_dispatches_scouts_with_aimed_scan():
     memory = _memory(pid)
     assert memory["opening_dispatched"] is True
     assert len(memory["scouts"]) == 4
-    assert all(info["committed"] is False for info in memory["scouts"].values())
+    assert memory["found"] == {}
 
     conn = get_connection()
     orgs = {r["id"]: r for r in conn.execute(
@@ -307,17 +307,18 @@ def test_fan_out_commits_to_the_revealed_sector_once_scan_resolves():
     assign_npc_profile(pid, "fan_out", config={"scout_distance": 2, "jump_range_per_turn": 1})
 
     end_of_turn()  # call 1: opening scout dispatch, arrival_turn = 0+2+1 = 3, aim = 2 further N
-    assert _memory(pid)["scouts"][str(ship_ids[0])]["committed"] is False
+    assert _memory(pid)["found"] == {}
 
     end_of_turn()  # call 2: still travelling
-    assert _memory(pid)["scouts"][str(ship_ids[0])]["committed"] is False
+    assert _memory(pid)["found"] == {}
 
     end_of_turn()  # call 3: lands AND its scan resolves in the same call; NPC step0 ran before that
-    assert _memory(pid)["scouts"][str(ship_ids[0])]["committed"] is False  # not yet observed by NPC step
+    assert _memory(pid)["found"] == {}  # not yet observed by NPC step
 
-    end_of_turn()  # call 4: NPC step0 now sees the landed ship + resolved scan from call 3, commits
+    end_of_turn()  # call 4: NPC step0 now sees the landed ship + resolved scan from call 3, converges
     memory = _memory(pid)
-    assert memory["scouts"][str(ship_ids[0])]["committed"] is True
+    assert memory["converged"] is True
+    assert str(ship_ids[0]) in memory["found"]
     conn = get_connection()
     org = conn.execute("SELECT sector_id, mission FROM organizations WHERE id=?", (ship_ids[0],)).fetchone()
     aq = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?",
@@ -325,6 +326,40 @@ def test_fan_out_commits_to_the_revealed_sector_once_scan_resolves():
     conn.close()
     assert org["sector_id"] == -1 and org["mission"] == "move"  # committed to final move
     assert (aq["dest_x"], aq["dest_y"], aq["dest_z"]) == (25, 21, 0)  # home(25,25) - 2(scout) - 2(reveal north)
+    assert (memory["destination"]["x"], memory["destination"]["y"], memory["destination"]["z"]) == (25, 21, 0)
+
+def test_fan_out_converges_whole_fleet_on_the_richest_scouted_sector():
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    ship_ids = _seed_fleet(pid, sid, 8)
+    for oid in ship_ids:
+        seed_pod(oid, task="produce_food", storage_current=100.0)
+        seed_pod(oid, task="produce_energy", storage_current=100.0)
+    # Pre-seed each direction's reveal target (2 scout + 2 aim = 4 out from
+    # home) with a distinct, known richness -- south is the deliberate best.
+    # reveal_sector() leaves an already-existing row untouched, so these
+    # survive the real scan resolution during play (see db/sectors.py).
+    seed_sector(25, 21, 0, energy=600.0)   # north
+    seed_sector(25, 29, 0, energy=900.0)   # south -- richest
+    seed_sector(29, 25, 0, energy=750.0)   # east
+    seed_sector(21, 25, 0, energy=500.0)   # west
+    assign_npc_profile(pid, "fan_out", config={"scout_distance": 2, "jump_range_per_turn": 1})
+
+    for _ in range(4):  # same cadence as the single-ship case above -- symmetric distances
+        end_of_turn()
+
+    memory = _memory(pid)
+    assert memory["converged"] is True
+    assert len(memory["found"]) == 8
+    assert (memory["destination"]["x"], memory["destination"]["y"], memory["destination"]["z"]) == (25, 29, 0)
+    assert memory["destination"]["energy_capacity"] == 900.0
+
+    conn = get_connection()
+    dests = conn.execute("""SELECT dest_x, dest_y, dest_z FROM arrival_queue
+        WHERE org_id IN ({})""".format(",".join("?" * len(ship_ids))), ship_ids).fetchall()
+    conn.close()
+    assert len(dests) == 8
+    assert all((d["dest_x"], d["dest_y"], d["dest_z"]) == (25, 29, 0) for d in dests)
 
 def test_fan_out_noop_with_no_ships():
     pid = seed_player()

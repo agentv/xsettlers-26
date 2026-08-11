@@ -197,21 +197,23 @@ def _frontier_map_stay_frosty(player_id: int, player_token: str, config: dict, m
 
 def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> dict:
     """
-    Distribute outward AND find opportunity -- distinct from
-    fan_out_consolidate's blind fixed-offset second leg. Opening: every
-    ship takes a short scout hop in its assigned cardinal direction, aimed
-    scanner pointed further out the same way. Once a scout lands (mission
-    back to 'idle') and its aimed scan has actually resolved (a
-    player_sectors row with confidence>0 exists at the aim target), it
-    commits its final move TO that revealed sector -- what was actually
-    found steers the destination, not a hardcoded further offset. Until the
-    scan resolves, the scout just waits in place (one more turn of
-    production at the scout stop) rather than guessing.
-    v1 simplification, worth being honest about: commits to whatever sector
-    was found regardless of quality (no energy_capacity threshold or
-    comparison against alternatives) -- "find opportunity" here means
-    "react to what scouting reveals" rather than "evaluate and optimize
-    among discoveries." A smarter version is a real future step, not this one.
+    Distribute outward, scan, then converge on the single best find --
+    distinct from fan_out_consolidate's blind fixed-offset second leg, and
+    from this strategy's own v1 (each scout committing individually to
+    whatever its own scan found, no comparison across scouts -- see
+    docs/TODO.md's 2026-08-10 tournament note for why that changed).
+    Opening: every ship takes a short scout hop in its assigned cardinal
+    direction, aimed scanner pointed further out the same way. Once a scout
+    lands (mission back to 'idle') and its aimed scan has actually resolved
+    (a player_sectors row with confidence>0 exists at the aim target), its
+    find (coords + energy_capacity) is recorded but nobody moves yet. Only
+    once every scout's scan has resolved does the fleet act: every ship --
+    not just whichever one found it -- moves to the single sector with the
+    highest energy_capacity among everything the fleet collectively found.
+    Two scouts sharing a bearing (8 ships over 4 directions) share an aim
+    too, so they'll independently confirm the same reading for that
+    direction -- redundant, not wrong, and cheap insurance against losing
+    a direction's data to one scout's own delay.
     Config: scout_distance (default 2 -- matches scan range, so the aimed
     scan lands exactly on the scout's next hop), jump_range_per_turn
     (default 1).
@@ -222,6 +224,9 @@ def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> d
     offsets = {"N": (0, -scout_distance, 0), "S": (0, scout_distance, 0),
                "E": (scout_distance, 0, 0), "W": (-scout_distance, 0, 0)}
 
+    if memory.get("converged"):
+        return memory
+
     if not memory.get("opening_dispatched"):
         conn = get_connection(); cur = conn.cursor()
         ship_ids = [r["id"] for r in cur.execute(
@@ -230,6 +235,7 @@ def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> d
         if not ship_ids:
             conn.close()
             memory["opening_dispatched"] = True
+            memory["converged"] = True
             return memory
         home = cur.execute("""SELECT s.coord_x,s.coord_y,s.coord_z FROM organizations o
             JOIN sectors s ON s.id=o.sector_id WHERE o.id=?""", (ship_ids[0],)).fetchone()
@@ -246,14 +252,15 @@ def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> d
             # coincidentally lines up, but the aim distance is governed by
             # scan range, not by however far scout_distance happens to be set.
             set_org_scan_bearing(player_token, ship_id, bearing=bearing+"2")
-            scouts[str(ship_id)] = {"bearing": bearing, "committed": False}
+            scouts[str(ship_id)] = {"bearing": bearing}
         memory["scouts"] = scouts
+        memory["found"] = {}
         memory["opening_dispatched"] = True
         return memory
 
     conn = get_connection(); cur = conn.cursor()
-    for ship_id_str, info in memory.get("scouts", {}).items():
-        if info["committed"]:
+    for ship_id_str in memory.get("scouts", {}):
+        if ship_id_str in memory["found"]:
             continue
         ship_id = int(ship_id_str)
         org = cur.execute("""SELECT o.sector_id, o.mission, s.coord_x, s.coord_y, s.coord_z,
@@ -265,13 +272,24 @@ def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> d
         tx = org["coord_x"] + org["scan_offset_x"]
         ty = org["coord_y"] + org["scan_offset_y"]
         tz = org["coord_z"] + org["scan_offset_z"]
-        found = cur.execute("""SELECT 1 FROM sectors s JOIN player_sectors ps ON ps.sector_id=s.id
+        found = cur.execute("""SELECT s.energy_capacity FROM sectors s JOIN player_sectors ps ON ps.sector_id=s.id
             WHERE s.coord_x=? AND s.coord_y=? AND s.coord_z=? AND ps.player_id=? AND ps.confidence>0""",
             (tx, ty, tz, player_id)).fetchone()
         if not found:
             continue  # scan hasn't resolved yet -- wait another turn
-        confirm_move(player_token, ship_id, tx, ty, tz, jump_range_per_turn=jump_range)
-        info["committed"] = True
+        memory["found"][ship_id_str] = {"x": tx, "y": ty, "z": tz,
+                                        "energy_capacity": found["energy_capacity"]}
+
+    if len(memory["found"]) < len(memory["scouts"]):
+        conn.close()
+        return memory  # still waiting on at least one scout's scan
+
+    best = max(memory["found"].values(), key=lambda f: f["energy_capacity"])
+    for ship_id_str in memory["scouts"]:
+        confirm_move(player_token, int(ship_id_str), best["x"], best["y"], best["z"],
+                     jump_range_per_turn=jump_range)
+    memory["destination"] = best
+    memory["converged"] = True
     conn.close()
     return memory
 

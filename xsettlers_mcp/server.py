@@ -17,9 +17,11 @@ from xsettlers_mcp.tools.player_tools import (
 from xsettlers_mcp.tools.sector_tools import get_sector, get_sector_map, show_sector_neighborhood
 from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
 from xsettlers_mcp.tools.organization_tools import (
-    set_mission, set_pod_task, set_pod_scan_bearing, show_organization,
-    rename_organization, set_org_scan_bearing, queue_command,
-    show_civilization_status, show_game_status
+    set_mission, set_pod_task, set_pod_scan_bearing,
+    rename_organization, set_org_scan_bearing, queue_command
+)
+from xsettlers_mcp.tools.organization_reports import (
+    show_organization, show_civilization_status, show_game_status
 )
 from db.schema import init_schema
 from engine.clock import run_clock

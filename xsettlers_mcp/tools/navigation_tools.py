@@ -1,10 +1,40 @@
-from db.connection import get_connection
 from db.events import record_event
 from engine.turn import get_current_turn
 from engine.movement import apply_confirm_move
+from xsettlers_mcp.tools.session import player_tool
 import math
 
-def preview_move(player_token: str, ship_id: int,
+NOT_MOVABLE = "Ship not found, not owned by player, or already in transit"
+LOCKED = "This organization is locked (colony or mid-colonization) and cannot move"
+NEGATIVE_DEST = "Destination coordinates cannot be negative -- space has no negative indices"
+
+
+def _departable_ship(sess, ship_id: int, dest):
+    """
+    The caller's ship, at a real sector, free to leave -- or (None, error).
+
+    preview_move and confirm_move asked exactly the same three questions in
+    the same order (do you own it and is it here, is it mobile, is the
+    destination legal) and answered them with the same three error strings, so
+    they ask once now. Returns the origin row including coordinates; the
+    committing caller ignores them, the preview needs them to measure distance.
+    """
+    ship = sess.cur.execute("""SELECT o.id, o.is_mobile, s.id AS sector_id,
+                                   s.coord_x, s.coord_y, s.coord_z
+        FROM organizations o JOIN sectors s ON s.id = o.sector_id
+        WHERE o.id=? AND o.player_id=? AND o.sector_id!=-1""",
+        (ship_id, sess.player_id)).fetchone()
+    if not ship:
+        return None, {"error": NOT_MOVABLE}
+    if not ship["is_mobile"]:
+        return None, {"error": LOCKED}
+    if any(c < 0 for c in dest):
+        return None, {"error": NEGATIVE_DEST}
+    return ship, None
+
+
+@player_tool
+def preview_move(sess, ship_id: int,
                  dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
     """
     Pure read — calculates travel time WITHOUT committing anything.
@@ -19,33 +49,20 @@ def preview_move(player_token: str, ship_id: int,
     reason), so a player reading "arrival_turn: 5" can plan the ship's turn-5
     orders directly instead of accounting for a hidden one-turn lag.
     """
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
-    player = cur.fetchone()
-    if not player:
-        conn.close(); return {"error": "Player not found"}
-    cur.execute("""SELECT o.id,o.is_mobile,s.coord_x,s.coord_y,s.coord_z,s.id AS sector_id
-        FROM organizations o JOIN sectors s ON s.id=o.sector_id
-        WHERE o.id=? AND o.player_id=? AND o.sector_id!=-1""", (ship_id, player["id"]))
-    ship = cur.fetchone()
-    if not ship:
-        conn.close(); return {"error": "Ship not found, not owned by player, or already in transit"}
-    if not ship["is_mobile"]:
-        conn.close(); return {"error": "This organization is locked (colony or mid-colonization) and cannot move"}
-    if dest_x < 0 or dest_y < 0 or dest_z < 0:
-        conn.close(); return {"error": "Destination coordinates cannot be negative -- space has no negative indices"}
+    ship, err = _departable_ship(sess, ship_id, (dest_x, dest_y, dest_z))
+    if err:
+        return err
     distance = math.sqrt(
         (dest_x-ship["coord_x"])**2 +
         (dest_y-ship["coord_y"])**2 +
         (dest_z-ship["coord_z"])**2)
     turns_needed = max(1, math.ceil(distance / jump_range_per_turn))
-    current_turn = get_current_turn()
-    conn.close()
     return {"preview": True, "ship_id": ship_id, "from_sector_id": ship["sector_id"],
             "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z, "turns_needed": turns_needed,
-            "arrival_turn": current_turn + turns_needed + 1}
+            "arrival_turn": get_current_turn() + turns_needed + 1}
 
-def confirm_move(player_token: str, ship_id: int,
+@player_tool
+def confirm_move(sess, ship_id: int,
                  dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
     """
     Commit a previewed move: validates ownership/mobility, then delegates the
@@ -57,54 +74,34 @@ def confirm_move(player_token: str, ship_id: int,
     Destination is any coordinate triple -- it's only revealed (get-or-created
     as a real sectors row, see db/sectors.py) once the ship actually arrives.
     """
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
-    player = cur.fetchone()
-    if not player:
-        conn.close(); return {"error": "Player not found"}
-    cur.execute("""SELECT o.id,o.is_mobile FROM organizations o
-        WHERE o.id=? AND o.player_id=? AND o.sector_id!=-1""", (ship_id, player["id"]))
-    ship = cur.fetchone()
-    if not ship:
-        conn.close(); return {"error": "Ship not found, not owned by player, or already in transit"}
-    if not ship["is_mobile"]:
-        conn.close(); return {"error": "This organization is locked (colony or mid-colonization) and cannot move"}
-    if dest_x < 0 or dest_y < 0 or dest_z < 0:
-        conn.close(); return {"error": "Destination coordinates cannot be negative -- space has no negative indices"}
-    current_turn = get_current_turn()
-    result = apply_confirm_move(cur, ship_id, player["id"], dest_x, dest_y, dest_z,
-                                jump_range_per_turn, current_turn)
-    conn.commit(); conn.close()
-    return result
+    _, err = _departable_ship(sess, ship_id, (dest_x, dest_y, dest_z))
+    if err:
+        return err
+    return apply_confirm_move(sess.cur, ship_id, sess.player_id, dest_x, dest_y, dest_z,
+                              jump_range_per_turn, get_current_turn())
 
-def cancel_move(player_token: str, ship_id: int) -> dict:
+@player_tool
+def cancel_move(sess, ship_id: int) -> dict:
     """
     Cancel a move in progress. Rubber-bands the ship to its origin_sector_id.
     Logs ship.move_cancelled (write-ahead) before mutating state.
     """
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
-    player = cur.fetchone()
-    if not player:
-        conn.close(); return {"error": "Player not found"}
-    cur.execute("""SELECT id,mission FROM organizations
-        WHERE id=? AND player_id=? AND sector_id=-1""", (ship_id, player["id"]))
-    ship = cur.fetchone()
-    if not ship:
-        conn.close(); return {"error": "Ship not found, not owned by player, or not in transit"}
-    cur.execute("SELECT origin_sector_id FROM arrival_queue WHERE org_id=?", (ship_id,))
-    row = cur.fetchone()
+    if not sess.cur.execute("""SELECT id FROM organizations
+            WHERE id=? AND player_id=? AND sector_id=-1""",
+            (ship_id, sess.player_id)).fetchone():
+        return {"error": "Ship not found, not owned by player, or not in transit"}
+    row = sess.cur.execute("SELECT origin_sector_id FROM arrival_queue WHERE org_id=?",
+                        (ship_id,)).fetchone()
     if not row:
-        conn.close(); return {"error": "No arrival_queue entry found for this ship"}
+        return {"error": "No arrival_queue entry found for this ship"}
     origin_sector_id = row["origin_sector_id"]
     # Write-ahead
     record_event(
         event_type="ship.move_cancelled",
         payload={"org_id": ship_id, "rubber_banded_to_sector_id": origin_sector_id},
-        actor_id=player["id"], subject_id=ship_id, subject_type="organization")
-    cur.execute("DELETE FROM arrival_queue WHERE org_id=?", (ship_id,))
-    cur.execute("""UPDATE organizations SET sector_id=?, mission='idle', mission_params=NULL,
+        actor_id=sess.player_id, subject_id=ship_id, subject_type="organization")
+    sess.cur.execute("DELETE FROM arrival_queue WHERE org_id=?", (ship_id,))
+    sess.cur.execute("""UPDATE organizations SET sector_id=?, mission='idle', mission_params=NULL,
         is_mobile=1 WHERE id=?""", (origin_sector_id, ship_id))
-    conn.commit(); conn.close()
     return {"cancelled": True, "ship_id": ship_id,
             "rubber_banded_to_sector_id": origin_sector_id}

@@ -2,7 +2,7 @@
 """
 Fixed-format status CLI. No discretionary formatting -- same code path,
 same output shape, every time. A thin wrapper around the existing tool
-functions (xsettlers_mcp/tools/organization_tools.py) and the generic
+functions (xsettlers_mcp/tools/organization_reports.py) and the generic
 hint-driven renderer (views/render.py's render_status()); adds nothing of
 its own beyond argument parsing and a turn-context header line.
 
@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.clock import is_frozen
 from views.render import render_status
-from xsettlers_mcp.tools.organization_tools import show_game_status, show_civilization_status
+from xsettlers_mcp.tools.organization_reports import show_game_status, show_civilization_status
 
 DEFAULT_TOKEN = os.environ.get("XSETTLERS_PLAYER_TOKEN", "REPLACE_WITH_GENERATED_TOKEN_1")
 HEALTH_URL = f"http://localhost:{os.environ.get('PORT', 8080)}/health"

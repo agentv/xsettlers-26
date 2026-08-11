@@ -1,45 +1,48 @@
-from db.connection import get_connection
 from db.events import record_event
 from engine.turn import check_consensus_acceleration
+from xsettlers_mcp.tools.session import player_tool
 
 # Matches organization_tools.py's MAX_ORG_NAME_LENGTH -- same "has to fit a
 # fleet-report/leaderboard column on a phone" constraint.
 MAX_DISPLAY_NAME_LENGTH = 24
 
-def get_player_state(player_token: str) -> dict:
+@player_tool
+def get_player_state(sess) -> dict:
     """Full state: player record, all organizations, all pods."""
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT * FROM players WHERE player_token=?", (player_token,))
-    player = cur.fetchone()
-    if not player:
-        conn.close(); return {"error": "Player not found"}
-    cur.execute("SELECT * FROM organizations WHERE player_id=?", (player["id"],))
-    orgs = [dict(o) for o in cur.fetchall()]
+    orgs = [dict(o) for o in sess.cur.execute(
+        "SELECT * FROM organizations WHERE player_id=?", (sess.player_id,)).fetchall()]
     for org in orgs:
-        cur.execute("SELECT * FROM pods WHERE org_id=?", (org["id"],))
-        org["pods"] = [dict(p) for p in cur.fetchall()]
-    conn.close()
-    return {"player": dict(player), "organizations": orgs}
+        org["pods"] = [dict(p) for p in sess.cur.execute(
+            "SELECT * FROM pods WHERE org_id=?", (org["id"],)).fetchall()]
+    return {"player": dict(sess.player), "organizations": orgs}
 
-def declare_end_turn(player_token: str) -> dict:
-    """Player declares they have no further moves this tick."""
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("UPDATE players SET end_turn_declared=1 WHERE player_token=?", (player_token,))
-    conn.commit(); conn.close()
+@player_tool
+def declare_end_turn(sess) -> dict:
+    """
+    Player declares they have no further moves this tick.
+
+    Until 2026-08-11 this was the one tool that never checked the token
+    existed: it ran a bare UPDATE ... WHERE player_token=?, which matched no
+    rows for a stranger, and then cheerfully answered {"declared": True} --
+    and went on to call check_consensus_acceleration(), which can end the turn
+    for everyone. It is authenticated now for the same reason every sibling
+    is, and by the same code rather than a re-typed copy of it.
+    """
+    sess.cur.execute("UPDATE players SET end_turn_declared=1 WHERE id=?", (sess.player_id,))
+    # Released before consensus is evaluated: check_consensus_acceleration()
+    # can run a whole end_of_turn() on its own connection, which cannot
+    # proceed while this one holds the write lock (see PlayerSession.release).
+    sess.release()
     return {"declared": True, "clock_accelerated": check_consensus_acceleration()}
 
-def rescind_end_turn(player_token: str) -> dict:
+@player_tool
+def rescind_end_turn(sess) -> dict:
     """Player takes back their end turn declaration."""
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT end_turn_declared FROM players WHERE player_token=?", (player_token,))
-    row = cur.fetchone()
-    if not row:
-        conn.close(); return {"error": "Player not found"}
-    cur.execute("UPDATE players SET end_turn_declared=0 WHERE player_token=?", (player_token,))
-    conn.commit(); conn.close()
+    sess.cur.execute("UPDATE players SET end_turn_declared=0 WHERE id=?", (sess.player_id,))
     return {"rescinded": True}
 
-def set_display_name(player_token: str, display_name: str) -> dict:
+@player_tool
+def set_display_name(sess, display_name: str) -> dict:
     """
     Choose your own in-game display name -- local to this xsettlers game,
     independent of whatever name GameHouse (or a bootstrap default like
@@ -59,20 +62,13 @@ def set_display_name(player_token: str, display_name: str) -> dict:
     if len(display_name) > MAX_DISPLAY_NAME_LENGTH:
         return {"error": f"Display name is {len(display_name)} characters; "
                           f"limit is {MAX_DISPLAY_NAME_LENGTH}"}
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id, display_name FROM players WHERE player_token=?", (player_token,))
-    player = cur.fetchone()
-    if not player:
-        conn.close(); return {"error": "Player not found"}
-    cur.execute("SELECT id FROM players WHERE id!=? AND display_name=? COLLATE NOCASE",
-                (player["id"], display_name))
-    if cur.fetchone():
-        conn.close(); return {"error": f"Display name '{display_name}' is already taken"}
-    previous = player["display_name"]
+    if sess.cur.execute("SELECT id FROM players WHERE id!=? AND display_name=? COLLATE NOCASE",
+                     (sess.player_id, display_name)).fetchone():
+        return {"error": f"Display name '{display_name}' is already taken"}
+    previous = sess.player["display_name"]
     record_event(
         event_type="player.renamed",
         payload={"from": previous, "to": display_name},
-        actor_id=player["id"], subject_id=player["id"], subject_type="player")
-    cur.execute("UPDATE players SET display_name=? WHERE id=?", (display_name, player["id"]))
-    conn.commit(); conn.close()
+        actor_id=sess.player_id, subject_id=sess.player_id, subject_type="player")
+    sess.cur.execute("UPDATE players SET display_name=? WHERE id=?", (display_name, sess.player_id))
     return {"ok": True, "previous_display_name": previous, "display_name": display_name}

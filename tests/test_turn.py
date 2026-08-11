@@ -60,7 +60,7 @@ def test_get_next_tick_at_none_until_clock_has_run():
 def test_show_game_status_countdown_is_dashes_when_clock_has_never_run():
     """No scenario's clock has ticked yet in this test DB, so next_tick_at is
     None and the countdown must show dashes rather than a stale/garbage time."""
-    from xsettlers_mcp.tools.organization_tools import show_game_status
+    from xsettlers_mcp.tools.organization_reports import show_game_status
     seed_player()
     status = show_game_status("U_P1")
     assert status["next_tick_at"] is None
@@ -69,7 +69,7 @@ def test_show_game_status_countdown_is_dashes_when_clock_has_never_run():
 
 def test_show_game_status_countdown_formats_mmss_from_next_tick_at():
     from datetime import datetime, timedelta, timezone
-    from xsettlers_mcp.tools.organization_tools import show_game_status
+    from xsettlers_mcp.tools.organization_reports import show_game_status
     seed_player()
     future = datetime.now(timezone.utc) + timedelta(minutes=4, seconds=30)
     conn = get_connection()
@@ -281,7 +281,7 @@ def test_get_final_scores_is_none_before_game_over():
 
 def test_show_game_status_becomes_the_final_scoreboard_after_game_over():
     """The scoreboard a player is handed at the end is the recorded one."""
-    from xsettlers_mcp.tools.organization_tools import show_game_status
+    from xsettlers_mcp.tools.organization_reports import show_game_status
     _play_to_game_over()
     status = show_game_status("U_P1")
     assert status["game_over"] is True and status["is_final"] is True
@@ -290,7 +290,7 @@ def test_show_game_status_becomes_the_final_scoreboard_after_game_over():
     assert status["standings"][0]["rank"] == 1
 
 def test_show_game_status_is_not_final_mid_game():
-    from xsettlers_mcp.tools.organization_tools import show_game_status
+    from xsettlers_mcp.tools.organization_reports import show_game_status
     seed_player(); end_of_turn()
     status = show_game_status("U_P1")
     assert status["game_over"] is False and status["winner"] is None

@@ -19,7 +19,7 @@ def render_status(data: dict) -> str:
     show_organization's scanner summary. Columns with no
     entry in `column_labels` header as the field name itself, same as always.
     Covers the status tools in
-    xsettlers_mcp/tools/organization_tools.py (show_game_status,
+    xsettlers_mcp/tools/organization_reports.py (show_game_status,
     show_civilization_status, show_organization).
 
     `display.kind == "map"` hands off to render_map() -- a grid is not a table,

@@ -2,7 +2,7 @@
 What a player's score is, and what the standings are -- defined once.
 
 Three call sites need this and used to each carry their own copy: the live
-scoreboard (xsettlers_mcp/tools/organization_tools.show_game_status), the
+scoreboard (xsettlers_mcp/tools/organization_reports.show_game_status), the
 per-turn ledger (engine/turn._snapshot_holdings), and the game-over result
 (engine/turn._calculate_final_scores). All three promised in their docstrings
 to agree with each other -- "same formula", "must match what show_game_status

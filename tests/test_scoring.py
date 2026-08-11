@@ -125,7 +125,7 @@ def test_all_three_consumers_report_the_same_score():
     so this could only ever be true by coincidence."""
     import json
     from engine.turn import end_of_turn, _calculate_final_scores
-    from xsettlers_mcp.tools.organization_tools import show_game_status
+    from xsettlers_mcp.tools.organization_reports import show_game_status
 
     pid = seed_player()
     sid = seed_sector(energy=1000.0)

@@ -1,0 +1,503 @@
+"""
+Read-only status reports for a player's organizations, and the public
+scoreboard.
+
+Split out of organization_tools.py on 2026-08-11, which had grown to 982 lines
+holding four unrelated jobs. These three tools mutate nothing -- they read
+state and shape it for display -- and every formatting helper below exists
+only to serve them, so the two halves shared no code at all: the split moved
+458 lines without a single symbol needing to be referenced across the new
+boundary.
+
+The `display` block each report returns is a presentation hint, not a
+rendering: it names which field holds the rows and which columns to show, so
+views/render.py can draw any of them with no per-tool special-casing. Raw
+fields are always present alongside, for a client that would rather build its
+own view.
+"""
+from config.loader import load_config
+from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED
+from engine.production import POD_PRODUCTION, get_production_multiplier
+from engine.turn import get_next_tick_at, get_final_scores
+from engine.scoring import player_standings
+from xsettlers_mcp.tools.sector_tools import bearing_name
+from datetime import datetime, timezone
+import json
+import os
+
+def _tick_countdown_display(next_tick_at: str | None) -> str:
+    """
+    "MM:SS" until the next clock tick, or "--:--" when there's nothing
+    ticking -- next_tick_at is None before any scenario is selected or
+    whenever the clock process isn't the one refreshing it (see
+    get_next_tick_at's docstring). Unlike scripts/status.py's _clock_status,
+    this has no way to health-check a separate process -- it runs inside the
+    same process the clock does, so a None value here already means "not
+    currently running," no liveness probe needed.
+    """
+    if not next_tick_at:
+        return "--:--"
+    next_dt = datetime.strptime(next_tick_at, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+    remaining = max(0, round((next_dt - datetime.now(timezone.utc)).total_seconds()))
+    minutes, seconds = divmod(remaining, 60)
+    return f"{minutes:02d}:{seconds:02d}"
+
+# Presentation hints for status-report tools (show_civilization_status,
+# show_game_status): offloads simple, repetitive formatting work onto the
+# server rather than every client (LLM or not) reinventing it. Raw fields
+# are always still present alongside these -- a client that wants its own
+# presentation is free to ignore all of this and build from the raw data.
+RESOURCE_ABBREV = {"energy": "E", "food": "F", "goods": "G"}
+# Legacy bootstrap names ("Ship-P1-01", "Colony-P1"). Defaults are short
+# now (S1..Sn, C1) and players can rename freely, so this only still
+# matters for games bootstrapped before 2026-07-31.
+_NAME_PREFIXES_TO_STRIP = ("Ship-", "Colony-")
+
+# Locked MVP cargo-table format for a single org's status (see show_organization):
+# columns are Task, Count, Energy, Food, Goods, Capacity -- Capacity as a
+# "current/total" string rather than a bare number. This is a starting point,
+# not a final design -- richer/graphical presentations are expected later
+# (see docs/ui_and_rendering_design.md), but this is the one clients can
+# render today without inventing their own column order or capacity format.
+_TASK_DISPLAY = {"produce_energy": "Energy", "produce_food": "Food",
+                  "produce_goods": "Goods", "idle": "Idle", "scan": "Scan"}
+
+# Spelled-out compass names for the scanners footer (see _scanner_summary) --
+# distinct from the terse codes (SCAN_BEARINGS' "N"/"NE"/"N2") used everywhere
+# else, since this is a summary line meant to read in plain English rather
+# than a compact table cell.
+_BEARING_FULL_NAME = {
+    "N": "North", "NE": "Northeast", "E": "East", "SE": "Southeast",
+    "S": "South", "SW": "Southwest", "W": "West", "NW": "Northwest",
+    "N2": "North (2)", "E2": "East (2)", "S2": "South (2)", "W2": "West (2)",
+}
+
+def _scanner_summary(cur, org: dict) -> tuple[list, str | None]:
+    """
+    Every currently-active scanner on this org -- its own innate sensor (see
+    organizations.scan_offset_*) plus any pod on the scan task -- as a list of
+    {"source", "bearing", "aimed"} dicts, and a ready-to-render footer line
+    ("Scans: North, South, Southeast") for clients that just want the text.
+
+    An aimed scanner shows its compass name (or the raw offset if it doesn't
+    land on one of the 12 named bearings); an unaimed scan pod still costs its
+    food and reveals nothing, so it's counted and flagged rather than silently
+    dropped (see set_pod_task's docstring). Returns ([], None) when the org
+    has no scanning capacity in use at all -- nothing to show, not an empty
+    line.
+    """
+    scanners = []
+    if org["scan_offset_x"] is not None:
+        name = bearing_name(org["scan_offset_x"], org["scan_offset_y"], org["scan_offset_z"])
+        display = name or f"({org['scan_offset_x']},{org['scan_offset_y']},{org['scan_offset_z']})"
+        scanners.append({"source": "sensors", "bearing": display, "aimed": True})
+    cur.execute("SELECT id, task_params FROM pods WHERE org_id=? AND task='scan' ORDER BY id",
+                (org["id"],))
+    for pod in cur.fetchall():
+        if pod["task_params"]:
+            p = json.loads(pod["task_params"])
+            name = bearing_name(p["offset_x"], p["offset_y"], p["offset_z"])
+            display = name or f"({p['offset_x']},{p['offset_y']},{p['offset_z']})"
+            scanners.append({"source": f"pod {pod['id']}", "bearing": display, "aimed": True})
+        else:
+            scanners.append({"source": f"pod {pod['id']}", "bearing": None, "aimed": False})
+    if not scanners:
+        return [], None
+    aimed = [_BEARING_FULL_NAME.get(s["bearing"], s["bearing"]) for s in scanners if s["aimed"]]
+    unaimed = sum(1 for s in scanners if not s["aimed"])
+    footer = f"Scans: {', '.join(aimed)}" if aimed else "Scans: none aimed"
+    if unaimed:
+        footer += f" (+{unaimed} unaimed)"
+    return scanners, footer
+
+def _short_name(name: str) -> str:
+    """"Ship-P1-01" -> "P1-01", "Colony-P1" -> "P1" -- a ready-to-display
+    label so clients don't need their own name-shortening rule."""
+    for prefix in _NAME_PREFIXES_TO_STRIP:
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return name
+
+def _tasking_summary(tasking: dict) -> str:
+    """{"produce_energy": 2, "produce_food": 2} -> "E:2, F:2" -- a
+    ready-to-display string using RESOURCE_ABBREV, so clients don't need to
+    do the mission-name-to-abbreviation lookup themselves."""
+    return ", ".join(f"{RESOURCE_ABBREV[m.replace('produce_', '')]}:{n}"
+                     for m, n in tasking.items() if m.replace("produce_", "") in RESOURCE_ABBREV)
+
+def _resource_summary(values: dict) -> str:
+    """{"energy": 20.0, "food": 20.0} -> "E:20, F:20" -- same abbreviation
+    convention as _tasking_summary, for any resource-keyed dict (e.g. a
+    production breakdown) rather than a mission-keyed one."""
+    return ", ".join(f"{RESOURCE_ABBREV[r]}:{v:g}" for r, v in values.items() if r in RESOURCE_ABBREV)
+
+def _org_production(tasking: dict, in_transit: bool, org_type: str = "ship") -> dict:
+    """
+    Gross per-turn production an org's current pod deployment would yield at
+    full input availability -- i.e. POD_PRODUCTION's base rate times how many
+    pods are tasked to each producing task, times the org-type multiplier
+    (see get_production_multiplier: colonies out-produce ships). This is the
+    "nameplate" figure, not a prediction of what end_of_turn() will actually
+    credit: it does not account for POD_CONSUMPTION_RECIPE input costs, org
+    upkeep, or storage caps, all of which can prorate the real output down
+    (see engine/turn.py).
+    One real-world exception is applied here: an org in transit is parked at
+    the sentinel sector (id=-1, permanently 0 energy_capacity), so its energy
+    production is always 0 regardless of tasking, matching engine/turn.py's
+    sector-capacity cap -- food/goods aren't sector-sourced and are unaffected.
+    """
+    multiplier = get_production_multiplier(org_type)
+    production = {}
+    for task, outputs in POD_PRODUCTION.items():
+        count = tasking.get(task, 0)
+        if not count:
+            continue
+        for resource, base_amount in outputs.items():
+            amount = (0.0 if (resource == "energy" and in_transit)
+                      else base_amount * count * multiplier)
+            production[resource] = production.get(resource, 0.0) + amount
+    return production
+
+@player_tool
+def show_organization(sess, org_id: int) -> dict:
+    """
+    Return the complete properties of one of the player's own organizations:
+    org record (type, mission, mission_params, is_mobile, sector location)
+    plus pods grouped by task — count of pods on each task, total
+    capacity of that group, and what's actually stored there broken down by
+    resource type (energy/food/goods). Storage is generic per pod and
+    independent of current task (see engine/turn.py), so a task group's
+    contents don't necessarily match its own task -- e.g. produce_goods pods
+    can still be holding energy leftover from before a retask. Individual
+    pods aren't listed separately; a ship with 6 pods reads as up to 3 task
+    rows, not 6 pod rows.
+    display: presentation hints (see RESOURCE_ABBREV/_short_name/_TASK_DISPLAY
+    module docstring) -- a ready-to-render header ("<name> — at (x,y,z), <mission>")
+    and the locked MVP column order for the cargo table (Task, Count, Energy,
+    Food, Goods, Capacity). Each task row also gets task_display (e.g.
+    "produce_energy" -> "Energy") and capacity_display ("current/total", e.g.
+    "200/200") alongside the raw fields -- all raw fields stay present, this
+    is purely additive. `display.rows_key` ("tasks") names which top-level
+    field holds the row list, for a generic renderer -- see views/render.py.
+    `scanners` (see _scanner_summary) lists every active scanner on this org
+    -- innate sensors plus scan-task pods -- and `display.footer`, when
+    present, is that same information as a ready-to-render line below the
+    table ("Scans: North, South, Southeast").
+    Ownership-gated — only the calling player's orgs are accessible.
+    """
+    cur = sess.cur
+    cur.execute("""
+        SELECT o.id, o.org_type, o.name, o.mission, o.mission_params,
+               o.is_mobile, o.sector_id,
+               o.scan_offset_x, o.scan_offset_y, o.scan_offset_z,
+               s.coord_x, s.coord_y, s.coord_z
+        FROM organizations o
+        LEFT JOIN sectors s ON s.id = o.sector_id
+        WHERE o.id = ? AND o.player_id = ?""", (org_id, sess.player_id))
+    org = cur.fetchone()
+    if not org:
+        return {"error": ORG_NOT_OWNED}
+    result = dict(org)
+    cur.execute("""
+        SELECT task, COUNT(*) AS count,
+               SUM(storage_capacity) AS capacity,
+               SUM(energy_stored) AS energy,
+               SUM(food_stored) AS food,
+               SUM(goods_stored) AS goods
+        FROM pods WHERE org_id = ? GROUP BY task""", (org_id,))
+    result["tasks"] = [dict(t) for t in cur.fetchall()]
+    for t in result["tasks"]:
+        t["task_display"] = _TASK_DISPLAY.get(t["task"], t["task"])
+        current = (t["energy"] or 0) + (t["food"] or 0) + (t["goods"] or 0)
+        t["capacity_display"] = f"{current:.0f}/{t['capacity']:.0f}"
+    status = (f"at ({org['coord_x']},{org['coord_y']},{org['coord_z']})"
+              if org["sector_id"] != -1 else "in transit")
+    result["short_name"] = _short_name(org["name"])
+    result["status"] = status
+    scanners, scanners_footer = _scanner_summary(cur, org)
+    result["scanners"] = scanners
+    result["display"] = {
+        "header": f"{org['name']} — {status}, {org['mission']}",
+        "resource_abbrev": RESOURCE_ABBREV,
+        "rows_key": "tasks",
+        "columns": ["task_display", "count", "energy", "food", "goods", "capacity_display"],
+        "column_labels": {"task_display": "Task", "capacity_display": "Utilization"},
+    }
+    if scanners_footer:
+        result["display"]["footer"] = scanners_footer
+    return result
+
+@player_tool
+def show_civilization_status(sess) -> dict:
+    """
+    Return a player-scoped fleet/status report (aliases: "fleet status",
+    "my status") -- the full roster (ships and colonies) plus fleet-wide
+    aggregates in one call:
+    - Turn context: current turn, turn limit, and next_tick_at (ISO8601, from
+      engine/clock.py -- None if the clock has never run or is paused; a
+      caller also needs to check the server is actually live before trusting
+      it, since a paused clock leaves a stale value -- see get_next_tick_at()
+      and scripts/status.py for how the CLI report reconciles the two)
+    - All player organizations (ships and colonies) with name, org_type, mission,
+      sector location, a per-org cargo summary (current/capacity summed across
+      that org's pods), a per-org storage breakdown (energy/food/goods
+      currently held, summed across that org's pods regardless of each pod's
+      own task -- storage is generic per pod, see RESOURCE_STORAGE_COLUMN),
+      a tasking breakdown (pod count per task, e.g.
+      {"produce_energy": 2, "produce_food": 2, "produce_goods": 2} -- this is
+      the pod-deployment picture), and a production breakdown (see
+      _org_production -- gross per-turn output at full input availability,
+      not netted against consumption costs). Ships in
+      transit are marked with in_transit=True, destination sector, expected
+      arrival turn, and turns_remaining as raw fields -- arrival_turn is the
+      turn the ship is actually free to act, not the turn whose end_of_turn()
+      pass performs the landing (that happens one turn earlier; see
+      engine/turn.py's arrival resolution). turns_remaining counts down to
+      that same turn, so it only reaches 0 once the ship has actually landed
+      and can take a new mission. The
+      display `status` string itself is intentionally terse -- just "in
+      transit", full stop, no destination or ETA -- a player asked for this
+      view to be that minimal; dest_sector/turns_remaining/arrival_turn are
+      still real raw fields on the entry for a client that wants to build a
+      richer status string itself.
+    - Accumulated assets: aggregate energy, food, goods, and total across all
+      pods, plus total capacity and percent_full.
+    - display: presentation hints (see RESOURCE_ABBREV/_short_name/_tasking_summary
+      module docstring) -- every org also carries ready-to-use short_name,
+      status, cargo_display, tasking_summary, and production_summary fields
+      alongside the raw ones, so a client with no LLM in the loop doesn't have
+      to build its own formatting logic. `display.rows_key` names which
+      top-level field holds the row list ("organizations", here) and
+      `display.columns` lists which of each row's fields to render, in order
+      -- see views/render.py's render_status() for a renderer driven entirely
+      by these hints, with no per-tool special-casing. All raw fields are
+      still present; this is purely additive.
+    Ownership-gated — only the calling player's data.
+    """
+    cur = sess.cur
+
+    # Turn context
+    cur.execute("SELECT current_turn FROM game_state WHERE id=1")
+    current_turn = cur.fetchone()["current_turn"]
+    turn_limit = int(os.getenv("TURN_LIMIT", 20))
+    next_tick_at = get_next_tick_at()
+
+    # Organizations
+    cur.execute("""
+        SELECT o.id, o.name, o.org_type, o.mission, o.mission_params,
+               o.sector_id, s.coord_x, s.coord_y, s.coord_z
+        FROM organizations o
+        LEFT JOIN sectors s ON s.id = o.sector_id
+        WHERE o.player_id = ?
+        ORDER BY o.org_type, o.name""", (sess.player_id,))
+    orgs_raw = cur.fetchall()
+    orgs = []
+    for o in orgs_raw:
+        cargo = cur.execute("""SELECT SUM(energy_stored+food_stored+goods_stored) AS current,
+            SUM(storage_capacity) AS capacity,
+            SUM(energy_stored) AS energy, SUM(food_stored) AS food, SUM(goods_stored) AS goods
+            FROM pods WHERE org_id=?""",
+            (o["id"],)).fetchone()
+        storage = {"energy": cargo["energy"] or 0.0, "food": cargo["food"] or 0.0,
+                   "goods": cargo["goods"] or 0.0}
+        tasks = cur.execute("SELECT task, COUNT(*) AS n FROM pods WHERE org_id=? GROUP BY task",
+                           (o["id"],)).fetchall()
+        tasking = {t["task"]: t["n"] for t in tasks}
+        in_transit = o["sector_id"] == -1
+        production = _org_production(tasking, in_transit, o["org_type"])
+        entry = {
+            "id": o["id"],
+            "name": o["name"],
+            "short_name": _short_name(o["name"]),
+            "org_type": o["org_type"],
+            "mission": o["mission"],
+            "cargo": {"current": cargo["current"] or 0.0, "capacity": cargo["capacity"] or 0.0},
+            "cargo_display": f"{cargo['current'] or 0.0:.0f}/{cargo['capacity'] or 0.0:.0f}",
+            "storage": storage,
+            "storage_summary": _resource_summary(storage),
+            "tasking": tasking,
+            "tasking_summary": _tasking_summary(tasking),
+            "production": production,
+            "production_summary": _resource_summary(production),
+        }
+        if o["sector_id"] == -1:
+            # In transit — fetch destination and arrival turn from arrival_queue.
+            # No join to sectors: the destination may not exist as a row yet
+            # (sectors are lazily instantiated, see db/sectors.py) until arrival.
+            cur.execute("""
+                SELECT dest_x, dest_y, dest_z, arrival_turn
+                FROM arrival_queue WHERE org_id = ?""", (o["id"],))
+            aq = cur.fetchone()
+            entry["in_transit"] = True
+            if aq:
+                entry["dest_sector"] = {
+                    "coords": [aq["dest_x"], aq["dest_y"], aq["dest_z"]]
+                }
+                entry["arrival_turn"] = aq["arrival_turn"]
+                # arrival_turn is the turn the ship is actually free to act
+                # -- landing itself happens one turn earlier, during the
+                # end_of_turn() pass for arrival_turn-1 (see engine/turn.py).
+                # turns_remaining counts down to arrival_turn directly, so it
+                # reaches 0 exactly when the ship can take a new mission, not
+                # one turn before.
+                # turns_remaining/arrival_turn/dest_sector stay as raw fields
+                # -- no longer folded into the display string. A player asked
+                # for the display status to just say "in transit", full stop
+                # -- destination and ETA are still on the entry for a client
+                # that wants to build its own richer view from the raw data.
+                entry["turns_remaining"] = max(0, aq["arrival_turn"] - current_turn)
+                entry["status"] = "in transit"
+            else:
+                entry["status"] = "in transit"
+        else:
+            entry["in_transit"] = False
+            entry["sector"] = {
+                "id": o["sector_id"],
+                "coords": [o["coord_x"], o["coord_y"], o["coord_z"]]
+            }
+            entry["status"] = f"at ({o['coord_x']},{o['coord_y']},{o['coord_z']})"
+        orgs.append(entry)
+
+    # Accumulated assets — aggregate across all pods for this player
+    cur.execute("""
+        SELECT
+            SUM(p.energy_stored) AS energy,
+            SUM(p.food_stored) AS food,
+            SUM(p.goods_stored) AS goods,
+            SUM(p.energy_stored+p.food_stored+p.goods_stored) AS total,
+            SUM(p.storage_capacity) AS capacity
+        FROM pods p
+        JOIN organizations o ON o.id = p.org_id
+        WHERE o.player_id = ?""", (sess.player_id,))
+    assets_row = cur.fetchone()
+    total = assets_row["total"] or 0
+    capacity = assets_row["capacity"] or 0
+    assets = {
+        "energy":       round(assets_row["energy"] or 0, 2),
+        "food":         round(assets_row["food"]   or 0, 2),
+        "goods":        round(assets_row["goods"]  or 0, 2),
+        "total":        round(total, 2),
+        "capacity":     round(capacity, 2),
+        "percent_full": round(total / capacity * 100, 1) if capacity else 0.0,
+    }
+
+    return {
+        "turn": current_turn,
+        "turn_limit": turn_limit,
+        "next_tick_at": next_tick_at,
+        "organizations": orgs,
+        "assets": assets,
+        "display": {
+            "resource_abbrev": RESOURCE_ABBREV,
+            "rows_key": "organizations",
+            "columns": ["short_name", "status", "cargo_display", "storage_summary",
+                        "tasking_summary", "production_summary"],
+            "column_labels": {
+                "short_name": "Unit", "status": "Status", "cargo_display": "Cargo",
+                "storage_summary": "Storage", "tasking_summary": "Tasking",
+                "production_summary": "Production/turn",
+            },
+        },
+    }
+
+@player_tool
+def show_game_status(sess) -> dict:
+    """
+    Return the public scoreboard -- turn context (including next_tick_at,
+    see show_civilization_status's docstring for the caveat about a paused
+    clock, and next_tick_countdown -- the same value pre-formatted "MM:SS",
+    or "--:--" when next_tick_at is None) plus every player's aggregate
+    resource totals, side by side.
+    Unlike show_civilization_status
+    (or every other tool in this module), this is NOT ownership-gated to the
+    caller's own data: aggregate totals are treated as public standing, the
+    same information _calculate_final_scores already reveals at game-over,
+    just available on demand throughout the game instead of only at the end.
+    player_token is only used to confirm the caller is a real player in this
+    game -- it does not filter or restrict what's returned. Detailed fleet
+    composition, position, and tasking of other players is NOT included here
+    and stays private -- only aggregate resource totals are public.
+    `score` is the actual game score, not just another resource total:
+    energy/food/goods currently held are weighted by `config/game_config.yaml`'s
+    `score_weights` (as of 2026-07-30: 0/1/2 respectively -- energy is a means
+    of production, not a scored asset; goods score double food) and summed.
+    Same formula `engine/turn.py`'s `_calculate_final_scores()` uses to decide
+    the actual winner at game-over -- this tool just makes it checkable on
+    demand throughout the game instead of only at the end. Standings are
+    ranked by `score` (highest first, "rank" field included), NOT by the raw
+    `total` (an unweighted sum, still included for capacity/fullness context).
+    Carries a display block (resource_abbrev, rows_key="standings", suggested
+    column order) for clients that want a ready-to-use presentation instead
+    of building one -- see views/render.py's render_status().
+    """
+    cur = sess.cur
+
+    cur.execute("SELECT current_turn FROM game_state WHERE id=1")
+    current_turn = cur.fetchone()["current_turn"]
+    turn_limit = int(os.getenv("TURN_LIMIT", 20))
+    next_tick_at = get_next_tick_at()
+    weights = load_config().game.score_weights
+
+    # Ranking and scoring both come from engine/scoring.py -- the same call
+    # _calculate_final_scores makes, so the standing shown here and the winner
+    # declared at game over cannot disagree. Rounding and utilization are
+    # added on top: those are presentation, and the scoring module
+    # deliberately returns raw figures (see its player_standings docstring).
+    standings = player_standings(cur, weights)
+    for s in standings:
+        capacity = s["capacity"]
+        s["utilization"] = round(s["total"] / capacity * 100, 1) if capacity else 0.0
+        for field in ("energy", "food", "goods", "total", "capacity", "score"):
+            s[field] = round(s[field], 2)
+
+    # Once the game is over this becomes the end-of-game scoreboard: the
+    # RECORDED result, not a recomputation. get_final_scores() reads the
+    # game.final_scores event written at the whistle, so what a player is
+    # shown afterwards is what actually happened, and stays right even if
+    # anything touches state later.
+    final = get_final_scores()
+    game_over = final is not None
+    if game_over:
+        standings = final["standings"]
+        for s in standings:
+            s.setdefault("utilization",
+                         round(s["total"] / s["capacity"] * 100, 1) if s.get("capacity") else 0.0)
+    next_tick_countdown = _tick_countdown_display(next_tick_at)
+    header = (f"FINAL — game over at turn {final['final_turn']} of {final['turn_limit']}. "
+              f"Winner: {final['winner']}" if game_over
+              else f"Turn {current_turn} of {turn_limit} ({next_tick_countdown})")
+
+    # Whole-number display variants -- score/energy/food/goods never carry a
+    # meaningful fraction (production and upkeep are integer per-turn amounts),
+    # so the raw rounded-to-2dp float is noise in a table meant for a phone
+    # screen. Additive, like every other _display field: the raw floats above
+    # are untouched for a client that wants to compute with them.
+    for s in standings:
+        s["score_display"] = f"{s['score']:.0f}"
+        s["energy_display"] = f"{s['energy']:.0f}"
+        s["food_display"] = f"{s['food']:.0f}"
+        s["goods_display"] = f"{s['goods']:.0f}"
+
+    return {
+        "turn": current_turn,
+        "turn_limit": turn_limit,
+        "next_tick_at": next_tick_at,
+        "next_tick_countdown": next_tick_countdown,
+        "game_over": game_over,
+        "is_final": game_over,
+        "winner": final["winner"] if game_over else None,
+        "score_weights": final["score_weights"] if game_over else dict(weights),
+        "standings": standings,
+        "display": {
+            "header": header,
+            "resource_abbrev": RESOURCE_ABBREV,
+            "rows_key": "standings",
+            # utilization deliberately excluded from this report -- still a
+            # raw field on every standings row, just not part of the table.
+            "columns": ["rank", "display_name", "score_display", "energy_display",
+                        "food_display", "goods_display"],
+            "column_labels": {"display_name": "Player", "score_display": "score",
+                               "energy_display": "energy", "food_display": "food",
+                               "goods_display": "goods"},
+        },
+    }

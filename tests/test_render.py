@@ -1,8 +1,8 @@
 from views.render import render_status, render_map
-from xsettlers_mcp.tools.organization_tools import (
-    show_civilization_status, show_game_status, show_organization,
-    set_org_scan_bearing
+from xsettlers_mcp.tools.organization_reports import (
+    show_civilization_status, show_game_status, show_organization
 )
+from xsettlers_mcp.tools.organization_tools import set_org_scan_bearing
 from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
 from tests.conftest import (
     seed_player, seed_sector, seed_ship, seed_pod, seed_player_sector

@@ -34,7 +34,7 @@ pytest tests/test_navigation.py::test_confirm_move_parks_at_sentinel -v
 
 Config is env-driven (see `.env.example`, loaded via `python-dotenv`): `DB_PATH`, `GAME_CONFIG_PATH`, `CONFIDENCE_DECAY_PER_TURN`, `GAME_TICK_SECONDS`, `TURN_LIMIT`.
 
-**Env vars shadow `config/game_config.yaml`, and most of that file's `game:` block is inert.** Only `max_players` (`config/loader.py`, `db/bootstrap.py`) and `score_weights` (`engine/turn.py`, `organization_tools.py`) are actually read. `tick_seconds`, `turn_limit`, and `confidence_decay_per_turn` are each parsed into `GameSettings` and then ignored in favor of an env var — they are kept deliberately, reserved for the precedence rule (YAML as default, env as override) tracked in `docs/TODO.md`, so don't "clean them up". Changing a value in the YAML and expecting it to take effect is the trap here — check whether anything consumes the field first. (`dimensions` and `feature_flags` also used to live here, read by nothing and shadowed by nothing; they were deleted 2026-08-11 rather than reserved, since there was no env var to reconcile them against.)
+**Env vars shadow `config/game_config.yaml`, and most of that file's `game:` block is inert.** Only `max_players` (`config/loader.py`, `db/bootstrap.py`) and `score_weights` (`engine/turn.py`, `organization_reports.py`, both via `engine/scoring.py`) are actually read. `tick_seconds`, `turn_limit`, and `confidence_decay_per_turn` are each parsed into `GameSettings` and then ignored in favor of an env var — they are kept deliberately, reserved for the precedence rule (YAML as default, env as override) tracked in `docs/TODO.md`, so don't "clean them up". Changing a value in the YAML and expecting it to take effect is the trap here — check whether anything consumes the field first. (`dimensions` and `feature_flags` also used to live here, read by nothing and shadowed by nothing; they were deleted 2026-08-11 rather than reserved, since there was no env var to reconcile them against.)
 
 Deploy target is Fly.io (`fly.toml`, `Dockerfile`) — persistent volume mounted at `/data` holds the SpatiaLite `.db` file.
 
@@ -47,12 +47,16 @@ Any MCP client (Slack, curl, an LLM agent) → POST /mcp (carries player_token)
                           │
                     xsettlers_mcp/server.py  (list_tools / call_tool dispatch)
                           │
-                    xsettlers_mcp/tools/*.py  (player_tools, sector_tools, navigation_tools, organization_tools)
+                    xsettlers_mcp/tools/*.py  (player_tools, sector_tools, navigation_tools,
+                          │                    organization_tools, organization_reports)
+                          │                   all gated by session.py's @player_tool
                           │
                     db/connection.py → SpatiaLite (.db file)
 ```
 
-There is **no separate `gateway.py`** despite what `docs/mcp_server_layer_design.md` originally sketched. Instead, every gameplay tool does its own `SELECT id FROM players WHERE player_token=?` ownership check inline. Before a scenario is selected, `players` is empty, so every tool naturally rejects with "Player not found" — that's the actual gate, no central pre-flight wrapper needed. `xsettlers_mcp/game_select.select_scenario()` (backed by `xsettlers_mcp/auth.authenticate()`) is the one real gatekeeping call. See `tests/test_gateway.py` for the end-to-end proof of this behavior.
+There is **no separate `gateway.py`** despite what `docs/mcp_server_layer_design.md` originally sketched — no central pre-flight wrapper decides who may call what. Instead every gameplay tool carries the `@player_tool` decorator (`xsettlers_mcp/tools/session.py`), which resolves `player_token` against `players`, rejects an unknown token with "Player not found" before the tool body runs at all, and hands the tool an authenticated `PlayerSession` (open cursor + player row) so it never manages a connection itself. Before a scenario is selected `players` is empty, so every tool naturally rejects — that's the actual gate. `xsettlers_mcp/game_select.select_scenario()` (backed by `xsettlers_mcp/auth.authenticate()`) is the one real gatekeeping call. See `tests/test_gateway.py` for the end-to-end proof.
+
+Until 2026-08-11 that check was *copied inline* into each tool — 18 hand-written lookups and 69 hand-placed `conn.close()` calls — and one tool (`declare_end_turn`) had simply omitted it. Only the implementation moved into the decorator; the gate is still per-tool and still the same gate. Two tools call `PlayerSession.release()` to commit and close early before delegating to code that opens its own connection (`set_mission`→`confirm_move`, `declare_end_turn`→`end_of_turn()`); `db/connection.py` sets no busy_timeout, so a second writer fails immediately rather than waiting.
 
 ### Scenario selection & bootstrap
 

@@ -1,5 +1,6 @@
 from db.connection import get_connection
 from db.sectors import TURNS_TO_BLINK_OUT
+from xsettlers_mcp.tools.session import player_tool
 
 # --- Neighborhood viewport ---------------------------------------------------
 # Radius 4 gives a 9x9 bounding square, which is about as wide as a markdown
@@ -117,37 +118,30 @@ def get_scan_range(org_id: int) -> int:
 # valid target. See `engine/turn.py` for scan resolution logic.
 
 
-def get_sector(player_token: str, sector_id: int) -> dict:
+@player_tool
+def get_sector(sess, sector_id: int) -> dict:
     """Return sector info — only if the player has visibility (confidence > 0)."""
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
-    player = cur.fetchone()
-    if not player:
-        conn.close(); return {"error": "Player not found"}
-    cur.execute("""SELECT s.*, ps.confidence FROM sectors s
-        JOIN player_sectors ps ON ps.sector_id=s.id
-        WHERE s.id=? AND ps.player_id=? AND ps.confidence>0""", (sector_id, player["id"]))
-    sector = cur.fetchone(); conn.close()
-    if not sector: return {"error": "Sector not visible or does not exist"}
+    sector = sess.cur.execute("""SELECT sec.*, ps.confidence FROM sectors sec
+        JOIN player_sectors ps ON ps.sector_id=sec.id
+        WHERE sec.id=? AND ps.player_id=? AND ps.confidence>0""",
+        (sector_id, sess.player_id)).fetchone()
+    if not sector:
+        return {"error": "Sector not visible or does not exist"}
     return dict(sector)
 
-def get_sector_map(player_token: str) -> list:
+@player_tool
+def get_sector_map(sess) -> list:
     """Return all sectors visible to this player, ordered by confidence."""
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
-    player = cur.fetchone()
-    if not player:
-        conn.close(); return {"error": "Player not found"}
-    cur.execute("""SELECT s.id,s.coord_x,s.coord_y,s.coord_z,
-               s.energy_capacity,ps.confidence
-        FROM sectors s JOIN player_sectors ps ON ps.sector_id=s.id
-        WHERE ps.player_id=? AND ps.confidence>0 ORDER BY ps.confidence DESC""", (player["id"],))
-    sectors = [dict(r) for r in cur.fetchall()]; conn.close()
-    return sectors
+    return [dict(r) for r in sess.cur.execute("""SELECT sec.id,sec.coord_x,sec.coord_y,sec.coord_z,
+               sec.energy_capacity,ps.confidence
+        FROM sectors sec JOIN player_sectors ps ON ps.sector_id=sec.id
+        WHERE ps.player_id=? AND ps.confidence>0 ORDER BY ps.confidence DESC""",
+        (sess.player_id,)).fetchall()]
 
 
+@player_tool
 def show_sector_neighborhood(
-        player_token: str,
+        sess,
         org_id: int = None,
         center_x: int = None, center_y: int = None, center_z: int = None,
         radius: int = NEIGHBORHOOD_RADIUS) -> dict:
@@ -190,28 +184,22 @@ def show_sector_neighborhood(
     """
     if radius < 1 or radius > MAX_NEIGHBORHOOD_RADIUS:
         return {"error": f"radius must be between 1 and {MAX_NEIGHBORHOOD_RADIUS}"}
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id FROM players WHERE player_token=?", (player_token,))
-    player = cur.fetchone()
-    if not player:
-        conn.close(); return {"error": "Player not found"}
-    player_id = player["id"]
+    cur = sess.cur
+    player_id = sess.player_id
 
     label = None
     if org_id is not None:
-        cur.execute("""SELECT o.name, s.coord_x, s.coord_y, s.coord_z
-            FROM organizations o JOIN sectors s ON s.id = o.sector_id
-            WHERE o.id=? AND o.player_id=? AND o.sector_id != -1""",
-            (org_id, player_id))
-        origin = cur.fetchone()
-        if not origin:
-            conn.close(); return {"error": "Organization not found, not owned by player, or currently in transit"}
-        cx, cy, cz = origin["coord_x"], origin["coord_y"], origin["coord_z"]
+        origin = sess.own_org(org_id, columns="name, sector_id")
+        origin_sector = cur.execute("""SELECT coord_x, coord_y, coord_z FROM sectors
+            WHERE id=?""", (origin["sector_id"],)).fetchone() if origin else None
+        if not origin or origin["sector_id"] == -1 or not origin_sector:
+            return {"error": "Organization not found, not owned by player, or currently in transit"}
+        cx, cy, cz = origin_sector["coord_x"], origin_sector["coord_y"], origin_sector["coord_z"]
         label = origin["name"]
     elif None not in (center_x, center_y, center_z):
         cx, cy, cz = center_x, center_y, center_z
     else:
-        conn.close(); return {"error": "Must supply either org_id or (center_x, center_y, center_z)"}
+        return {"error": "Must supply either org_id or (center_x, center_y, center_z)"}
 
     r2 = radius ** 2
     cur.execute("""
@@ -246,7 +234,6 @@ def show_sector_neighborhood(
     cur.execute("SELECT current_turn FROM game_state WHERE id=1")
     turn_row = cur.fetchone()
     current_turn = turn_row["current_turn"] if turn_row else None
-    conn.close()
 
     by_coord = {}
     for s in sectors:

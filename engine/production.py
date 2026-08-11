@@ -92,7 +92,7 @@ def get_production(task: str) -> dict:
 def get_production_multiplier(org_type: str) -> float:
     """Output multiplier for a pod aboard an org of this type -- the single
     place the colony bonus is decided, so the live engine (engine/turn.py)
-    and the nameplate figure players see (organization_tools._org_production)
+    and the nameplate figure players see (organization_reports._org_production)
     can never drift apart."""
     return COLONY_PRODUCTION_MULTIPLIER if org_type == "colony" else 1.0
 

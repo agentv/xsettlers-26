@@ -1,3 +1,4 @@
+import json
 from db.connection import get_connection
 from engine.turn import end_of_turn
 from xsettlers_mcp.tools.navigation_tools import confirm_move
@@ -214,3 +215,100 @@ def test_at_turn_requires_turn_parameter():
     ship = seed_ship(p1, sid)
     result = queue_command("U_P1", ship, "at_turn", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
     assert "error" in result
+
+
+# --- Dispatch containment ----------------------------------------------------
+# queue_command now validates params up front, so these rows can no longer be
+# created through the tool. They are inserted directly to stand for what that
+# check cannot cover: rows queued before it existed (a live DB may hold some),
+# and any future action that learns to fail. The invariant under test is that
+# one player's bad order cannot stop the turn for everyone -- which is exactly
+# what used to happen, since the exception escaped end_of_turn() and the row
+# was never deleted, so it re-fired on every subsequent tick forever.
+
+def _inject_raw_command(org_id, action, params_json, resolve_turn=0,
+                        trigger_phase="at_turn"):
+    conn = get_connection()
+    conn.execute("""INSERT INTO org_command_queue
+        (org_id,trigger_phase,resolve_turn,action,params,created_turn)
+        VALUES (?,?,?,?,?,0)""", (org_id, trigger_phase, resolve_turn, action, params_json))
+    conn.commit(); conn.close()
+
+
+def _failure_alerts():
+    conn = get_connection()
+    rows = [dict(r) for r in conn.execute(
+        """SELECT subject_id, payload FROM events
+           WHERE event_type='alert.queued_command_failed' ORDER BY id""").fetchall()]
+    conn.close()
+    for row in rows:
+        row["payload"] = json.loads(row["payload"])
+    return rows
+
+
+def _turn():
+    conn = get_connection()
+    t = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
+    conn.close(); return t
+
+
+def test_a_malformed_queued_command_no_longer_wedges_the_turn_engine():
+    """The regression this guard exists for. An invalid task hits the pods
+    CHECK constraint; before the guard that IntegrityError escaped
+    end_of_turn(), the row survived the rollback, and every later tick raised
+    again -- the game could never advance."""
+    pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
+    pod = seed_pod(oid, task="produce_food", storage_capacity=100.0, storage_current=50.0)
+    _inject_raw_command(oid, "set_pod_task",
+                        '{"pod_id": %d, "task": "become_a_dragon"}' % pod)
+    before = _turn()
+    end_of_turn()                      # must not raise
+    assert _turn() == before + 1       # the turn actually advanced
+    assert _queue_count() == 0         # one-shot: the bad row is gone, not retried
+    alerts = _failure_alerts()
+    assert len(alerts) == 1 and alerts[0]["subject_id"] == oid
+    assert "IntegrityError" in alerts[0]["payload"]["error"]
+    # And the tick keeps working from here on -- the old failure mode was that
+    # it never would again.
+    end_of_turn()
+    assert _turn() == before + 2
+
+
+def test_a_bad_command_does_not_stop_another_players_turn_resolving():
+    """Containment is the whole point: the rest of the turn must complete."""
+    p1 = seed_player(email="a@t.com", player_token="U_P1")
+    p2 = seed_player(email="b@t.com", player_token="U_P2")
+    sid = seed_sector(energy=1000.0)
+    o1 = seed_ship(p1, sid, name="Broken"); o2 = seed_ship(p2, sid, name="Fine")
+    seed_pod(o1, task="produce_food", storage_capacity=100.0, storage_current=50.0)
+    good_pod = seed_pod(o2, task="produce_energy", storage_capacity=100.0, storage_current=50.0)
+    # o2 also needs food on hand: produce_energy's recipe costs food, and org
+    # upkeep takes food too, so an energy pod alone would produce nothing and
+    # this test would pass for the wrong reason.
+    seed_pod(o2, task="produce_food", storage_capacity=100.0, storage_current=50.0)
+    _inject_raw_command(o1, "move", '{"dest_x": 3}')      # KeyError on dest_y
+    end_of_turn()
+    conn = get_connection()
+    produced = conn.execute("SELECT energy_stored FROM pods WHERE id=?",
+                            (good_pod,)).fetchone()["energy_stored"]
+    snapshots = conn.execute(
+        "SELECT COUNT(*) n FROM events WHERE event_type='turn.snapshot'").fetchone()["n"]
+    conn.close()
+    assert produced > 50.0, "the unaffected player's production still resolved"
+    assert snapshots == 2, "both players' ledger rows were still written"
+    assert len(_failure_alerts()) == 1
+    assert "KeyError" in _failure_alerts()[0]["payload"]["error"]
+
+
+def test_during_transit_dispatch_is_guarded_too():
+    """This dispatcher runs from confirm_move as well as the turn engine, so an
+    unguarded raise would fail a player's own move call, not just the tick."""
+    pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_food", storage_capacity=100.0, storage_current=50.0)
+    _inject_raw_command(oid, "set_pod_task", '{"task": "idle"}',   # no pod_id -> KeyError
+                        resolve_turn=None, trigger_phase="during_transit")
+    result = confirm_move("U_P1", oid, 2, 0, 0)
+    assert result.get("confirmed") is True, "the move itself must still succeed"
+    assert _queue_count() == 0
+    alerts = _failure_alerts()
+    assert len(alerts) == 1 and "KeyError" in alerts[0]["payload"]["error"]

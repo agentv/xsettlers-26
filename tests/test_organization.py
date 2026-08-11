@@ -6,7 +6,7 @@ from xsettlers_mcp.tools.sector_tools import SCAN_RANGE
 from xsettlers_mcp.tools.organization_tools import (
     set_mission, set_pod_task, show_civilization_status, show_game_status,
     rename_organization, set_org_scan_bearing, set_pod_scan_bearing,
-    show_organization
+    show_organization, queue_command
 )
 from engine.production import (POD_PRODUCTION, COLONY_PRODUCTION_MULTIPLIER,
                                COLONIZATION_ENERGY_COST)
@@ -655,3 +655,141 @@ def test_show_organization_notes_unaimed_pods_alongside_aimed_ones():
     seed_pod(oid, task="scan")
     result = show_organization("U_P1", oid)
     assert result["display"]["footer"] == "Scans: West (+1 unaimed)"
+
+
+# --- queue_command param validation -----------------------------------------
+# Everything below was unvalidated until 2026-08-11: queue_command checked the
+# trigger phase, the action name and ownership of the ORG, then stored params
+# verbatim. The dispatchers index straight into that dict, so a malformed order
+# detonated inside end_of_turn() -- which is to say, inside the background
+# clock, on everybody's turn at once.
+
+def _org_with_pod(token="U_P1", email="p@t.com", task="produce_food"):
+    pid = seed_player(email=email, player_token=token)
+    sid = seed_sector(energy=1000.0)
+    oid = seed_ship(pid, sid, name=f"Ship-{token}")
+    pod = seed_pod(oid, task=task, storage_capacity=100.0, storage_current=50.0)
+    return pid, oid, pod
+
+
+def _pod_task(pod_id):
+    conn = get_connection()
+    row = conn.execute("SELECT task, task_params FROM pods WHERE id=?", (pod_id,)).fetchone()
+    conn.close()
+    return row["task"], row["task_params"]
+
+
+def _queued_count():
+    conn = get_connection()
+    n = conn.execute("SELECT COUNT(*) n FROM org_command_queue").fetchone()["n"]
+    conn.close()
+    return n
+
+
+def test_queue_command_rejects_an_out_of_range_scan_aim():
+    """The player's rule: out of range is an error, the pod keeps its current
+    mission, and the player is told -- at the moment they gave the order, not
+    silently three turns later when a background clock drops it."""
+    _, oid, pod = _org_with_pod()
+    result = queue_command("U_P1", oid, "at_turn", "set_pod_task",
+                           {"pod_id": pod, "task": "scan",
+                            "offset_x": 9, "offset_y": 0, "offset_z": 0}, turn=3)
+    assert "error" in result and "scan range is 2" in result["error"]
+    assert result["in_range"] is False and result["distance"] == 9.0
+    assert _pod_task(pod) == ("produce_food", None)   # previous mission intact
+    assert _queued_count() == 0                       # nothing queued
+
+
+def test_queue_command_accepts_an_in_range_scan_aim():
+    _, oid, pod = _org_with_pod()
+    result = queue_command("U_P1", oid, "at_turn", "set_pod_task",
+                           {"pod_id": pod, "task": "scan",
+                            "offset_x": 0, "offset_y": -2, "offset_z": 0}, turn=3)
+    assert result["ok"] is True
+    assert _queued_count() == 1
+
+
+def test_queue_command_normalizes_a_compass_bearing_to_offsets():
+    """queue_command's docstring promises bearings work, but both dispatchers
+    read only offset_x/y/z -- so an unresolved bearing was silently dropped at
+    dispatch and the pod got the task with no aim."""
+    _, oid, pod = _org_with_pod()
+    queue_command("U_P1", oid, "at_turn", "set_pod_task",
+                  {"pod_id": pod, "task": "scan", "bearing": "N2"}, turn=3)
+    conn = get_connection()
+    stored = json.loads(conn.execute(
+        "SELECT params FROM org_command_queue").fetchone()["params"])
+    conn.close()
+    assert (stored["offset_x"], stored["offset_y"], stored["offset_z"]) == (0, -2, 0)
+    assert "bearing" not in stored
+
+
+def test_queue_command_rejects_an_invalid_pod_task():
+    """Previously reached the pods CHECK constraint and raised IntegrityError
+    inside end_of_turn(), wedging the turn engine permanently: the queue row is
+    deleted only after its handler returns, so the failing row survived the
+    rollback and re-fired on every later tick."""
+    _, oid, pod = _org_with_pod()
+    result = queue_command("U_P1", oid, "at_turn", "set_pod_task",
+                           {"pod_id": pod, "task": "become_a_dragon"}, turn=3)
+    assert "error" in result and "Invalid pod task" in result["error"]
+    assert _queued_count() == 0
+
+
+def test_queue_command_refuses_a_pod_belonging_to_another_player():
+    """queue_command verified the ORG was yours but never that the pod was.
+    apply_set_pod_task documents itself as doing no ownership check ('caller's
+    job') and the queued dispatcher wasn't doing that job either, so this
+    retasked a rival's pod."""
+    _, mine, _ = _org_with_pod(token="U_P1", email="a@t.com")
+    _, _, rival_pod = _org_with_pod(token="U_P2", email="b@t.com", task="produce_goods")
+    result = queue_command("U_P1", mine, "at_turn", "set_pod_task",
+                           {"pod_id": rival_pod, "task": "idle"}, turn=3)
+    assert "error" in result and "not part of this organization" in result["error"]
+    assert _queued_count() == 0
+    end_of_turn()
+    assert _pod_task(rival_pod)[0] == "produce_goods"   # untouched
+
+
+def test_queue_command_requires_full_destination_coordinates():
+    """A missing dest_y raised KeyError inside end_of_turn(), same wedge."""
+    _, oid, _ = _org_with_pod()
+    result = queue_command("U_P1", oid, "at_turn", "move", {"dest_x": 3}, turn=3)
+    assert "error" in result and "dest_y" in result["error"] and "dest_z" in result["error"]
+    assert _queued_count() == 0
+
+
+def test_queue_command_rejects_negative_destinations():
+    """Matches confirm_move's own rule, which the queued path bypassed."""
+    _, oid, _ = _org_with_pod()
+    result = queue_command("U_P1", oid, "at_turn", "move",
+                           {"dest_x": 1, "dest_y": -4, "dest_z": 0}, turn=3)
+    assert "error" in result and "negative" in result["error"]
+    assert _queued_count() == 0
+
+
+def test_queue_command_rejects_an_aim_on_a_non_scan_task():
+    _, oid, pod = _org_with_pod()
+    result = queue_command("U_P1", oid, "at_turn", "set_pod_task",
+                           {"pod_id": pod, "task": "produce_energy", "bearing": "N"}, turn=3)
+    assert "error" in result and "Only the scan task takes an aim" in result["error"]
+    assert _queued_count() == 0
+
+
+def test_the_turn_engine_survives_what_used_to_wedge_it():
+    """The regression that matters: none of the malformed orders above can be
+    queued, so end_of_turn() keeps advancing the game for everyone."""
+    _, oid, pod = _org_with_pod()
+    for bad in ({"pod_id": pod, "task": "become_a_dragon"},
+                {"pod_id": pod},
+                {"dest_x": 3}):
+        action = "move" if "dest_x" in bad else "set_pod_task"
+        assert "error" in queue_command("U_P1", oid, "at_turn", action, bad, turn=0)
+    conn = get_connection()
+    before = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
+    conn.close()
+    end_of_turn()
+    conn = get_connection()
+    after = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
+    conn.close()
+    assert after == before + 1

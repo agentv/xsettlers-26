@@ -1,5 +1,5 @@
 import json, math
-from db.events import record_event_direct
+from db.events import record_event_direct, record_dispatch_failure
 from engine.pod_tasking import apply_set_pod_task
 
 def apply_confirm_move(cur, org_id: int, player_id: int,
@@ -69,10 +69,19 @@ def _dispatch_during_transit(cur, org_id: int, player_id: int, current_turn: int
            WHERE org_id=? AND trigger_phase='during_transit'""", (org_id,)).fetchall()
     for row in rows:
         if row["action"] == "set_pod_task":
-            params = json.loads(row["params"] or "{}")
-            offset = None
-            if all(k in params for k in ("offset_x", "offset_y", "offset_z")):
-                offset = (params["offset_x"], params["offset_y"], params["offset_z"])
-            apply_set_pod_task(cur, params["pod_id"], org_id, player_id,
-                               params["task"], offset, current_turn)
+            # Guarded for the same reason as engine/ship_log.py's sweep: a
+            # malformed row must not take down the caller. This one is reached
+            # from confirm_move as well as from the turn engine, so an
+            # unguarded raise here would fail a player's move tool call too,
+            # not just the tick.
+            try:
+                params = json.loads(row["params"] or "{}")
+                offset = None
+                if all(k in params for k in ("offset_x", "offset_y", "offset_z")):
+                    offset = (params["offset_x"], params["offset_y"], params["offset_z"])
+                apply_set_pod_task(cur, params["pod_id"], org_id, player_id,
+                                   params["task"], offset, current_turn)
+            except Exception as exc:
+                record_dispatch_failure(cur, current_turn, row["id"], org_id,
+                                        player_id, row["action"], repr(exc))
         cur.execute("DELETE FROM org_command_queue WHERE id=?", (row["id"],))

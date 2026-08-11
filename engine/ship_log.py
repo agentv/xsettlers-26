@@ -15,6 +15,7 @@ would fail with "database is locked" if called from inside engine/turn.py's
 already-open transaction; see engine/movement.py's docstring).
 """
 import json
+from db.events import record_dispatch_failure
 from engine.movement import apply_confirm_move
 from engine.pod_tasking import apply_set_pod_task
 
@@ -56,6 +57,14 @@ def dispatch_due_commands(cur, current_turn: int):
         if org and org["mission"] == "idle":
             handler = ACTIONS.get(row["action"])
             if handler:
-                handler(cur, row["org_id"], org["player_id"],
-                       json.loads(row["params"] or "{}"), current_turn)
+                # One malformed order must not stop the turn for everyone. An
+                # exception here used to escape end_of_turn() entirely, leaving
+                # the row undeleted (deletion is below, after the handler) so it
+                # re-fired every tick and the game could never advance again.
+                try:
+                    handler(cur, row["org_id"], org["player_id"],
+                           json.loads(row["params"] or "{}"), current_turn)
+                except Exception as exc:
+                    record_dispatch_failure(cur, current_turn, row["id"], row["org_id"],
+                                            org["player_id"], row["action"], repr(exc))
         cur.execute("DELETE FROM org_command_queue WHERE id=?", (row["id"],))

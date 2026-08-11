@@ -51,6 +51,32 @@ def record_event_direct(cur, turn: int, event_type: str, actor_id=None,
         VALUES (NULL,?,?,?,?,?,?,?)
     """, (turn, seq, event_type, actor_id, subject_id, subject_type, json.dumps(payload or {})))
 
+DISPATCH_FAILURE_EVENT = "alert.queued_command_failed"
+
+def record_dispatch_failure(cur, turn: int, command_id: int, org_id: int,
+                            player_id: int, action: str, error: str):
+    """
+    Log a queued command that raised when the engine tried to run it.
+
+    Containment, not diagnosis: queue_command validates its params up front
+    (see organization_tools._normalize_queued_params), so nothing reaching a
+    dispatcher should fail any more. This exists for the cases that check
+    cannot cover -- rows queued before that validation existed, rows written
+    directly, and whatever a future action learns to fail at. The rule this
+    upholds is that one player's bad order must never stop the turn for
+    everyone else, which is exactly what used to happen: the exception escaped
+    end_of_turn(), the offending row was never deleted (deletion happens after
+    the handler returns), and it re-fired on every subsequent tick.
+
+    Lives here rather than in either dispatcher because both need it and they
+    cannot import from each other -- engine/ship_log.py already imports
+    engine/movement.py for the 'move' action.
+    """
+    record_event_direct(cur, turn, DISPATCH_FAILURE_EVENT,
+        actor_id=player_id, subject_id=org_id, subject_type="organization",
+        payload={"command_id": command_id, "org_id": org_id,
+                 "action": action, "error": error})
+
 # Removed 2026-08-11 (complexity audit): record_turn_snapshot(),
 # get_events_since_turn() and get_last_snapshot(). All three had zero callers
 # and zero tests since the initial commit -- speculative replay/recovery

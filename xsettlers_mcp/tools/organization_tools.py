@@ -261,6 +261,83 @@ def set_mission(player_token: str, org_id: int, mission: str, params: dict = Non
 
 DURING_TRANSIT_ACTIONS = {"set_pod_task"}
 
+
+def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
+    """
+    Validate a queued command's params at QUEUE time and return them
+    normalized, as (params, None) -- or (None, error) if the order could
+    never have worked.
+
+    Everything checked here used to be checked nowhere. `queue_command` only
+    validated the trigger phase, the action name and ownership of the *org*,
+    then stored `params` verbatim as JSON; the dispatchers
+    (engine/ship_log.py, engine/movement._dispatch_during_transit) index
+    straight into that dict and hand it to helpers that document themselves
+    as doing "no ownership check, no task-validity check (caller's job)" --
+    and no caller on the queued path was doing that job. Consequences, all
+    reproduced before this was written (2026-08-11):
+
+      - a bad `task` string reached the pods CHECK constraint and raised
+        sqlite3.IntegrityError *inside end_of_turn()*, aborting the turn for
+        every player. The queue row is deleted only after its handler
+        returns, so the failing row survived the rollback and re-fired on
+        every subsequent tick: the game could not advance again.
+      - a missing dest_y/dest_z raised KeyError in the same place, same way.
+      - `pod_id` was never checked against the org, so a player could queue a
+        retask of ANOTHER PLAYER'S pod and it would be applied.
+
+    Validating here rather than at dispatch is also what the player actually
+    needs: an order rejected three turns after it was given, by a background
+    clock, has no one to tell. Refusing it in the tool call that created it
+    puts the error in front of the player while they can still fix it -- the
+    same reasoning set_mission uses to charge colonization up front.
+
+    Normalization matters for the same reason: a compass `bearing` is
+    resolved to offset_x/y/z here, because both dispatchers read only the
+    offsets and would silently have dropped a bearing this function's own
+    docstring told players they could pass.
+    """
+    if action == "move":
+        missing = [k for k in ("dest_x", "dest_y", "dest_z") if params.get(k) is None]
+        if missing:
+            return None, {"error": f"action='move' requires params: {', '.join(missing)}"}
+        if any(params[k] < 0 for k in ("dest_x", "dest_y", "dest_z")):
+            return None, {"error": "Destination coordinates cannot be negative "
+                                   "-- space has no negative indices"}
+        return params, None
+
+    # action == 'set_pod_task' (the only other entry in SHIP_LOG_ACTIONS)
+    pod_id, task = params.get("pod_id"), params.get("task")
+    missing = [name for name, value in (("pod_id", pod_id), ("task", task)) if value is None]
+    if missing:
+        return None, {"error": f"action='set_pod_task' requires params: {', '.join(missing)}"}
+    if task not in VALID_POD_TASKS:
+        return None, {"error": f"Invalid pod task '{task}'. Valid: {sorted(VALID_POD_TASKS)}"}
+    # The pod must belong to the org the command is attached to -- ownership of
+    # the org was already checked by the caller, and this is what makes that
+    # check actually cover the pod being retasked.
+    if not cur.execute("SELECT id FROM pods WHERE id=? AND org_id=?",
+                       (pod_id, org_id)).fetchone():
+        return None, {"error": "Pod not found or not part of this organization"}
+
+    aiming = params.get("bearing") is not None or any(
+        params.get(c) is not None for c in ("offset_x", "offset_y", "offset_z"))
+    if not aiming:
+        return params, None
+    if task != "scan":
+        return None, {"error": f"Only the scan task takes an aim; '{task}' does not"}
+    offset, err = resolve_aim(params.get("bearing"), params.get("offset_x"),
+                              params.get("offset_y"), params.get("offset_z"))
+    if err:
+        return None, err
+    status = aim_status(org_id, offset)
+    if not status["in_range"]:
+        return None, {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
+                               f"{status['scan_range']}", **status}
+    normalized = {k: v for k, v in params.items() if k != "bearing"}
+    normalized.update(offset_x=offset[0], offset_y=offset[1], offset_z=offset[2])
+    return normalized, None
+
 def queue_command(player_token: str, org_id: int, trigger_phase: str, action: str,
                   params: dict = None, turn: int = None) -> dict:
     """
@@ -290,6 +367,14 @@ def queue_command(player_token: str, org_id: int, trigger_phase: str, action: st
     If a player gives the org new orders before a before_arrival/after_arrival/
     at_turn command fires, the queued command is silently dropped rather than
     clobbering them (see engine.ship_log.dispatch_due_commands).
+
+    Params are fully validated here, when the order is given, not when the
+    clock fires it (see _normalize_queued_params): the pod must belong to this
+    org, the task must be a real task, a move needs all three non-negative
+    destination coordinates, and a scan aim must be in range. An order that
+    could never work is refused outright -- nothing is queued, the pod keeps
+    whatever mission it already had, and the player is told why while they can
+    still do something about it.
     """
     if trigger_phase not in VALID_TRIGGER_PHASES:
         return {"error": f"Invalid trigger_phase '{trigger_phase}'. Valid: {sorted(VALID_TRIGGER_PHASES)}"}
@@ -307,6 +392,13 @@ def queue_command(player_token: str, org_id: int, trigger_phase: str, action: st
     cur.execute("SELECT id FROM organizations WHERE id=? AND player_id=?", (org_id, player["id"]))
     if not cur.fetchone():
         conn.close(); return {"error": "Organization not found or not owned by player"}
+
+    # Validate the payload now, not when the clock fires it (see
+    # _normalize_queued_params): a malformed queued order used to surface as
+    # an exception inside end_of_turn(), which stopped the turn for everyone.
+    params, err = _normalize_queued_params(cur, org_id, action, params or {})
+    if err:
+        conn.close(); return err
 
     resolve_turn = None
     if trigger_phase in ("before_arrival", "after_arrival"):

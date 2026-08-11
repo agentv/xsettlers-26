@@ -116,6 +116,111 @@ def _store_org_resource(cur, org_id: int, producing_pod_id: int, resource: str, 
             remaining -= add
     # Anything still remaining here means the whole org is full -- lost.
 
+def _affordable_ratio(cur, org_id: int, recipe: dict, cap: float = 1.0) -> float:
+    """
+    What fraction of `recipe` this org can actually pay for right now: the
+    smallest available/required across every resource the recipe wants,
+    starting from `cap` and only ever narrowing.
+
+    Returned unclamped and uncharged -- callers that need to fold in a
+    further constraint (the production pass caps by what the sector has
+    left) do so before clamping, since min() composes in any order.
+    """
+    for resource, required in recipe.items():
+        if required <= 0:
+            continue
+        ratio = min(cap, _available_org_resource(cur, org_id, resource) / required)
+        cap = ratio
+    return cap
+
+def _charge(cur, org_id: int, player_id: int, recipe: dict, ratio: float,
+            consumption: dict):
+    """
+    Draw `recipe` scaled by `ratio` from the org's pooled stock, and tally
+    what was drawn into the per-player consumption accumulator that feeds
+    the turn.snapshot ledger's derived waste figure (see _snapshot_holdings).
+    """
+    for resource, required in recipe.items():
+        amount = required * ratio
+        _drain_org_resource(cur, org_id, resource, amount)
+        consumption[player_id][resource] += amount
+
+def _pay_for(cur, org_id: int, player_id: int, recipe: dict, consumption: dict,
+             cap: float = 1.0) -> float:
+    """
+    The economy's one rule for paying to do something, and the fraction of it
+    you get to do: work out what the org can afford, clamp to [0,1], charge
+    that much, and hand back the ratio so the caller can scale its output by
+    the same figure.
+
+    Graceful degradation rather than an all-or-nothing gate is the whole
+    point -- half the required input on hand buys half the output. This was
+    written out four separate times (org upkeep, pod production, pod scan,
+    innate org scan) before being pulled together here; a change to how
+    proration works had to be made in four places to be made at all.
+
+    A `cap` below 1.0 lets a caller impose a limit the org's own stock knows
+    nothing about -- the production pass passes the sector's remaining energy
+    that way (see _sector_cap).
+    """
+    ratio = max(0.0, min(1.0, _affordable_ratio(cur, org_id, recipe, cap)))
+    if ratio > 0:
+        _charge(cur, org_id, player_id, recipe, ratio, consumption)
+    return ratio
+
+def _sector_cap(cur, sector_id: int, base_production: dict) -> float:
+    """
+    How much of a full-rate harvest the org's current sector can actually
+    supply, as a fraction -- energy is the only sector-sourced resource (see
+    RESOURCE_CAPACITY_COLUMN), so in practice this is the energy pool alone.
+
+    A ship in transit sits at the sentinel sector (id -1, permanently 0
+    capacity), so this returns 0 for it and drives energy production to zero
+    while travelling with no in-transit branch anywhere.
+    """
+    cap = 1.0
+    for resource, base_amount in base_production.items():
+        if resource not in RESOURCE_CAPACITY_COLUMN or base_amount <= 0:
+            continue
+        col = RESOURCE_CAPACITY_COLUMN[resource]
+        sector = cur.execute(f"SELECT {col} AS remaining FROM sectors WHERE id=?",
+                             (sector_id,)).fetchone()
+        available = sector["remaining"] if sector else 0.0
+        cap = min(cap, available / base_amount)
+    return cap
+
+def _resolve_scan(cur, current_turn: int, org_id: int, player_id: int, origin,
+                  offset, subject_id: int, subject_type: str, payload_extra: dict):
+    """
+    Resolve one aimed scanner: reveal the sector it points at, or log an
+    out-of-range alert if the aim overreaches.
+
+    Scanning is scanning, whoever carries the equipment -- an org's innate
+    sensors and a pod on the scan task follow identical rules, and this is
+    where that claim stops being a comment in two places and becomes one
+    piece of code. The only thing the two callers differ on is who the event
+    is *about* (subject_id/subject_type, plus a pod_id in the payload), which
+    is why those are parameters and nothing else is.
+
+    `origin` is the scanning org's absolute (x,y,z); `offset` is the relative
+    aim (see sector_tools.SCAN_BEARINGS -- aim is relative so it survives a
+    move). Range is re-checked here even though it was validated at set time
+    and cannot drift, because get_scan_range() will eventually vary per org.
+    """
+    dx, dy, dz = offset
+    tx, ty, tz = origin[0] + dx, origin[1] + dy, origin[2] + dz
+    distance = math.sqrt(dx*dx + dy*dy + dz*dz)
+    scan_range = get_scan_range(org_id)
+    if distance <= scan_range:
+        reveal_sector(cur, player_id, tx, ty, tz)
+        # TODO: emit pod.scanned/org.scanned event; detect rivals
+        return
+    record_event_direct(cur, current_turn, "alert.scan_out_of_range",
+        actor_id=player_id, subject_id=subject_id, subject_type=subject_type,
+        payload={**payload_extra, "org_id": org_id,
+                 "target_x": tx, "target_y": ty, "target_z": tz,
+                 "distance": distance, "range": scan_range})
+
 def _apply_org_upkeep(cur, consumption: dict):
     """
     Per-organization upkeep, once per turn (not per pod) -- every ship/colony
@@ -133,19 +238,7 @@ def _apply_org_upkeep(cur, consumption: dict):
     accounts for every resource sink in the turn, not just production inputs.
     """
     for org in cur.execute("SELECT id, player_id FROM organizations").fetchall():
-        org_id = org["id"]
-        ratio = 1.0
-        for resource, required in ORG_UPKEEP_COST.items():
-            if required <= 0:
-                continue
-            available = _available_org_resource(cur, org_id, resource)
-            ratio = min(ratio, available / required)
-        ratio = max(0.0, min(1.0, ratio))
-        if ratio > 0:
-            for resource, required in ORG_UPKEEP_COST.items():
-                amount = required * ratio
-                _drain_org_resource(cur, org_id, resource, amount)
-                consumption[org["player_id"]][resource] += amount
+        _pay_for(cur, org["id"], org["player_id"], ORG_UPKEEP_COST, consumption)
 
 def end_of_turn():
     if is_game_over():
@@ -260,30 +353,14 @@ def end_of_turn():
             recipe = get_consumption_recipe(task)
             org_id = pod["org_id"]
 
-            ratio = 1.0
-            for resource, required in recipe.items():
-                if required <= 0:
-                    continue
-                ratio = min(ratio, _available_org_resource(cur, org_id, resource) / required)
-
-            for resource, base_amount in base_production.items():
-                if resource not in RESOURCE_CAPACITY_COLUMN or base_amount <= 0:
-                    continue
-                col = RESOURCE_CAPACITY_COLUMN[resource]
-                sector = cur.execute(
-                    f"SELECT {col} AS remaining FROM sectors WHERE id=?",
-                    (pod["org_sector_id"],)).fetchone()
-                available_sector = sector["remaining"] if sector else 0.0
-                ratio = min(ratio, available_sector / base_amount)
-
-            ratio = max(0.0, min(1.0, ratio))
+            # Two independent limits on how much of a turn's work actually
+            # happens: what the org can pay for, and what the sector has left
+            # to give. _pay_for takes the smaller of the two, charges the
+            # inputs at that rate, and returns it to scale the output by.
+            ratio = _pay_for(cur, org_id, player_id, recipe, consumption,
+                             cap=_sector_cap(cur, pod["org_sector_id"], base_production))
 
             if ratio > 0:
-                for resource, required in recipe.items():
-                    amount = required * ratio
-                    _drain_org_resource(cur, org_id, resource, amount)
-                    consumption[player_id][resource] += amount
-
                 for resource, base_amount in base_production.items():
                     amount = base_amount * ratio
                     if resource in RESOURCE_CAPACITY_COLUMN and amount > 0:
@@ -303,45 +380,22 @@ def end_of_turn():
         # 3c. Scan: costs food (see POD_CONSUMPTION_RECIPE) but produces no
         #     output -- stationary orgs only (transit suppresses scan).
         elif task == "scan":
-            recipe = get_consumption_recipe(task)
             org_id = pod["org_id"]
-            ratio = 1.0
-            for resource, required in recipe.items():
-                if required <= 0:
-                    continue
-                ratio = min(ratio, _available_org_resource(cur, org_id, resource) / required)
-            ratio = max(0.0, min(1.0, ratio))
-            if ratio > 0:
-                for resource, required in recipe.items():
-                    amount = required * ratio
-                    _drain_org_resource(cur, org_id, resource, amount)
-                    consumption[player_id][resource] += amount
+            ratio = _pay_for(cur, org_id, player_id, get_consumption_recipe(task),
+                             consumption)
 
             org = cur.execute(
                 "SELECT o.sector_id,o.player_id,s.coord_x,s.coord_y,s.coord_z FROM organizations o "
-                "JOIN sectors s ON s.id=o.sector_id WHERE o.id=?", (pod["org_id"],)).fetchone()
+                "JOIN sectors s ON s.id=o.sector_id WHERE o.id=?", (org_id,)).fetchone()
             if ratio > 0 and org and org["sector_id"] != -1:
-                # Aim is an OFFSET from wherever the org currently is, so it
-                # survives the ship moving (see sector_tools.SCAN_BEARINGS).
-                # Range was validated when the aim was set and cannot drift,
-                # but it is re-checked here because get_scan_range() will
-                # eventually vary per org (sensor pods).
                 params = json.loads(pod["task_params"] or "{}")
-                dx, dy, dz = (params.get("offset_x"), params.get("offset_y"),
-                              params.get("offset_z"))
-                if dx is not None and dy is not None and dz is not None:
-                    tx, ty, tz = (org["coord_x"] + dx, org["coord_y"] + dy, org["coord_z"] + dz)
-                    distance = math.sqrt(dx*dx + dy*dy + dz*dz)
-                    scan_range = get_scan_range(pod["org_id"])
-                    if distance <= scan_range:
-                        reveal_sector(cur, org["player_id"], tx, ty, tz)
-                        # TODO: emit pod.scanned event; detect rivals
-                    else:
-                        record_event_direct(cur, current_turn, "alert.scan_out_of_range",
-                            actor_id=org["player_id"], subject_id=pod["id"], subject_type="pod",
-                            payload={"pod_id": pod["id"], "org_id": pod["org_id"],
-                                     "target_x": tx, "target_y": ty, "target_z": tz,
-                                     "distance": distance, "range": scan_range})
+                offset = (params.get("offset_x"), params.get("offset_y"),
+                          params.get("offset_z"))
+                if all(c is not None for c in offset):
+                    _resolve_scan(cur, current_turn, org_id, org["player_id"],
+                        origin=(org["coord_x"], org["coord_y"], org["coord_z"]),
+                        offset=offset, subject_id=pod["id"], subject_type="pod",
+                        payload_extra={"pod_id": pod["id"]})
 
     # 3d. Innate organization scan — every org can scan one sector per turn on
     #     its own account (a ship's bridge, a colony's headquarters), without
@@ -364,30 +418,13 @@ def end_of_turn():
           AND o.scan_offset_y IS NOT NULL
           AND o.scan_offset_z IS NOT NULL""")
     for org in cur.fetchall():
-        ratio = 1.0
-        for resource, required in scan_recipe.items():
-            if required <= 0:
-                continue
-            ratio = min(ratio, _available_org_resource(cur, org["id"], resource) / required)
-        ratio = max(0.0, min(1.0, ratio))
-        if ratio > 0:
-            for resource, required in scan_recipe.items():
-                amount = required * ratio
-                _drain_org_resource(cur, org["id"], resource, amount)
-                consumption[org["player_id"]][resource] += amount
+        ratio = _pay_for(cur, org["id"], org["player_id"], scan_recipe, consumption)
         if ratio <= 0 or org["sector_id"] == -1:
             continue          # starved, or in transit: cost paid, no reveal
-        tx, ty, tz = (org["coord_x"] + org["dx"], org["coord_y"] + org["dy"],
-                      org["coord_z"] + org["dz"])
-        distance = math.sqrt(org["dx"]**2 + org["dy"]**2 + org["dz"]**2)
-        scan_range = get_scan_range(org["id"])
-        if distance <= scan_range:
-            reveal_sector(cur, org["player_id"], tx, ty, tz)
-        else:
-            record_event_direct(cur, current_turn, "alert.scan_out_of_range",
-                actor_id=org["player_id"], subject_id=org["id"], subject_type="organization",
-                payload={"org_id": org["id"], "target_x": tx, "target_y": ty,
-                         "target_z": tz, "distance": distance, "range": scan_range})
+        _resolve_scan(cur, current_turn, org["id"], org["player_id"],
+            origin=(org["coord_x"], org["coord_y"], org["coord_z"]),
+            offset=(org["dx"], org["dy"], org["dz"]),
+            subject_id=org["id"], subject_type="organization", payload_extra={})
 
     # 4. Colonization resolution — only orgs whose 3-turn colonize_complete event has matured.
     #    Scheduled by set_mission() via record_event(resolve_at_turn=...). Idempotent via the

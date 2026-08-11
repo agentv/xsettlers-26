@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Round-robin tournament across every registered NPC strategy (engine/npc.py's
-STRATEGIES), each pair playing once via scripts/simulate_npc_matchup.py in its
+strategy_names() -- code strategies plus the named programs), each pair playing once via scripts/simulate_npc_matchup.py in its
 own scratch DB (tourney/dbs/) and its own subprocess. This orchestrator never
 opens a DB connection itself -- each matchup's subprocess dumps its own
 turn-by-turn + standings JSON (tourney/data/) via that script's --json-out,
@@ -53,8 +53,13 @@ def main():
     args = parser.parse_args()
 
     sys.path.insert(0, REPO_ROOT)
-    from engine.npc import STRATEGIES
-    strategies = sorted(STRATEGIES)
+    from engine.npc import strategy_names
+    # 'scripted' is assignable (it is how a profile carrying its own inline
+    # program is run -- the NPC builder's path) but it is not a strategy: with
+    # no program in its config it does nothing at all, and would enter the
+    # field as a second, identically-scoring turtle. Named programs from
+    # config/npc_programs/ play on their own names.
+    strategies = [s for s in strategy_names() if s != "scripted"]
     pairs = list(itertools.combinations(strategies, 2))
     print(f"Round robin: {len(strategies)} strategies, {len(pairs)} matchups.")
 

@@ -6,7 +6,9 @@ from db.events import record_event_direct
 from engine.ship_log import dispatch_due_commands
 from engine.production import (get_production, get_consumption_recipe,
                                get_production_multiplier, ORG_UPKEEP_COST,
-                               RESOURCE_CAPACITY_COLUMN, RESOURCE_STORAGE_COLUMN)
+                               RESOURCE_CAPACITY_COLUMN)
+from engine.org_resources import (available_org_resource, drain_org_resource,
+                                  store_org_resource)
 from engine.scoring import score_for, player_standings
 from xsettlers_mcp.tools.sector_tools import get_scan_range
 
@@ -56,66 +58,6 @@ def _player_holdings(cur) -> dict:
                              "goods": r["goods"] or 0.0, "total": r["total"] or 0.0}
             for r in rows}
 
-def _available_org_resource(cur, org_id: int, resource: str) -> float:
-    """
-    An org's pooled stock of a resource: summed across ALL of that org's
-    pods' <resource>_stored column, regardless of each pod's current task
-    -- storage is generic per pod, so retasking a pod never hides whatever
-    it already has stored (see RESOURCE_STORAGE_COLUMN).
-    """
-    col = RESOURCE_STORAGE_COLUMN[resource]
-    return cur.execute(
-        f"SELECT COALESCE(SUM({col}),0) AS total FROM pods WHERE org_id=?",
-        (org_id,)).fetchone()["total"]
-
-def _drain_org_resource(cur, org_id: int, resource: str, amount: float):
-    """Drain amount of a resource from an org's pooled stock, sequentially
-    (by pod id) across whichever of its pods currently hold that resource --
-    regardless of their current task."""
-    if amount <= 0:
-        return
-    col = RESOURCE_STORAGE_COLUMN[resource]
-    remaining = amount
-    source_pods = cur.execute(
-        f"SELECT id, {col} AS have FROM pods WHERE org_id=? AND {col}>0 ORDER BY id",
-        (org_id,)).fetchall()
-    for sp in source_pods:
-        if remaining <= 0:
-            break
-        draw = min(sp["have"], remaining)
-        if draw > 0:
-            cur.execute(f"UPDATE pods SET {col}={col}-? WHERE id=?", (draw, sp["id"]))
-            remaining -= draw
-
-def _store_org_resource(cur, org_id: int, producing_pod_id: int, resource: str, amount: float):
-    """
-    Add amount of a resource to storage: fills the producing pod's own free
-    space first, then spills into other pods in the same org that still
-    have free space (by pod id), then is lost if no pod in the org has room
-    left. Free space on a pod = storage_capacity minus everything currently
-    stored there (energy+food+goods combined) -- storage is one shared
-    container per pod, not resource-specific, so a pod already full of one
-    resource has no room for another regardless of type.
-    """
-    if amount <= 0:
-        return
-    col = RESOURCE_STORAGE_COLUMN[resource]
-    remaining = amount
-    # Producing pod first (id != producing_pod_id sorts to 0/False first), then by id.
-    pods = cur.execute(
-        """SELECT id, storage_capacity, energy_stored, food_stored, goods_stored
-           FROM pods WHERE org_id=? ORDER BY (id != ?), id""",
-        (org_id, producing_pod_id)).fetchall()
-    for p in pods:
-        if remaining <= 0:
-            break
-        free = p["storage_capacity"] - (p["energy_stored"] + p["food_stored"] + p["goods_stored"])
-        add = min(free, remaining)
-        if add > 0:
-            cur.execute(f"UPDATE pods SET {col}={col}+? WHERE id=?", (add, p["id"]))
-            remaining -= add
-    # Anything still remaining here means the whole org is full -- lost.
-
 def _affordable_ratio(cur, org_id: int, recipe: dict, cap: float = 1.0) -> float:
     """
     What fraction of `recipe` this org can actually pay for right now: the
@@ -129,7 +71,7 @@ def _affordable_ratio(cur, org_id: int, recipe: dict, cap: float = 1.0) -> float
     for resource, required in recipe.items():
         if required <= 0:
             continue
-        ratio = min(cap, _available_org_resource(cur, org_id, resource) / required)
+        ratio = min(cap, available_org_resource(cur, org_id, resource) / required)
         cap = ratio
     return cap
 
@@ -142,7 +84,7 @@ def _charge(cur, org_id: int, player_id: int, recipe: dict, ratio: float,
     """
     for resource, required in recipe.items():
         amount = required * ratio
-        _drain_org_resource(cur, org_id, resource, amount)
+        drain_org_resource(cur, org_id, resource, amount)
         consumption[player_id][resource] += amount
 
 def _pay_for(cur, org_id: int, player_id: int, recipe: dict, consumption: dict,
@@ -326,7 +268,7 @@ def end_of_turn():
         #    Each producing task (plus scan) costs some other resource(s)
         #    to run (see POD_CONSUMPTION_RECIPE) -- drawn
         #    from the org's own pooled stock of that resource (see
-        #    _available_org_resource/_drain_org_resource above). idle costs
+        #    available_org_resource/drain_org_resource above). idle costs
         #    nothing. Output is prorated to whatever fraction of the required
         #    input is actually available: e.g. only half the energy needed on
         #    hand gives half the normal output, rather than an all-or-nothing
@@ -369,11 +311,11 @@ def end_of_turn():
                                     (amount, pod["org_sector_id"]))
                     # Fills this pod's own free space first, then spills into
                     # other org pods with room, then is lost if the whole org
-                    # is full (see _store_org_resource) -- production tallied
+                    # is full (see store_org_resource) -- production tallied
                     # here regardless of whether it actually fit; the gap
                     # between this and what _player_holdings later shows
                     # stored is exactly the turn.snapshot ledger's waste figure.
-                    _store_org_resource(cur, org_id, pod["id"], resource, amount)
+                    store_org_resource(cur, org_id, pod["id"], resource, amount)
                     if amount > 0:
                         production[player_id][resource] += amount
 
@@ -496,7 +438,7 @@ def _snapshot_holdings(cur, turn: int, before_holdings: dict, production: dict, 
         wasted = produced - consumed - (after - before)
     i.e. whatever was produced and consumed this turn but doesn't show up in
     the actual before/after delta was lost to a full pod with nowhere to
-    spill (see _store_org_resource). `production`/`consumption` are
+    spill (see store_org_resource). `production`/`consumption` are
     {player_id: {resource: amount}} accumulators built inline during this
     same end_of_turn() pass (_apply_org_upkeep and the pod loop above) --
     this function costs exactly one extra query (the after-holdings read,

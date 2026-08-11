@@ -196,9 +196,13 @@ async def list_tools():
                         "'after_arrival' fires exactly one turn later -- both require the org to already be in "
                         "transit; 'at_turn' fires at an explicit absolute turn (pass `turn`), independent of any "
                         "move, for orders that don't fit the arrival-relative phases (e.g. \"on turn 7, jump "
-                        "somewhere else\"). Action whitelist: 'move' (params: dest_x, dest_y, dest_z, optionally "
-                        "jump_range_per_turn -- same shape confirm_move takes) and 'set_pod_task' (params: "
-                        "pod_id, task, optionally bearing/offset_x/y/z -- same shape set_pod_task takes). If you "
+                        "somewhere else\"). Action whitelist: 'move' (either dest_x/dest_y/dest_z absolute or "
+                        "d_x/d_y/d_z relative to wherever the org is when the order fires, never both, plus "
+                        "optional jump_range_per_turn); 'set_pod_task' (params: pod_id, task, optionally "
+                        "bearing/offset_x/y/z -- same shape set_pod_task takes); 'colonize' (no params -- commits "
+                        "the ship at whatever sector it occupies when the order fires, and is refused if it "
+                        "cannot afford the energy by then); 'aim_scan' (optionally bearing/offset_x/y/z, same "
+                        "shape set_org_scan_bearing takes; pass none to clear the aim). If you "
                         "give the org new orders before a before_arrival/after_arrival/at_turn command fires, "
                         "the queued one is silently dropped rather than overriding your manual orders.",
             inputSchema={"type":"object","properties":{

@@ -33,7 +33,7 @@ from config.loader import load_starting_configuration
 from db.connection import get_connection
 from db.bootstrap import bootstrap_game
 from db.npc_profiles import assign_npc_profile
-from engine.npc import STRATEGIES
+from engine.npc import strategy_names
 from xsettlers_mcp.game_select import get_active_game
 
 SCENARIO_FILE = "config/game0.yaml"
@@ -103,9 +103,13 @@ def _validate_players(players: list, lobby) -> dict | None:
         if p["kind"] == "npc":
             profile = p.get("profile") or {}
             strategy_name = profile.get("strategy_name")
-            if strategy_name not in STRATEGIES:
+            # strategy_names() is the union of code strategies and the named
+            # programs in config/npc_programs/ -- a strategy moving from
+            # Python into YAML must not change what a roster may ask for.
+            valid = strategy_names()
+            if strategy_name not in valid:
                 return {"error": f"Unknown npc strategy_name '{strategy_name}'. "
-                                 f"Valid: {sorted(STRATEGIES)}"}
+                                 f"Valid: {valid}"}
     return None
 
 def start_session(session_token: str, players: list, scenario_key: str = None) -> dict:

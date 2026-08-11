@@ -6,6 +6,7 @@ in real traffic today, but accepted so a real call from GameHouse's
 push_start_session (which always sends the field as of its 2026-08-07
 contract change) doesn't crash on an unexpected keyword argument.
 """
+import json
 from db.connection import get_connection
 from xsettlers_mcp.gamehouse import start_session
 from xsettlers_mcp.tools.player_tools import get_player_state
@@ -169,3 +170,31 @@ def test_start_session_rejects_a_different_token_while_active():
     start_session("tok1", [_person(1), _npc("npc-1")])
     result = start_session("tok2", [_person(99), _npc("npc-2")])
     assert "error" in result
+
+
+def test_a_program_named_npc_seated_here_actually_plays():
+    """The handoff's end of the strategy-name contract. `burst_and_colonize`
+    stopped being a Python function on 2026-08-11 and became
+    config/npc_programs/burst_and_colonize.yaml -- a roster asking for it by
+    name must still seat an NPC that dispatches under a real end_of_turn()
+    loop, with nothing calling the strategy by hand."""
+    from engine.turn import end_of_turn
+    _clear_active_game()
+    result = start_session("tok1", [_person(42), _npc("npc-1", strategy="burst_and_colonize")])
+    assert result["ok"] is True
+    npc_id = next(p for p in result["players"] if p["kind"] == "npc")["xsettlers_player_id"]
+
+    end_of_turn()  # the only thing driving the NPC
+
+    conn = get_connection()
+    orgs = conn.execute("""SELECT mission, sector_id FROM organizations
+                           WHERE player_id=? AND org_type='ship'""", (npc_id,)).fetchall()
+    memory = conn.execute("SELECT memory FROM npc_profiles WHERE player_id=?",
+                          (npc_id,)).fetchone()["memory"]
+    conn.close()
+
+    assert json.loads(memory)["dispatched"] is True
+    missions = [o["mission"] for o in orgs]
+    assert missions.count("colonize") == 2, "two ships committed to colonies"
+    assert all(o["sector_id"] == -1 for o in orgs if o["mission"] == "move")
+    assert missions.count("move") == 6, "the other six scattered"

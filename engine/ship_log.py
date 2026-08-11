@@ -15,13 +15,15 @@ would fail with "database is locked" if called from inside engine/turn.py's
 already-open transaction; see engine/movement.py's docstring).
 """
 import json
-from db.events import record_dispatch_failure
+from db.events import record_dispatch_failure, record_command_refused
 from engine.movement import apply_confirm_move
+from engine.missions import apply_colonize
+from engine.org_scanning import apply_set_org_scan_bearing
 from engine.pod_tasking import apply_set_pod_task
 
 def _dispatch_move(cur, org_id: int, player_id: int, params: dict, current_turn: int):
-    apply_confirm_move(cur, org_id, player_id,
-        params["dest_x"], params["dest_y"], params["dest_z"],
+    dest_x, dest_y, dest_z = resolve_destination(cur, org_id, params)
+    apply_confirm_move(cur, org_id, player_id, dest_x, dest_y, dest_z,
         params.get("jump_range_per_turn", 1), current_turn)
 
 def _dispatch_set_pod_task(cur, org_id: int, player_id: int, params: dict, current_turn: int):
@@ -31,7 +33,57 @@ def _dispatch_set_pod_task(cur, org_id: int, player_id: int, params: dict, curre
     apply_set_pod_task(cur, params["pod_id"], org_id, player_id,
         params["task"], offset, current_turn)
 
-ACTIONS = {"move": _dispatch_move, "set_pod_task": _dispatch_set_pod_task}
+def _dispatch_colonize(cur, org_id: int, player_id: int, params: dict, current_turn: int):
+    """
+    Unlike every other action here this one can come back with an {"error":...}
+    instead of raising or succeeding -- a ship that no longer has the energy is
+    refused, not broken. Returning it lets dispatch_due_commands log it as a
+    refusal rather than a failure.
+    """
+    org = cur.execute("SELECT sector_id FROM organizations WHERE id=?", (org_id,)).fetchone()
+    return apply_colonize(cur, org_id, player_id, org["sector_id"], current_turn)
+
+def _dispatch_aim_scan(cur, org_id: int, player_id: int, params: dict, current_turn: int):
+    offset = None
+    if all(k in params for k in ("offset_x", "offset_y", "offset_z")):
+        offset = (params["offset_x"], params["offset_y"], params["offset_z"])
+    apply_set_org_scan_bearing(cur, org_id, player_id, offset, current_turn,
+                               bearing=params.get("bearing"))
+
+ACTIONS = {"move": _dispatch_move, "set_pod_task": _dispatch_set_pod_task,
+           "colonize": _dispatch_colonize, "aim_scan": _dispatch_aim_scan}
+
+def resolve_destination(cur, org_id: int, params: dict) -> tuple:
+    """
+    A queued move's absolute destination, from either form its params may
+    carry: dest_x/y/z (absolute) or d_x/d_y/d_z (relative to wherever the org
+    is standing when the command actually fires). queue_command guarantees
+    exactly one of the two is present.
+
+    The relative form is what makes an authored order portable -- the same
+    "jump three further out" works from any starting sector, the same reason
+    scan aims are stored as offsets rather than coordinates (see
+    sector_tools.SCAN_BEARINGS). It cannot be resolved at queue time because
+    the origin is whatever sector the org reaches, which is the point.
+
+    Raises rather than returning an error: a relative move that lands on a
+    negative coordinate, or an org with no position to offset from, is a
+    malformed order, and dispatch_due_commands' handler guard turns the raise
+    into an alert.queued_command_failed event without stopping the turn.
+    """
+    if params.get("dest_x") is not None:
+        return params["dest_x"], params["dest_y"], params["dest_z"]
+    org = cur.execute("""SELECT s.coord_x, s.coord_y, s.coord_z
+        FROM organizations o JOIN sectors s ON s.id=o.sector_id
+        WHERE o.id=? AND o.sector_id!=-1""", (org_id,)).fetchone()
+    if not org:
+        raise ValueError(f"org {org_id} has no position to apply a relative move from")
+    dest = (org["coord_x"] + params["d_x"], org["coord_y"] + params["d_y"],
+            org["coord_z"] + params["d_z"])
+    if any(c < 0 for c in dest):
+        raise ValueError(f"relative move from ({org['coord_x']},{org['coord_y']},"
+                         f"{org['coord_z']}) lands at {dest} -- space has no negative indices")
+    return dest
 
 def dispatch_due_commands(cur, current_turn: int):
     """
@@ -62,8 +114,15 @@ def dispatch_due_commands(cur, current_turn: int):
                 # the row undeleted (deletion is below, after the handler) so it
                 # re-fired every tick and the game could never advance again.
                 try:
-                    handler(cur, row["org_id"], org["player_id"],
-                           json.loads(row["params"] or "{}"), current_turn)
+                    outcome = handler(cur, row["org_id"], org["player_id"],
+                                      json.loads(row["params"] or "{}"), current_turn)
+                    # A handler that hands back an error declined the order on
+                    # the game's terms rather than breaking on it -- logged as
+                    # a refusal, not a failure (see db.events.record_command_refused).
+                    if isinstance(outcome, dict) and "error" in outcome:
+                        record_command_refused(cur, current_turn, row["id"], row["org_id"],
+                                               org["player_id"], row["action"],
+                                               outcome["error"])
                 except Exception as exc:
                     record_dispatch_failure(cur, current_turn, row["id"], row["org_id"],
                                             org["player_id"], row["action"], repr(exc))

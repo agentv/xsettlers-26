@@ -99,6 +99,21 @@ Key fields and their split responsibilities:
 
 The clock (`engine/clock.py`) calls `end_of_turn()` on a fixed interval (`GAME_TICK_SECONDS`); `check_consensus_acceleration()` lets all-players-declared consensus fire it early.
 
+### NPC strategies — data first, code only when it must be
+
+**An NPC is just a player row with `is_npc=1` plus an `npc_profiles` row**; strategies act by calling the same tool functions a human calls through MCP, so every ownership check works unmodified. `run_npc_decisions()` is step 0 of `end_of_turn()`, and completes before the turn's own transaction opens.
+
+Since 2026-08-11 a strategy is **either a YAML program or a Python function**, and the split is deliberate:
+
+- **Plans** — fixed openings whose whole sequence is decided in advance — are data: `config/npc_programs/*.yaml`, executed by `engine/npc_script.py`. `turtle`, `burst_and_colonize` and `fan_out_consolidate` all live here. Adding one is adding a file, no code change.
+- **Policies** — strategies that read the world each turn and decide from it — stay as functions in `engine/npc.py`. `fan_out` (waits for every scout's scan, then converges the fleet on the richest find) and `frontier_map_stay_frosty` (no terminal state) need conditions, repetition and cross-org coordination, which the ship's log deliberately isn't. **Write a new strategy as a program first**; only reach for a function when it has to look at the board before choosing.
+
+`engine/npc.strategy_names()` is the union of both and is what `xsettlers_mcp/gamehouse.py` validates rosters against and `scripts/run_tournament.py` plays — so a strategy crossing the data/code line never changes what callers may ask for. Don't reintroduce a bare `STRATEGIES` lookup in those callers.
+
+Programs are validated at **assign** time (`validate_program()`, called by `assign_npc_profile()`), not when they run — the same reasoning behind `queue_command`'s up-front param validation, one level up: a program is authored by a person and an error must reach them synchronously, not three turns later inside a clock tick. This matters because the whole point of the format is a future NPC builder (tracked in `docs/TODO.md`).
+
+The ship's log (`org_command_queue`, `engine/ship_log.py`) is what makes programs possible; its action whitelist is `{move, set_pod_task, colonize, aim_scan}`, each dispatching into an engine-layer `apply_*` helper (`engine/movement.py`, `engine/pod_tasking.py`, `engine/missions.py`, `engine/org_scanning.py`) rather than the self-connecting tool wrappers, which would deadlock inside the turn transaction. A `move` takes either absolute `dest_x/y/z` or **relative `d_x/d_y/d_z`**, resolved against the org's position at fire time — that's what makes a program portable between home sectors, and it's why the negative-coordinate guard lives at fire time for that form. `colonize` is the one action that can be *refused* rather than only succeeding or raising (a ship that can't pay when the order fires), which is why `alert.queued_command_refused` is a separate event type from `alert.queued_command_failed` — don't merge them.
+
 ### Config
 
 **This service is a library of games, not one game** — that shapes the whole config split (reworked 2026-07-30; before that the roster lived in `game_config.yaml` and was paired to scenarios by list position, which made player count a property of the *service*).

@@ -1,0 +1,12 @@
+# Hold still. Take no action, ever.
+#
+# The baseline of the fleet-strategy taxonomy, and a real control rather than
+# a placeholder: it beat frontier_map_stay_frosty in the 2026-08-10 round
+# robin (2240 to 1864), because a fleet that sits at home keeps producing
+# while one that never stops moving spends its energy travelling.
+#
+# An empty program is the whole strategy -- which is the clearest evidence
+# that "no code" is the right shape for this class of behavior.
+name: turtle
+description: Hold position at the home colony and produce. Takes no actions.
+program: []

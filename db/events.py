@@ -30,7 +30,8 @@ def record_event(event_type, payload, actor_id=None,
     return event_id
 
 def record_event_direct(cur, turn: int, event_type: str, actor_id=None,
-                        subject_id=None, subject_type=None, payload=None):
+                        subject_id=None, subject_type=None, payload=None,
+                        resolve_at_turn=None):
     """
     Write an event directly against an already-open cur/transaction, rather
     than opening a fresh connection like record_event does. Needed by any
@@ -43,15 +44,43 @@ def record_event_direct(cur, turn: int, event_type: str, actor_id=None,
     parameter (unlike record_event, which calls get_current_turn() itself)
     so this module never needs to import engine.turn -- avoids the circular
     import that motivated keeping this logic out of here until now.
+
+    resolve_at_turn carries the same meaning it does in record_event -- a
+    deferred event a later end_of_turn() pass picks up once current_turn
+    reaches it. Added 2026-08-11 for engine/missions.py's apply_colonize,
+    which schedules colonize_complete from inside the turn transaction; until
+    then every direct-write caller logged only already-resolved facts, so the
+    column was simply omitted from the INSERT and defaulted to NULL.
     """
     cur.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM events WHERE turn=?", (turn,))
     seq = cur.fetchone()[0]
     cur.execute("""
-        INSERT INTO events (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,payload)
-        VALUES (NULL,?,?,?,?,?,?,?)
-    """, (turn, seq, event_type, actor_id, subject_id, subject_type, json.dumps(payload or {})))
+        INSERT INTO events (game_id,turn,seq,event_type,actor_id,subject_id,subject_type,
+                            resolve_at_turn,payload)
+        VALUES (NULL,?,?,?,?,?,?,?,?)
+    """, (turn, seq, event_type, actor_id, subject_id, subject_type,
+          resolve_at_turn, json.dumps(payload or {})))
 
 DISPATCH_FAILURE_EVENT = "alert.queued_command_failed"
+COMMAND_REFUSED_EVENT = "alert.queued_command_refused"
+
+def record_command_refused(cur, turn: int, command_id: int, org_id: int,
+                           player_id: int, action: str, error: str):
+    """
+    Log a queued command the engine ran and the game legitimately declined.
+
+    Deliberately a different event type from record_dispatch_failure below.
+    That one means something was *wrong* -- a malformed order that raised, a
+    bug to go and fix. This one means the order was well-formed and valid when
+    it was given, and the world simply moved on: a queued 'colonize' whose ship
+    spent its energy before the command fired is the motivating case (see
+    engine/missions.apply_colonize). Folding the two together would bury real
+    defects in a stream of ordinary economic outcomes.
+    """
+    record_event_direct(cur, turn, COMMAND_REFUSED_EVENT,
+        actor_id=player_id, subject_id=org_id, subject_type="organization",
+        payload={"command_id": command_id, "org_id": org_id,
+                 "action": action, "error": error})
 
 def record_dispatch_failure(cur, turn: int, command_id: int, org_id: int,
                             player_id: int, action: str, error: str):

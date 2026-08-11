@@ -1,16 +1,27 @@
 import json
 from db.connection import get_connection
+from engine.npc_script import validate_program
 
 def assign_npc_profile(player_id: int, strategy_name: str, config: dict = None) -> dict:
     """
     Mark a player as NPC-controlled and give it a named strategy profile
-    (see engine/npc.py's STRATEGIES registry for valid names). Reassigning a
+    (see engine/npc.py's strategy_names() for valid names). Reassigning a
     strategy to a player that already has one replaces it and resets memory
     to {} -- a strategy's working memory is only meaningful to that strategy,
     so carrying it over to a different one would be a foreign, unparseable
     blob rather than a useful head start.
     Dev/test-only: not exposed as an MCP tool (see docs/TODO.md).
+
+    A config carrying an inline `program` is validated here and refused if it
+    is malformed, before anything is written. This is the assignment-time half
+    of the rule queue_command already applies to a single order: a program is
+    authored by a person, so it has to be rejected while they are still
+    holding it, not three turns later inside a clock tick. Named programs from
+    config/npc_programs/ are validated by their own test, not on every assign.
     """
+    program_error = validate_program((config or {}).get("program"))
+    if program_error:
+        return program_error
     conn = get_connection(); cur = conn.cursor()
     cur.execute("UPDATE players SET is_npc=1 WHERE id=?", (player_id,))
     cur.execute("""

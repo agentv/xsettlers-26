@@ -1,149 +1,40 @@
 """
 NPC strategy execution. Each is_npc=1 player with a row in npc_profiles gets
-its registered strategy function invoked once per turn, early in
-end_of_turn() (see run_npc_decisions, called from engine/turn.py before any
-turn-resolution processing). A strategy decides and acts by calling the
-exact same tool functions (confirm_move today; set_pod_task/set_mission
-as more strategies need them) any human player calls through the MCP
-interface -- no special-cased write path, no direct mutation of
-organizations/pods from here. Each tool call commits its own connection
-before the next NPC is processed, so nothing is left open when
-end_of_turn()'s own turn-resolution transaction opens right after this
-returns (see the comment at that call site).
+its strategy invoked once per turn, early in end_of_turn() (see
+run_npc_decisions, called from engine/turn.py before any turn-resolution
+processing). A strategy decides and acts by calling the exact same tool
+functions any human player calls through the MCP interface -- no
+special-cased write path, no direct mutation of organizations/pods from here.
+Each tool call commits its own connection before the next NPC is processed, so
+nothing is left open when end_of_turn()'s own turn-resolution transaction
+opens right after this returns (see the comment at that call site).
 
-Per-NPC working memory (what player2_policy.py, this strategy's prototype,
-used to track in a stray .player2_plan.json file) lives in
-npc_profiles.memory, a JSON blob mutated turn to turn -- same pattern
-pods.task_params already uses for per-pod working state.
+**A strategy is either data or code, and most are data.** Openings whose whole
+sequence is decided in advance live in config/npc_programs/*.yaml and run
+through engine/npc_script.py -- turtle, burst_and_colonize and
+fan_out_consolidate were all Python functions here until 2026-08-11 and are
+now YAML files, with no change to how they play. What is left in this module
+is the strategies a program genuinely cannot express: ones that read the world
+each turn and decide from it. fan_out waits for every scout's scan to resolve
+and then converges the whole fleet on the richest sector found; frontier_map_
+stay_frosty has no terminal state at all. Both need conditions, repetition and
+cross-org coordination, which is a rule engine rather than a command queue --
+see engine/npc_script.py's module docstring for where that line sits and why.
+
+Write a new strategy as a program first. Only reach for a function here when
+it has to look at the board before it can choose.
+
+Per-NPC working memory (what player2_policy.py, the fan-out prototype, used to
+track in a stray .player2_plan.json file) lives in npc_profiles.memory, a JSON
+blob mutated turn to turn -- same pattern pods.task_params already uses for
+per-pod working state.
 """
 import json
 from db.connection import get_connection
+from engine.npc_programs import load_programs
+from engine.npc_script import run_program
 from xsettlers_mcp.tools.navigation_tools import confirm_move
-from xsettlers_mcp.tools.organization_tools import queue_command, set_mission, set_org_scan_bearing
-
-def _fan_out_consolidate(player_id: int, player_token: str, config: dict, memory: dict) -> dict:
-    """
-    Ported from player2_policy.py: fan out in 4 directions (2 ships per
-    direction, first 8 ships found), then one ship per pair (the "mover")
-    jumps `leg_distance` further out in the same direction while the other
-    (the "stayer") stays put. From there everyone just settles in and
-    produces -- no further decisions after the second leg.
-    Config: leg_distance (default 3), jump_range_per_turn (default 1).
-    The second leg is driven entirely by the ship's log (see
-    engine/ship_log.py): each mover's leg-2 move is queued at opening-dispatch
-    time as an 'after_arrival' command, so it self-fires one end_of_turn()
-    pass after that mover lands leg 1 -- one turn of harvesting at the
-    intermediate stop, fixed by the after_arrival phase's own definition (see
-    docs/TODO.md), not a configurable hold_turns. (Previously a bespoke
-    memory["second_leg_turn"] poll -- this strategy was the TODO note's
-    motivating example for generalizing that into org_command_queue.)
-    Requires at least 8 of the player's organizations to be ships; if fewer
-    are available the strategy marks itself done without acting (nothing
-    sensible to fan out) rather than retrying every turn indefinitely.
-    Single-phase now: once the opening moves and their queued second legs are
-    dispatched, this strategy has nothing further to decide.
-    """
-    leg = config.get("leg_distance", 3)
-    jump_range = config.get("jump_range_per_turn", 1)
-
-    if memory.get("opening_dispatched"):
-        return memory
-
-    conn = get_connection(); cur = conn.cursor()
-    ship_ids = [r["id"] for r in cur.execute(
-        "SELECT id FROM organizations WHERE player_id=? AND org_type='ship' ORDER BY id",
-        (player_id,)).fetchall()]
-    if len(ship_ids) < 8:
-        conn.close()
-        memory["opening_dispatched"] = True
-        return memory
-    home = cur.execute("""SELECT s.coord_x,s.coord_y,s.coord_z FROM organizations o
-        JOIN sectors s ON s.id=o.sector_id WHERE o.id=?""", (ship_ids[0],)).fetchone()
-    conn.close()
-    hx, hy, hz = home["coord_x"], home["coord_y"], home["coord_z"]
-
-    groups = {
-        "north": (ship_ids[0], ship_ids[1], (hx, hy+leg, hz), (0, leg, 0)),
-        "south": (ship_ids[2], ship_ids[3], (hx, hy-leg, hz), (0, -leg, 0)),
-        "east":  (ship_ids[4], ship_ids[5], (hx+leg, hy, hz), (leg, 0, 0)),
-        "west":  (ship_ids[6], ship_ids[7], (hx-leg, hy, hz), (-leg, 0, 0)),
-    }
-    plan = {"stayer": {}, "mover": {}, "second_dest": {}}
-    for name, (stayer, mover, dest, vec) in groups.items():
-        confirm_move(player_token, stayer, *dest, jump_range_per_turn=jump_range)
-        mover_result = confirm_move(player_token, mover, *dest, jump_range_per_turn=jump_range)
-        second_dest = [dest[0]+vec[0], dest[1]+vec[1], dest[2]+vec[2]]
-        if "error" not in mover_result:
-            queue_command(player_token, mover, "after_arrival", "move",
-                          {"dest_x": second_dest[0], "dest_y": second_dest[1], "dest_z": second_dest[2],
-                           "jump_range_per_turn": jump_range})
-        plan["stayer"][name] = stayer
-        plan["mover"][name] = mover
-        plan["second_dest"][name] = second_dest
-    memory.update(plan)
-    memory["opening_dispatched"] = True
-    return memory
-
-def _turtle(player_id: int, player_token: str, config: dict, memory: dict) -> dict:
-    """
-    Hold still. Take no action, ever. The baseline no-op strategy from
-    docs/TODO.md's fleet-strategy taxonomy -- no config, no state, nothing
-    to dispatch. Already has one real data point: this is exactly what
-    "Player Two" did in the Diaspora mock-run comparison (a pure-idle
-    opponent), scoring 2240 vs. a burst-and-colonize opponent's 2574.
-    """
-    return memory
-
-def _burst_and_colonize(player_id: int, player_token: str, config: dict, memory: dict) -> dict:
-    """
-    Fast, simultaneous multi-direction departure, plus committing a fixed
-    fraction of the fleet to colonizing immediately rather than staying
-    mobile -- betting the colony production multiplier compounding over the
-    rest of the game beats full flexibility. Single-shot, single-phase: one
-    opening dispatch, nothing further to decide afterward (unlike
-    fan_out_consolidate/_fan_out, there's no second leg or scan-driven
-    follow-up here -- "burst" means everyone commits at once).
-    Config: leg_distance (default 3), jump_range_per_turn (default 1),
-    colonize_fraction (default 0.25 -- rounded, minimum 1 ship if there's
-    more than one to work with).
-    This is the exact pattern run as "Vincent" in the Diaspora mock-run
-    comparison earlier (6 ships fanned out, 2 colonized turn 1) -- the
-    winning side, 2574 vs. a turtle opponent's 2240.
-    """
-    if memory.get("dispatched"):
-        return memory
-    leg = config.get("leg_distance", 3)
-    jump_range = config.get("jump_range_per_turn", 1)
-    colonize_fraction = config.get("colonize_fraction", 0.25)
-
-    conn = get_connection(); cur = conn.cursor()
-    ship_ids = [r["id"] for r in cur.execute(
-        "SELECT id FROM organizations WHERE player_id=? AND org_type='ship' ORDER BY id",
-        (player_id,)).fetchall()]
-    if not ship_ids:
-        conn.close()
-        memory["dispatched"] = True
-        return memory
-    home = cur.execute("""SELECT s.coord_x,s.coord_y,s.coord_z FROM organizations o
-        JOIN sectors s ON s.id=o.sector_id WHERE o.id=?""", (ship_ids[0],)).fetchone()
-    conn.close()
-    hx, hy, hz = home["coord_x"], home["coord_y"], home["coord_z"]
-
-    num_colonize = max(1, round(len(ship_ids) * colonize_fraction)) if len(ship_ids) > 1 else 0
-    colonize_ids = ship_ids[:num_colonize]
-    fan_ids = ship_ids[num_colonize:]
-
-    directions = [(0, -leg, 0), (0, leg, 0), (leg, 0, 0), (-leg, 0, 0)]  # N, S, E, W
-    for i, ship_id in enumerate(fan_ids):
-        dx, dy, dz = directions[i % 4]
-        confirm_move(player_token, ship_id, hx+dx, hy+dy, hz+dz, jump_range_per_turn=jump_range)
-    for ship_id in colonize_ids:
-        set_mission(player_token, ship_id, "colonize")
-
-    memory["dispatched"] = True
-    memory["colonized"] = colonize_ids
-    memory["fanned_out"] = fan_ids
-    return memory
+from xsettlers_mcp.tools.organization_tools import set_org_scan_bearing
 
 def _frontier_map_stay_frosty(player_id: int, player_token: str, config: dict, memory: dict) -> dict:
     """
@@ -293,13 +184,32 @@ def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> d
     conn.close()
     return memory
 
+def _scripted(player_id: int, player_token: str, config: dict, memory: dict) -> dict:
+    """
+    Run whatever program this profile carries in its own config -- the entry
+    point for a program that has no name in the library, which is what an NPC
+    builder will produce. A named program from config/npc_programs/ arrives
+    here too, resolved by run_npc_decisions below.
+    Config: program (see engine/npc_script.py for the step format).
+    """
+    return run_program(player_id, player_token, config.get("program"), memory)
+
+# Code strategies: the ones that read the world and decide, which a program
+# cannot express (see engine/npc_script.py's module docstring on why that line
+# is drawn where it is rather than filled in). Everything scripted lives in
+# config/npc_programs/ instead.
 STRATEGIES = {
-    "fan_out_consolidate": _fan_out_consolidate,
-    "turtle": _turtle,
-    "burst_and_colonize": _burst_and_colonize,
     "frontier_map_stay_frosty": _frontier_map_stay_frosty,
     "fan_out": _fan_out,
+    "scripted": _scripted,
 }
+
+def strategy_names() -> list:
+    """Every strategy_name that can be assigned: code strategies plus the named
+    programs. This union is the contract GameHouse validates a roster against
+    and the field scripts/run_tournament.py plays, so a strategy moving from
+    Python into YAML doesn't change what either of them sees."""
+    return sorted(set(STRATEGIES) | set(load_programs()))
 
 def run_npc_decisions():
     """
@@ -308,6 +218,10 @@ def run_npc_decisions():
     begins. Unknown strategy_name values are skipped rather than raising --
     a profile pointing at a since-removed/renamed strategy shouldn't crash
     the whole turn for every player.
+
+    A name is resolved against the code strategies first, then the program
+    library; a named program runs through the same scripted runner as a
+    profile carrying its own inline program.
     """
     conn = get_connection(); cur = conn.cursor()
     npcs = cur.execute("""
@@ -317,13 +231,19 @@ def run_npc_decisions():
     """).fetchall()
     conn.close()
 
+    programs = load_programs()
     for row in npcs:
-        strategy = STRATEGIES.get(row["strategy_name"])
-        if strategy is None:
-            continue
+        name = row["strategy_name"]
         config = json.loads(row["config"] or "{}")
         memory = json.loads(row["memory"] or "{}")
-        memory = strategy(row["player_id"], row["player_token"], config, memory)
+        strategy = STRATEGIES.get(name)
+        if strategy is not None:
+            memory = strategy(row["player_id"], row["player_token"], config, memory)
+        elif name in programs:
+            memory = run_program(row["player_id"], row["player_token"],
+                                 programs[name], memory)
+        else:
+            continue
         conn = get_connection()
         conn.execute("UPDATE npc_profiles SET memory=? WHERE player_id=?",
                      (json.dumps(memory), row["player_id"]))

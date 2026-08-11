@@ -59,64 +59,71 @@ def test_unknown_strategy_name_is_skipped_without_crashing():
     assign_npc_profile(pid, "does_not_exist")
     run_npc_decisions()  # must not raise
 
-def test_fan_out_strategy_noop_with_fewer_than_eight_ships():
-    """Fewer than 8 ships means the 4-direction/2-ships-per-direction plan
-    doesn't fit -- the strategy marks itself done without acting, rather than
-    IndexError-ing or retrying every turn forever."""
+def test_fan_out_consolidate_with_a_short_fleet_moves_only_the_ships_it_has():
+    """The Python original required 8 ships and bailed entirely below that.
+    A program has no such all-or-nothing rule: a slice simply selects what
+    exists, so a 3-ship fleet gets the first three directions and nothing
+    errors. Deliberate divergence, recorded here rather than left implicit --
+    it cannot change the tournament result, where every fleet is 8 ships."""
     pid = seed_player()
     sid = seed_sector(25, 25, 0)
     _seed_fleet(pid, sid, 3)
     assign_npc_profile(pid, "fan_out_consolidate")
     run_npc_decisions()
     conn = get_connection()
-    orgs = conn.execute("SELECT sector_id FROM organizations WHERE player_id=?", (pid,)).fetchall()
-    conn.close()
-    assert all(o["sector_id"] == sid for o in orgs)
-    assert _memory(pid)["opening_dispatched"] is True
-
-def test_fan_out_dispatches_opening_moves_for_eight_ships():
-    pid = seed_player()
-    sid = seed_sector(25, 25, 0)
-    _seed_fleet(pid, sid, 8)
-    assign_npc_profile(pid, "fan_out_consolidate",
-                       config={"leg_distance": 3, "jump_range_per_turn": 1})
-    run_npc_decisions()
-    conn = get_connection()
-    orgs = conn.execute("SELECT sector_id, mission FROM organizations WHERE player_id=?", (pid,)).fetchall()
+    orgs = conn.execute("SELECT sector_id, mission FROM organizations WHERE player_id=?",
+                        (pid,)).fetchall()
     conn.close()
     assert all(o["sector_id"] == -1 and o["mission"] == "move" for o in orgs)
-    memory = _memory(pid)
-    assert memory["opening_dispatched"] is True
-    assert set(memory["mover"].keys()) == {"north", "south", "east", "west"}
-    # Second leg is now driven by the ship's log, not memory polling: each
-    # mover should have an after_arrival 'move' command queued for its
-    # second_dest, resolving one turn after arrival_turn (distance 3 at
-    # jump_range 1 => arrival_turn 0+3+1=4, so resolve_turn=5).
+    assert _memory(pid)["dispatched"] is True
+
+def test_fan_out_consolidate_dispatches_paired_opening_moves_for_eight_ships():
+    """Two ships per direction on leg one, and only the second of each pair
+    (ships at index 1, 3, 5, 7) carrying a queued second leg."""
+    pid = seed_player()
+    sid = seed_sector(25, 25, 0)
+    ship_ids = _seed_fleet(pid, sid, 8)
+    assign_npc_profile(pid, "fan_out_consolidate")
+    run_npc_decisions()
+
     conn = get_connection()
+    orgs = conn.execute("SELECT sector_id, mission FROM organizations WHERE player_id=?",
+                        (pid,)).fetchall()
+    aq = {r["org_id"]: (r["dest_x"], r["dest_y"], r["dest_z"]) for r in conn.execute(
+        "SELECT org_id, dest_x, dest_y, dest_z FROM arrival_queue").fetchall()}
     queued = {r["org_id"]: r for r in conn.execute(
         "SELECT org_id,trigger_phase,action,resolve_turn,params FROM org_command_queue").fetchall()}
     conn.close()
-    mover_ids = set(memory["mover"].values())
-    assert set(queued.keys()) == mover_ids
-    for mover_id in mover_ids:
-        row = queued[mover_id]
+
+    assert all(o["sector_id"] == -1 and o["mission"] == "move" for o in orgs)
+    # Pairs share a destination: north (+y), south (-y), east (+x), west (-x)
+    # at leg_distance 3 from the home sector at (25,25,0).
+    assert aq[ship_ids[0]] == aq[ship_ids[1]] == (25, 28, 0)
+    assert aq[ship_ids[2]] == aq[ship_ids[3]] == (25, 22, 0)
+    assert aq[ship_ids[4]] == aq[ship_ids[5]] == (28, 25, 0)
+    assert aq[ship_ids[6]] == aq[ship_ids[7]] == (22, 25, 0)
+
+    movers = {ship_ids[1], ship_ids[3], ship_ids[5], ship_ids[7]}
+    assert set(queued) == movers, "only one ship per pair carries a second leg"
+    for org_id in movers:
+        row = queued[org_id]
         assert row["trigger_phase"] == "after_arrival"
         assert row["action"] == "move"
+        # distance 3 at jump_range 1 => arrival_turn 0+3+1 = 4, fires one later
         assert row["resolve_turn"] == 5
 
-def test_end_of_turn_automatically_drives_npc_through_both_legs():
+def test_end_of_turn_automatically_drives_the_program_through_both_legs():
     """
     The gap flagged in docs/TODO.md's NPC scoping note: player2_policy.py had
-    to be invoked manually. Here nothing but end_of_turn() itself is called
-    -- proving the strategy fires on its own, first for the opening moves and
-    later (once its own ships have actually arrived and the ship's log's
-    after_arrival phase fires, one turn later) for the second-leg jump.
+    to be invoked manually. Here nothing but end_of_turn() itself is called --
+    proving a scripted strategy fires on its own, first for the opening moves
+    and later (once its ships have arrived and the ship's log's after_arrival
+    phase fires, one turn later) for the second-leg jump.
     """
     pid = seed_player()
     sid = seed_sector(25, 25, 0)
     ship_ids = _seed_fleet(pid, sid, 8)
-    assign_npc_profile(pid, "fan_out_consolidate",
-                       config={"leg_distance": 3, "jump_range_per_turn": 1})
+    assign_npc_profile(pid, "fan_out_consolidate")
 
     end_of_turn()  # turn 0: opening moves dispatched by the NPC step itself
     conn = get_connection()
@@ -128,19 +135,23 @@ def test_end_of_turn_automatically_drives_npc_through_both_legs():
     for _ in range(4):  # arrival resolves (turn 4), then after_arrival fires (turn 5)
         end_of_turn()
 
-    memory = _memory(pid)
     conn = get_connection()
     queued = conn.execute("SELECT COUNT(*) AS n FROM org_command_queue").fetchone()
     aq = {r["org_id"]: (r["dest_x"], r["dest_y"], r["dest_z"])
           for r in conn.execute("SELECT org_id, dest_x, dest_y, dest_z FROM arrival_queue").fetchall()}
     conn.close()
     assert queued["n"] == 0  # one-shot: dispatched and deleted, nothing left queued
-    mover_ids = set(memory["mover"].values())
-    assert mover_ids <= set(aq.keys())  # movers are in transit again, toward their second leg
-    for name, mover_id in memory["mover"].items():
-        assert list(aq[mover_id]) == memory["second_dest"][name]
-    stayer_ids = set(memory["stayer"].values())
-    assert stayer_ids.isdisjoint(aq.keys())  # stayers were never re-dispatched
+
+    movers = {ship_ids[1], ship_ids[3], ship_ids[5], ship_ids[7]}
+    stayers = {ship_ids[0], ship_ids[2], ship_ids[4], ship_ids[6]}
+    assert movers <= set(aq), "movers are in transit again, toward their second leg"
+    assert stayers.isdisjoint(aq), "stayers were never re-dispatched"
+    # Leg two continues the same direction from where leg one landed: the
+    # north mover went to (25,28,0) and pushes on to (25,31,0). That the
+    # offset resolves against the landing sector, not the home sector, is
+    # exactly what the relative move form buys.
+    assert aq[ship_ids[1]] == (25, 31, 0)
+    assert aq[ship_ids[7]] == (19, 25, 0)
 
 # --- turtle ---
 
@@ -162,26 +173,24 @@ def test_burst_and_colonize_dispatches_and_colonizes_on_first_call():
     pid = seed_player()
     sid = seed_sector(25, 25, 0)
     ship_ids = _seed_fleet(pid, sid, 8)
-    for sid_ship in ship_ids:
-        seed_pod(sid_ship, task="produce_energy", storage_current=100.0)
-    assign_npc_profile(pid, "burst_and_colonize",
-                       config={"leg_distance": 3, "jump_range_per_turn": 1, "colonize_fraction": 0.25})
+    for ship in ship_ids:
+        seed_pod(ship, task="produce_energy", storage_current=100.0)
+    assign_npc_profile(pid, "burst_and_colonize")
     run_npc_decisions()
 
-    memory = _memory(pid)
-    assert memory["dispatched"] is True
-    assert len(memory["colonized"]) == 2  # round(8 * 0.25)
-    assert len(memory["fanned_out"]) == 6
-
+    assert _memory(pid)["dispatched"] is True
     conn = get_connection()
     orgs = {r["id"]: r for r in conn.execute(
-        "SELECT id, sector_id, mission, is_mobile FROM organizations WHERE player_id=?", (pid,)).fetchall()}
+        "SELECT id, sector_id, mission, is_mobile FROM organizations WHERE player_id=?",
+        (pid,)).fetchall()}
     conn.close()
-    for oid in memory["colonized"]:
+
+    # A quarter of an 8-ship fleet stays home and converts; the rest scatter.
+    for oid in ship_ids[:2]:
         assert orgs[oid]["mission"] == "colonize"
-        assert orgs[oid]["sector_id"] == sid  # colonizing ships never moved
+        assert orgs[oid]["sector_id"] == sid, "colonizing ships never moved"
         assert orgs[oid]["is_mobile"] == 0
-    for oid in memory["fanned_out"]:
+    for oid in ship_ids[2:]:
         assert orgs[oid]["sector_id"] == -1  # in transit
         assert orgs[oid]["mission"] == "move"
 
@@ -189,25 +198,32 @@ def test_burst_and_colonize_only_dispatches_once():
     pid = seed_player()
     sid = seed_sector(25, 25, 0)
     ship_ids = _seed_fleet(pid, sid, 4)
-    for sid_ship in ship_ids:
-        seed_pod(sid_ship, task="produce_energy", storage_current=100.0)
+    for ship in ship_ids:
+        seed_pod(ship, task="produce_energy", storage_current=100.0)
     assign_npc_profile(pid, "burst_and_colonize")
     run_npc_decisions()
     memory_after_first = _memory(pid)
     run_npc_decisions()  # must be a no-op the second time
     assert _memory(pid) == memory_after_first
 
-def test_burst_and_colonize_noop_fraction_with_a_single_ship():
-    """len(ship_ids) > 1 gates colonizing at all -- a lone ship always fans
-    out rather than being forced to colonize by round()."""
+def test_burst_and_colonize_with_a_single_ship_colonizes_it():
+    """Documented divergence from the deleted Python version, which sized the
+    colonizing cohort as round(len(ships) * colonize_fraction) and gated it on
+    having more than one ship, so a lone ship always fanned out. A program
+    names a fixed slice instead, and slice [0,2] over a 1-ship fleet selects
+    that ship. Fleet-size-relative selectors are deferred (docs/TODO.md), not
+    smuggled in -- and at the 8-ship fleet every scenario actually uses, the
+    two rules agree exactly."""
     pid = seed_player()
     sid = seed_sector(25, 25, 0)
-    _seed_fleet(pid, sid, 1)
+    ship_ids = _seed_fleet(pid, sid, 1)
+    seed_pod(ship_ids[0], task="produce_energy", storage_current=100.0)
     assign_npc_profile(pid, "burst_and_colonize")
     run_npc_decisions()
-    memory = _memory(pid)
-    assert memory["colonized"] == []
-    assert len(memory["fanned_out"]) == 1
+    conn = get_connection()
+    org = conn.execute("SELECT mission FROM organizations WHERE id=?", (ship_ids[0],)).fetchone()
+    conn.close()
+    assert org["mission"] == "colonize"
 
 # --- frontier_map_stay_frosty ---
 

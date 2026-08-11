@@ -312,3 +312,165 @@ def test_during_transit_dispatch_is_guarded_too():
     assert _queue_count() == 0
     alerts = _failure_alerts()
     assert len(alerts) == 1 and "KeyError" in alerts[0]["payload"]["error"]
+
+
+# --- Relative destinations (d_x/d_y/d_z) -------------------------------------
+# The absolute form pins an order to one starting position; the relative form
+# is resolved against wherever the org actually is when the command fires,
+# which is what lets the same authored order be reused from any home sector
+# (see engine/npc_script.py).
+
+def test_queue_command_rejects_mixing_absolute_and_relative_destinations():
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(0, 0, 0))
+    result = queue_command("U_P1", ship, "at_turn", "move",
+                           {"dest_x": 5, "dest_y": 0, "dest_z": 0, "d_x": 1, "d_y": 0, "d_z": 0},
+                           turn=2)
+    assert "error" in result
+    assert "not both" in result["error"]
+
+def test_queue_command_requires_all_three_relative_offsets():
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(0, 0, 0))
+    result = queue_command("U_P1", ship, "at_turn", "move", {"d_x": 3}, turn=2)
+    assert "error" in result
+    assert "d_y" in result["error"] and "d_z" in result["error"]
+
+def test_relative_move_resolves_against_position_at_fire_time():
+    """The org moves between queueing and firing, so an absolute order and a
+    relative one would land in different places -- that difference is the point."""
+    p1 = seed_player()
+    seed_sector(0, 0, 0); seed_sector(4, 0, 0)
+    ship = seed_ship(p1, seed_sector(0, 0, 0))
+    confirm_move("U_P1", ship, 4, 0, 0, jump_range_per_turn=4)  # arrival_turn = 0+1+1 = 2
+    queue_command("U_P1", ship, "after_arrival", "move", {"d_x": 3, "d_y": 0, "d_z": 0})
+
+    for _ in range(3):  # land at (4,0,0) on turn 2, then fire after_arrival on turn 3
+        end_of_turn()
+
+    conn = get_connection()
+    aq = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?",
+                      (ship,)).fetchone()
+    conn.close()
+    # 4+3, not 0+3: resolved from where the ship landed, not where it started.
+    assert (aq["dest_x"], aq["dest_y"], aq["dest_z"]) == (7, 0, 0)
+    assert _queue_count() == 0
+
+def test_relative_move_off_the_edge_is_contained_as_a_failure():
+    """Negative coordinates can't be caught at queue time for the relative form
+    -- the origin isn't known yet -- so the fire-time guard has to hold."""
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(1, 1, 1))
+    result = queue_command("U_P1", ship, "at_turn", "move",
+                           {"d_x": -5, "d_y": 0, "d_z": 0}, turn=1)
+    assert result["ok"] is True, "valid at queue time -- the origin is still unknown"
+
+    end_of_turn(); end_of_turn()
+
+    org = _org(ship)
+    assert org["sector_id"] != -1, "never departed"
+    assert _queue_count() == 0
+    alerts = _failure_alerts()
+    assert len(alerts) == 1
+    assert "negative indices" in alerts[0]["payload"]["error"]
+
+
+# --- colonize / aim_scan actions ---------------------------------------------
+
+def _org_row(org_id):
+    conn = get_connection()
+    row = conn.execute("""SELECT org_type, mission, is_mobile,
+                                 scan_offset_x, scan_offset_y, scan_offset_z
+                          FROM organizations WHERE id=?""", (org_id,)).fetchone()
+    conn.close(); return row
+
+def _refusals():
+    conn = get_connection()
+    rows = [dict(r) for r in conn.execute(
+        """SELECT payload FROM events WHERE event_type='alert.queued_command_refused'
+           ORDER BY id""").fetchall()]
+    conn.close()
+    for row in rows:
+        row["payload"] = json.loads(row["payload"])
+    return rows
+
+def test_queued_colonize_commits_the_ship_when_it_can_pay():
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(0, 0, 0, energy=500.0))
+    seed_pod(ship, task="produce_energy", storage_capacity=200.0, storage_current=120.0)
+    result = queue_command("U_P1", ship, "at_turn", "colonize", {}, turn=1)
+    assert result["ok"] is True
+
+    end_of_turn(); end_of_turn()
+
+    org = _org_row(ship)
+    assert org["mission"] == "colonize"
+    assert org["is_mobile"] == 0
+    conn = get_connection()
+    scheduled = conn.execute(
+        """SELECT resolve_at_turn FROM events
+           WHERE event_type='colonize_complete' AND subject_id=?""", (ship,)).fetchone()
+    conn.close()
+    assert scheduled is not None, "the 3-turn completion event must be scheduled"
+    # The sweep is due when resolve_turn <= current_turn+1, so an at_turn=1
+    # order fires during the pass where current_turn is still 0 -- and the
+    # completion is scheduled 3 turns from when it actually fired, not from
+    # the turn number the order named.
+    assert scheduled["resolve_at_turn"] == 0 + 3
+    assert _refusals() == []
+
+def test_queued_colonize_is_refused_not_failed_when_the_ship_cannot_pay():
+    """The order was valid when given; the ship simply doesn't have the energy
+    by the time it fires. That is an ordinary outcome, not a malformed order,
+    so it must not land in the same alert stream as a genuine defect."""
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(0, 0, 0, energy=0.0))
+    seed_pod(ship, task="idle", storage_capacity=100.0, storage_current=0.0)
+    assert queue_command("U_P1", ship, "at_turn", "colonize", {}, turn=1)["ok"] is True
+
+    end_of_turn(); end_of_turn()
+
+    org = _org_row(ship)
+    assert org["mission"] != "colonize", "left untouched"
+    assert org["is_mobile"] == 1
+    assert _queue_count() == 0, "one-shot -- refused orders are still consumed"
+    assert _failure_alerts() == [], "not a failure"
+    refusals = _refusals()
+    assert len(refusals) == 1
+    assert "Colonizing costs" in refusals[0]["payload"]["error"]
+
+def test_queued_aim_scan_points_the_org_sensors():
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(5, 5, 5))
+    result = queue_command("U_P1", ship, "at_turn", "aim_scan", {"bearing": "N2"}, turn=1)
+    assert result["ok"] is True
+
+    end_of_turn(); end_of_turn()
+
+    org = _org_row(ship)
+    # North is -y (see sector_tools.SCAN_BEARINGS), and "N2" reaches 2 sectors.
+    assert (org["scan_offset_x"], org["scan_offset_y"], org["scan_offset_z"]) == (0, -2, 0)
+    assert _queue_count() == 0
+
+def test_queue_command_rejects_an_out_of_range_aim_scan_at_queue_time():
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(5, 5, 5))
+    result = queue_command("U_P1", ship, "at_turn", "aim_scan",
+                           {"offset_x": 9, "offset_y": 0, "offset_z": 0}, turn=1)
+    assert "error" in result
+    assert "scan range" in result["error"]
+    assert _queue_count() == 0
+
+def test_queued_aim_scan_with_no_aim_clears_the_bearing():
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(5, 5, 5))
+    conn = get_connection()
+    conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2, scan_offset_z=0
+                    WHERE id=?""", (ship,))
+    conn.commit(); conn.close()
+
+    queue_command("U_P1", ship, "at_turn", "aim_scan", {}, turn=1)
+    end_of_turn(); end_of_turn()
+
+    org = _org_row(ship)
+    assert org["scan_offset_x"] is None and org["scan_offset_y"] is None

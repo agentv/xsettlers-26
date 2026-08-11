@@ -1,12 +1,8 @@
 from db.events import record_event
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED, POD_NOT_OWNED
-from engine.production import COLONIZATION_ENERGY_COST
-# _available_org_resource/_drain_org_resource are engine internals, imported
-# here so the colonization charge draws from an org's pooled stock by exactly
-# the same rule the turn engine uses for every other cost -- a second
-# implementation would be a second place for the pooling rule to drift.
-from engine.turn import (get_current_turn,
-                         _available_org_resource, _drain_org_resource)
+from engine.turn import get_current_turn
+from engine.missions import apply_colonize
+from engine.org_scanning import apply_set_org_scan_bearing
 from engine.ship_log import ACTIONS as SHIP_LOG_ACTIONS
 from engine.pod_tasking import resolve_aim, aim_status, apply_set_pod_task
 from xsettlers_mcp.tools.navigation_tools import confirm_move
@@ -77,47 +73,22 @@ def set_mission(sess, org_id: int, mission: str, params: dict = None) -> dict:
         return confirm_move(sess.player["player_token"], org_id,
                              params["dest_x"], params["dest_y"],
                              params["dest_z"], params.get("jump_range_per_turn", 1))
-    # Colonization is bought, not merely ordered. Checked before any event is
-    # recorded so a refused conversion leaves no trace at all -- the ship is
-    # untouched and the player can try again once it has fuelled up.
+    # Colonization is bought, not merely ordered, and every rule about that
+    # purchase lives in engine.missions.apply_colonize -- the same function
+    # the ship's log dispatches a queued 'colonize' through, so a scheduled
+    # conversion and a hand-ordered one cannot drift apart. It refuses a ship
+    # that cannot pay without writing any event, leaving no trace of the
+    # attempt.
     if mission == "colonize":
-        available_energy = _available_org_resource(cur, org_id, "energy")
-        if available_energy < COLONIZATION_ENERGY_COST:
-            return {"error": f"Colonizing costs {COLONIZATION_ENERGY_COST:g} energy; "
-                             f"this ship has {available_energy:g}",
-                    "required_energy": COLONIZATION_ENERGY_COST,
-                    "available_energy": available_energy}
+        return apply_colonize(cur, org_id, sess.player_id, org["sector_id"],
+                              get_current_turn(), params)
     record_event(
         event_type="mission.set",
         payload={"org_id": org_id, "mission": mission, "params": params or {}},
         actor_id=sess.player_id, subject_id=org_id, subject_type="organization")
-    if mission == "colonize":
-        resolve_turn = get_current_turn() + 3
-        record_event(
-            event_type="colonize_complete",
-            payload={"org_id": org_id, "sector_id": org["sector_id"],
-                     "energy_cost": COLONIZATION_ENERGY_COST},
-            actor_id=sess.player_id, subject_id=org_id, subject_type="organization",
-            resolve_at_turn=resolve_turn)
-        # Charge the whole conversion cost up front, at commitment rather than
-        # at completion. The ship is locked for the 3-turn transition with no
-        # cancel path, so there is nothing to refund and no way to dodge the
-        # bill by changing your mind -- and paying now means the player sees
-        # the hit while they can still reason about what caused it.
-        # Drained after the record_event calls, not before: record_event opens
-        # its own connection and commits, so an uncommitted write held on this
-        # one would collide with it.
-        _drain_org_resource(cur, org_id, "energy", COLONIZATION_ENERGY_COST)
-        cur.execute("UPDATE organizations SET mission=?, mission_params=?, is_mobile=0 WHERE id=?",
-                    (mission, json.dumps(params) if params else None, org_id))
-    else:
-        cur.execute("UPDATE organizations SET mission=?, mission_params=? WHERE id=?",
-                    (mission, json.dumps(params) if params else None, org_id))
-    result = {"ok": True, "org_id": org_id, "mission": mission}
-    if mission == "colonize":
-        result["energy_spent"] = COLONIZATION_ENERGY_COST
-        result["completes_at_turn"] = resolve_turn
-    return result
+    cur.execute("UPDATE organizations SET mission=?, mission_params=? WHERE id=?",
+                (mission, json.dumps(params) if params else None, org_id))
+    return {"ok": True, "org_id": org_id, "mission": mission}
 
 DURING_TRANSIT_ACTIONS = {"set_pod_task"}
 
@@ -158,15 +129,56 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     docstring told players they could pass.
     """
     if action == "move":
-        missing = [k for k in ("dest_x", "dest_y", "dest_z") if params.get(k) is None]
-        if missing:
+        absolute = [k for k in ("dest_x", "dest_y", "dest_z") if params.get(k) is not None]
+        relative = [k for k in ("d_x", "d_y", "d_z") if params.get(k) is not None]
+        if absolute and relative:
+            return None, {"error": "action='move' takes either dest_x/dest_y/dest_z "
+                                   "(absolute) or d_x/d_y/d_z (relative to wherever "
+                                   "the org is when the order fires), not both"}
+        if relative:
+            if len(relative) < 3:
+                missing = [k for k in ("d_x", "d_y", "d_z") if params.get(k) is None]
+                return None, {"error": f"action='move' requires params: {', '.join(missing)}"}
+            # No negative check here: a relative move's absolute destination
+            # depends on where the org ends up, which is unknowable now and is
+            # the whole point of the form. engine.ship_log.resolve_destination
+            # checks it at fire time instead.
+            return params, None
+        if len(absolute) < 3:
+            missing = [k for k in ("dest_x", "dest_y", "dest_z") if params.get(k) is None]
             return None, {"error": f"action='move' requires params: {', '.join(missing)}"}
         if any(params[k] < 0 for k in ("dest_x", "dest_y", "dest_z")):
             return None, {"error": "Destination coordinates cannot be negative "
                                    "-- space has no negative indices"}
         return params, None
 
-    # action == 'set_pod_task' (the only other entry in SHIP_LOG_ACTIONS)
+    if action == "colonize":
+        # Takes no params at all -- which ship is colonizing is the org the
+        # command is attached to, and where is wherever it happens to be
+        # standing when the order fires. Whether it can afford the conversion
+        # is deliberately NOT checked here: the answer now says nothing about
+        # the answer then, since the ship goes on producing and spending in
+        # between. engine.missions.apply_colonize decides at fire time and a
+        # refusal is logged as such (see db.events.record_command_refused).
+        return {}, None
+
+    if action == "aim_scan":
+        aiming = params.get("bearing") is not None or any(
+            params.get(c) is not None for c in ("offset_x", "offset_y", "offset_z"))
+        if not aiming:
+            return {}, None  # clears the org's aim
+        offset, err = resolve_aim(params.get("bearing"), params.get("offset_x"),
+                                  params.get("offset_y"), params.get("offset_z"))
+        if err:
+            return None, err
+        status = aim_status(org_id, offset)
+        if not status["in_range"]:
+            return None, {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
+                                   f"{status['scan_range']}", **status}
+        return {"offset_x": offset[0], "offset_y": offset[1], "offset_z": offset[2],
+                "bearing": status["bearing"]}, None
+
+    # action == 'set_pod_task' (the only remaining entry in SHIP_LOG_ACTIONS)
     pod_id, task = params.get("pod_id"), params.get("task")
     missing = [name for name, value in (("pod_id", pod_id), ("task", task)) if value is None]
     if missing:
@@ -220,11 +232,23 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
         required for this phase only) -- independent of any move, for orders
         that don't fit the arrival-relative phases at all (e.g. "on turn 7,
         jump somewhere else"). No in-transit requirement.
-    Action whitelist: 'move' (params: dest_x, dest_y, dest_z, optional
-    jump_range_per_turn -- same shape confirm_move itself takes) and
-    'set_pod_task' (params: pod_id, task, optionally bearing/offset_x/y/z --
-    same shape set_pod_task itself takes), valid for before_arrival/
-    after_arrival/at_turn; during_transit is restricted to set_pod_task only.
+    Action whitelist, all valid for before_arrival/after_arrival/at_turn
+    (during_transit is restricted to set_pod_task only):
+      - 'move' -- either dest_x/dest_y/dest_z (absolute, the same shape
+        confirm_move takes) or d_x/d_y/d_z (relative to wherever this org is
+        standing when the order fires), never both, plus optional
+        jump_range_per_turn. The relative form is what makes an order portable
+        between starting positions -- "three further out the way I'm heading"
+        rather than a fixed coordinate.
+      - 'set_pod_task' -- pod_id, task, optionally bearing/offset_x/y/z, same
+        shape set_pod_task itself takes.
+      - 'colonize' -- no params. Commits this ship to becoming a colony, at
+        whatever sector it occupies when the order fires. Alone among these,
+        it can be refused at fire time rather than failing: colonizing is paid
+        for in energy, and a ship that cannot pay when the moment arrives is
+        declined and left untouched (logged as alert.queued_command_refused).
+      - 'aim_scan' -- optionally bearing/offset_x/y/z, same shape
+        set_org_scan_bearing takes; pass none of them to clear the aim.
     If a player gives the org new orders before a before_arrival/after_arrival/
     at_turn command fires, the queued command is silently dropped rather than
     clobbering them (see engine.ship_log.dispatch_due_commands).
@@ -437,21 +461,14 @@ def set_org_scan_bearing(sess, org_id: int, bearing: str = None,
     if not org:
         return {"error": ORG_NOT_OWNED}
     if clearing:
-        cur.execute("""UPDATE organizations
-            SET scan_offset_x=NULL, scan_offset_y=NULL, scan_offset_z=NULL WHERE id=?""", (org_id,))
+        apply_set_org_scan_bearing(cur, org_id, sess.player_id, None, get_current_turn())
         return {"ok": True, "org_id": org_id, "name": org["name"], "cleared": True}
     status = aim_status(org_id, offset)
     if not status["in_range"]:
         return {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
                          f"{status['scan_range']}", **status}
-    record_event(
-        event_type="organization.scan_bearing_set",
-        payload={"org_id": org_id, "offset_x": offset[0], "offset_y": offset[1],
-                 "offset_z": offset[2], "bearing": status["bearing"]},
-        actor_id=sess.player_id, subject_id=org_id, subject_type="organization")
-    cur.execute("""UPDATE organizations
-        SET scan_offset_x=?, scan_offset_y=?, scan_offset_z=? WHERE id=?""",
-        (offset[0], offset[1], offset[2], org_id))
+    apply_set_org_scan_bearing(cur, org_id, sess.player_id, offset,
+                               get_current_turn(), bearing=status["bearing"])
     aimed = _aimed_sector(cur, org_id, offset)
     return {"ok": True, "org_id": org_id, "name": org["name"], "cleared": False,
             "aimed_at": list(aimed) if aimed else None, **status}

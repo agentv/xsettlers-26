@@ -1,0 +1,39 @@
+# Fan out in four directions, two ships per direction, then send one ship of
+# each pair a second leg further out while its partner holds the intermediate
+# sector. From there everyone settles in and produces.
+#
+# The oldest strategy here: ported from the prototype player2_policy.py, whose
+# second leg was a hand-rolled memory["second_leg_turn"] poll before the ship's
+# log existed to carry it. Scored 2296 in the 2026-08-10 round robin.
+#
+# The second leg is the reason the relative (d_x/d_y/d_z) move form exists: it
+# resolves against wherever the mover actually landed, so the same offsets
+# describe both legs and the program is not pinned to one home sector.
+name: fan_out_consolidate
+description: Two ships per cardinal direction; one of each pair pushes a second leg further out.
+program:
+  # Leg one: ships 0..7 in pairs -- 0,1 north; 2,3 south; 4,5 east; 6,7 west.
+  # North is +y here, matching the ported original. It disagrees with
+  # burst_and_colonize's orientation; the direction labels never mattered to
+  # either strategy, only that the fleet spreads, and changing it now would
+  # move the score.
+  - ships: {slice: [0, 8]}
+    when: now
+    action: move
+    repeat_each: 2
+    params:
+      - {d_x: 0,  d_y: 3,  d_z: 0}
+      - {d_x: 0,  d_y: -3, d_z: 0}
+      - {d_x: 3,  d_y: 0,  d_z: 0}
+      - {d_x: -3, d_y: 0,  d_z: 0}
+  # Leg two: the second ship of each pair (stride 2 from offset 1 -- ships 1,
+  # 3, 5, 7) continues the same direction one turn after landing, while the
+  # first of each pair stays where it is.
+  - ships: {slice: [0, 8], stride: 2, offset: 1}
+    when: after_arrival
+    action: move
+    params:
+      - {d_x: 0,  d_y: 3,  d_z: 0}
+      - {d_x: 0,  d_y: -3, d_z: 0}
+      - {d_x: 3,  d_y: 0,  d_z: 0}
+      - {d_x: -3, d_y: 0,  d_z: 0}

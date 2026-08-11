@@ -7,6 +7,7 @@ from engine.ship_log import dispatch_due_commands
 from engine.production import (get_production, get_consumption_recipe,
                                get_production_multiplier, ORG_UPKEEP_COST,
                                RESOURCE_CAPACITY_COLUMN, RESOURCE_STORAGE_COLUMN)
+from engine.scoring import score_for, player_standings
 from xsettlers_mcp.tools.sector_tools import get_scan_range
 
 TURN_LIMIT = int(os.getenv("TURN_LIMIT", 20))
@@ -478,8 +479,7 @@ def _snapshot_holdings(cur, turn: int, before_holdings: dict, production: dict, 
               f"goods={after['goods']:.1f} total={after['total']:.1f}")
         wasted = {r: max(0.0, produced.get(r, 0.0) - consumed.get(r, 0.0)
                          - (after[r] - before[r])) for r in ("energy", "food", "goods")}
-        score = (after["energy"] * weights.get("energy", 0) + after["food"] * weights.get("food", 0)
-                 + after["goods"] * weights.get("goods", 0))
+        score = score_for(after, weights)
         record_event_direct(cur, turn, "turn.snapshot", actor_id=pid, subject_id=pid,
             subject_type="player", payload={
                 "player_id": pid, "display_name": player["display_name"],
@@ -495,10 +495,12 @@ FINAL_SCORES_EVENT = "game.final_scores"
 def _calculate_final_scores() -> list:
     """
     Weighted game score per player: config/game_config.yaml's score_weights
-    applied to each player's total stored energy/food/goods, highest wins --
-    same formula xsettlers_mcp/tools/organization_tools.py's show_game_status
-    uses, so the winner here always matches what was checkable mid-game via
-    that tool.
+    applied to each player's total stored energy/food/goods, highest wins.
+
+    Both the ranking and the formula come from engine/scoring.py, which is
+    also what show_game_status calls, so the winner here matches what was
+    checkable mid-game via that tool by construction rather than by two
+    copies of an expression happening to stay in step.
 
     The result is PERSISTED as a `game.final_scores` event, not merely printed.
     A game whose outcome exists only in a server log is a game nobody can be
@@ -521,28 +523,7 @@ def _calculate_final_scores() -> list:
         return json.loads(existing["payload"])["standings"]
 
     weights = load_config().game.score_weights
-    cur.execute("""
-        SELECT p.id AS player_id, p.display_name,
-               SUM(pods.energy_stored) AS energy,
-               SUM(pods.food_stored) AS food,
-               SUM(pods.goods_stored) AS goods,
-               SUM(pods.storage_capacity) AS capacity
-        FROM players p
-        LEFT JOIN organizations o ON o.player_id = p.id
-        LEFT JOIN pods ON pods.org_id = o.id
-        GROUP BY p.id
-    """)
-    standings = []
-    for row in cur.fetchall():
-        energy, food, goods = row["energy"] or 0, row["food"] or 0, row["goods"] or 0
-        score = (energy * weights.get("energy", 0) + food * weights.get("food", 0)
-                 + goods * weights.get("goods", 0))
-        standings.append({"player_id": row["player_id"], "display_name": row["display_name"],
-                          "score": score, "energy": energy, "food": food, "goods": goods,
-                          "total": energy + food + goods, "capacity": row["capacity"] or 0})
-    standings.sort(key=lambda s: s["score"], reverse=True)
-    for rank, s in enumerate(standings, start=1):
-        s["rank"] = rank
+    standings = player_standings(cur, weights)
 
     final_turn = cur.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()["current_turn"]
     record_event_direct(cur, final_turn, FINAL_SCORES_EVENT,
@@ -567,7 +548,6 @@ def get_final_scores() -> dict:
                        (FINAL_SCORES_EVENT,)).fetchone()
     conn.close()
     return json.loads(row["payload"]) if row else None
-    return standings
 
 def _handle_colonize(cur, org, current_turn):
     """Resolve a matured colonize_complete event: flip org_type to 'colony' and log ship.colonized."""

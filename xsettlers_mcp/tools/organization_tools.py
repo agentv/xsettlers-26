@@ -9,6 +9,7 @@ from engine.production import (POD_PRODUCTION, get_production_multiplier,
 # implementation would be a second place for the pooling rule to drift.
 from engine.turn import (get_current_turn, get_next_tick_at, get_final_scores,
                          _available_org_resource, _drain_org_resource)
+from engine.scoring import player_standings
 from engine.ship_log import ACTIONS as SHIP_LOG_ACTIONS
 from engine.pod_tasking import resolve_aim, aim_status, apply_set_pod_task
 from xsettlers_mcp.tools.navigation_tools import confirm_move
@@ -823,38 +824,17 @@ def show_game_status(player_token: str) -> dict:
     next_tick_at = get_next_tick_at()
     weights = load_config().game.score_weights
 
-    cur.execute("""
-        SELECT p.id AS player_id, p.display_name,
-               SUM(pods.energy_stored) AS energy,
-               SUM(pods.food_stored) AS food,
-               SUM(pods.goods_stored) AS goods,
-               SUM(pods.energy_stored+pods.food_stored+pods.goods_stored) AS total,
-               SUM(pods.storage_capacity) AS capacity
-        FROM players p
-        LEFT JOIN organizations o ON o.player_id = p.id
-        LEFT JOIN pods ON pods.org_id = o.id
-        GROUP BY p.id""")
-    standings = []
-    for row in cur.fetchall():
-        total = row["total"] or 0
-        capacity = row["capacity"] or 0
-        energy, food, goods = row["energy"] or 0, row["food"] or 0, row["goods"] or 0
-        score = (energy * weights.get("energy", 0) + food * weights.get("food", 0)
-                 + goods * weights.get("goods", 0))
-        standings.append({
-            "player_id": row["player_id"],
-            "display_name": row["display_name"],
-            "energy": round(energy, 2),
-            "food": round(food, 2),
-            "goods": round(goods, 2),
-            "total": round(total, 2),
-            "capacity": round(capacity, 2),
-            "utilization": round(total / capacity * 100, 1) if capacity else 0.0,
-            "score": round(score, 2),
-        })
-    standings.sort(key=lambda s: s["score"], reverse=True)
-    for rank, s in enumerate(standings, start=1):
-        s["rank"] = rank
+    # Ranking and scoring both come from engine/scoring.py -- the same call
+    # _calculate_final_scores makes, so the standing shown here and the winner
+    # declared at game over cannot disagree. Rounding and utilization are
+    # added on top: those are presentation, and the scoring module
+    # deliberately returns raw figures (see its player_standings docstring).
+    standings = player_standings(cur, weights)
+    for s in standings:
+        capacity = s["capacity"]
+        s["utilization"] = round(s["total"] / capacity * 100, 1) if capacity else 0.0
+        for field in ("energy", "food", "goods", "total", "capacity", "score"):
+            s[field] = round(s[field], 2)
     conn.close()
 
     # Once the game is over this becomes the end-of-game scoreboard: the

@@ -51,31 +51,16 @@ def record_event_direct(cur, turn: int, event_type: str, actor_id=None,
         VALUES (NULL,?,?,?,?,?,?,?)
     """, (turn, seq, event_type, actor_id, subject_id, subject_type, json.dumps(payload or {})))
 
-def record_turn_snapshot(turn: int) -> int:
-    """Full-state snapshot at end of turn — the recovery checkpoint."""
-    conn = get_connection(); cur = conn.cursor()
-    payload = {
-        "turn": turn,
-        "players":       [dict(r) for r in cur.execute("SELECT * FROM players").fetchall()],
-        "organizations": [dict(r) for r in cur.execute("SELECT * FROM organizations").fetchall()],
-        "pods":          [dict(r) for r in cur.execute("SELECT * FROM pods").fetchall()],
-        "player_sectors":[dict(r) for r in cur.execute("SELECT * FROM player_sectors").fetchall()],
-    }
-    conn.close()
-    return record_event("turn.snapshot", payload)
-
-def get_events_since_turn(since_turn: int) -> list:
-    """All events after since_turn, ordered for replay."""
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT * FROM events WHERE turn>? ORDER BY turn,seq", (since_turn,))
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close(); return rows
-
-def get_last_snapshot() -> dict | None:
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("""SELECT * FROM events WHERE event_type='turn.snapshot'
-                   ORDER BY turn DESC,seq DESC LIMIT 1""")
-    row = cur.fetchone(); conn.close()
-    if not row: return None
-    result = dict(row); result["payload"] = json.loads(result["payload"])
-    return result
+# Removed 2026-08-11 (complexity audit): record_turn_snapshot(),
+# get_events_since_turn() and get_last_snapshot(). All three had zero callers
+# and zero tests since the initial commit -- speculative replay/recovery
+# scaffolding for a feature that was never built.
+#
+# record_turn_snapshot() was worse than merely unused. It wrote event_type
+# "turn.snapshot" -- the SAME type engine/turn.py's _snapshot_holdings() writes
+# live, every turn, for every player -- but with an incompatible payload (a
+# full dump of players/organizations/pods/player_sectors, versus the ledger's
+# per-player holdings+score+waste row). get_last_snapshot() read that type
+# back and would have handed a caller a ledger row while calling it a recovery
+# checkpoint. Rebuild both sides together, against one agreed payload, if
+# replay is ever actually wanted.

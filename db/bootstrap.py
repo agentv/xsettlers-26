@@ -4,9 +4,9 @@
 # config/loader.py's resolve_seats) -- so player count is a property of the
 # scenario, not of the service. There is no runtime player-join path; to
 # change who is playing, bootstrap a new database. roster_override (below)
-# is an explicit escape hatch for a future caller (e.g. a lobby) that
-# assembles seats dynamically instead of reading a scenario file; nothing
-# calls it yet.
+# is the escape hatch for a caller that assembles seats dynamically instead
+# of reading a scenario file -- xsettlers_mcp/gamehouse.py's start_session()
+# uses it for the GameHouse handoff.
 #
 # Which scenario gets bootstrapped is chosen at runtime via
 # xsettlers_mcp/game_select.py's select_scenario() -- see scenario_file/scenario_name/
@@ -45,6 +45,34 @@ def _starting_cargo_for_task(task: str, capacity: float, fill: float) -> dict:
             stored[RESOURCE_STORAGE_COLUMN[resource]] = capacity * fill
     return stored
 
+def _create_org(cur, org_type: str, name: str, player_id: int, sector_id: int,
+                pod_templates, is_mobile: int) -> int:
+    """
+    Create one organization and expand its pod templates into real pods.
+
+    Ships and the home colony carry an identical loadout (see
+    docs/player_guide.md's Outbreak section: "every organization -- each ship
+    and the home colony alike -- carries the same 6-pod loadout"), and the
+    template expansion was written out twice to say so. Saying it once is how
+    it stays true.
+    """
+    cur.execute("""INSERT INTO organizations
+        (org_type,name,player_id,sector_id,is_mobile,mission)
+        VALUES (?,?,?,?,?,'idle')""",
+        (org_type, name, player_id, sector_id, is_mobile))
+    org_id = cur.lastrowid
+    for pod_tmpl in pod_templates:
+        for _ in range(pod_tmpl.count):
+            cargo = _starting_cargo_for_task(pod_tmpl.task, pod_tmpl.storage_capacity,
+                                             pod_tmpl.starting_fill)
+            cur.execute("""INSERT INTO pods
+                (task,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
+                VALUES (?,?,?,?,?,?)""",
+                (pod_tmpl.task, org_id, pod_tmpl.storage_capacity,
+                 cargo["energy_stored"], cargo["food_stored"], cargo["goods_stored"]))
+    return org_id
+
+
 def bootstrap_game(config_path: str = None, scenario_file: str = None,
                    scenario_name: str = None, selected_by: str = None,
                    roster_override: list = None):
@@ -60,11 +88,19 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
 
     roster_override, if given, is a list of dicts (email, display_name,
     player_token, home_sector, optional is_npc) used instead of the
-    scenario's own participants. Escape hatch for a future lobby that
-    assembles seats dynamically (real players + NPC fill-in) rather than
-    reading a fixed YAML list. Not currently called by anything --
-    xsettlers_mcp/game_select.py's select_scenario() always uses the
-    scenario's participants.
+    scenario's own participants -- for a lobby that assembles seats
+    dynamically (real players + NPC fill-in) rather than reading a fixed YAML
+    list.
+
+    This is a live path, not a reserved one: xsettlers_mcp/gamehouse.py's
+    start_session() passes a roster_override for every GameHouse handoff, and
+    the game currently on the deployed Fly volume was bootstrapped through it
+    (its players are gamehouse-N@handoff). Both this docstring and the module
+    header above claimed nothing called it, which was true when written and
+    stopped being true on 2026-08-07; corrected 2026-08-11.
+
+    xsettlers_mcp/game_select.py's select_scenario() -- the other bootstrap
+    path -- passes no override and always uses the scenario's participants.
     """
     cfg  = load_config(config_path, scenario_override=scenario_file) if config_path \
            else load_config(scenario_override=scenario_file)
@@ -78,7 +114,6 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
 
     # 1. Seed players from the resolved seats -- identity and starting
     #    position travel together, so nothing downstream pairs lists by index.
-    seats = roster_override if roster_override is not None else cfg.seats
     if roster_override is not None:
         if len(roster_override) > cfg.game.max_players:
             raise ValueError(
@@ -88,6 +123,8 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
                       player_token=p["player_token"],
                       home_sector=list(p["home_sector"]),
                       is_npc=bool(p.get("is_npc", False))) for p in roster_override]
+    else:
+        seats = cfg.seats
     player_id_list = []
     for seat in seats:
         cur.execute("""INSERT INTO players
@@ -98,7 +135,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
 
     # 2. Create starting ships for each player
     sc = cfg.starting_configuration
-    for idx, (player_id, seat) in enumerate(zip(player_id_list, seats)):
+    for player_id, seat in zip(player_id_list, seats):
         home_sector_id = reveal_sector(cur, player_id, *tuple(seat.home_sector))
         # Home does not take the ordinary discovery roll -- it is seeded flat
         # and effectively bottomless (see loader.HOME_SECTOR_ENERGY), so a
@@ -113,46 +150,22 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
         for ship_num in range(sc.ships_per_player):
             # Short by default: a player says "S3", not "Ship-P1-03".
             # Unique per player, which is what makes a name referenceable.
-            ship_name = f"S{ship_num+1}"
-            cur.execute("""INSERT INTO organizations
-                (org_type,name,player_id,sector_id,is_mobile,mission)
-                VALUES ('ship',?,?,?,1,'idle')""",
-                (ship_name, player_id, home_sector_id))
-            org_id = cur.lastrowid
-            # Expand pod templates: each template has a count
-            for pod_tmpl in sc.pods_per_ship:
-                for _ in range(pod_tmpl.count):
-                    cargo = _starting_cargo_for_task(pod_tmpl.task,
-                                                        pod_tmpl.storage_capacity,
-                                                        pod_tmpl.starting_fill)
-                    cur.execute("""INSERT INTO pods
-                        (task,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
-                        VALUES (?,?,?,?,?,?)""",
-                        (pod_tmpl.task, org_id, pod_tmpl.storage_capacity,
-                         cargo["energy_stored"], cargo["food_stored"], cargo["goods_stored"]))
+            _create_org(cur, "ship", f"S{ship_num+1}", player_id, home_sector_id,
+                        sc.pods_per_ship, is_mobile=1)
         print(f"  Created {sc.ships_per_player} ships for player {player_id}.")
 
-    # 3. Optionally create a home colony -- same pod loadout as a ship (see
-    #    docs/player_guide.md's Outbreak section: "every organization -- each
-    #    ship and the home colony alike -- carries the same 6-pod loadout").
+    # 3. Optionally create a home colony -- same pod loadout as a ship.
+    #    A separate pass over the players rather than part of the loop above,
+    #    deliberately: that ordering gives every player's ships contiguous,
+    #    lower organization ids than any colony, and NPC strategies select
+    #    ships with ORDER BY id (see engine/npc.py). Folding the colony into
+    #    the loop above would renumber every org and silently change which
+    #    ship each strategy picks.
     if sc.home_colony:
-        for idx, (player_id, seat) in enumerate(zip(player_id_list, seats)):
+        for player_id, seat in zip(player_id_list, seats):
             home_sector_id = reveal_sector(cur, player_id, *tuple(seat.home_sector))
-            cur.execute("""INSERT INTO organizations
-                (org_type,name,player_id,sector_id,is_mobile,mission)
-                VALUES ('colony',?,?,?,0,'idle')""",
-                ("C1", player_id, home_sector_id))
-            colony_org_id = cur.lastrowid
-            for pod_tmpl in sc.pods_per_ship:
-                for _ in range(pod_tmpl.count):
-                    cargo = _starting_cargo_for_task(pod_tmpl.task,
-                                                        pod_tmpl.storage_capacity,
-                                                        pod_tmpl.starting_fill)
-                    cur.execute("""INSERT INTO pods
-                        (task,org_id,storage_capacity,energy_stored,food_stored,goods_stored)
-                        VALUES (?,?,?,?,?,?)""",
-                        (pod_tmpl.task, colony_org_id, pod_tmpl.storage_capacity,
-                         cargo["energy_stored"], cargo["food_stored"], cargo["goods_stored"]))
+            _create_org(cur, "colony", "C1", player_id, home_sector_id,
+                        sc.pods_per_ship, is_mobile=0)
 
     cur.execute("INSERT OR IGNORE INTO game_state (id,current_turn) VALUES (1,0)")
     cur.execute("""INSERT OR IGNORE INTO games (id,scenario_name,scenario_file,selected_by)

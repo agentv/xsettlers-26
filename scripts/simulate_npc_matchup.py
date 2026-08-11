@@ -40,6 +40,11 @@ def main():
                         help="Per-strategy config override, one --config group per strategy "
                              "(e.g. --config colonize_fraction=0.5 --config leg_distance=4). "
                              "Empty group ({}) if omitted for a given player.")
+    parser.add_argument("--json-out", default=None,
+                        help="Dump turn-by-turn holdings + final standings as JSON to this path, "
+                             "read from the same live connection this run already holds -- avoids "
+                             "a second process re-loading the SpatiaLite extension against this DB "
+                             "(observed to segfault when done repeatedly across a batch of runs).")
     args = parser.parse_args()
 
     if os.path.exists(args.db):
@@ -91,6 +96,36 @@ def main():
     print("=== Final standings ===")
     for player, strategy_name in zip(players, args.strategy):
         print(f"  Player {player['id']} ({player['display_name']}) ran: {strategy_name}")
+
+    if args.json_out:
+        import json
+        strategy_by_player = {p["id"]: s for p, s in zip(players, args.strategy)}
+        conn = get_connection()
+        snapshots = conn.execute("""
+            SELECT turn, subject_id AS player_id, payload FROM events
+            WHERE event_type='turn.snapshot' ORDER BY turn, subject_id
+        """).fetchall()
+        turn_data = [{
+            "turn": row["turn"], "player_id": row["player_id"],
+            "strategy": strategy_by_player[row["player_id"]],
+            **{k: json.loads(row["payload"])[k] for k in ("energy", "food", "goods", "total", "score")},
+        } for row in snapshots]
+        final = conn.execute("""
+            SELECT payload FROM events WHERE event_type='game.final_scores' ORDER BY id LIMIT 1
+        """).fetchone()
+        conn.close()
+        standings = json.loads(final["payload"])["standings"] if final else []
+        for s in standings:
+            s["strategy"] = strategy_by_player[s["player_id"]]
+
+        with open(args.json_out, "w") as f:
+            json.dump({
+                "scenario": scenario_name,
+                "players": [{"id": p["id"], "display_name": p["display_name"], "strategy": s}
+                            for p, s in zip(players, args.strategy)],
+                "turn_data": turn_data, "standings": standings,
+            }, f, indent=2)
+        print(f"\nWrote {args.json_out}")
 
 if __name__ == "__main__":
     main()

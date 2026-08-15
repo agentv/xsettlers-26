@@ -5,10 +5,11 @@ from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED, POD_NOT_OWNE
 from engine.turn import get_current_turn
 from engine.missions import apply_colonize
 from engine.movement import move_params_error
-from engine.org_scanning import apply_set_org_scan_bearing
 from engine.actions import ACTION_NAMES, DURING_TRANSIT_ACTIONS, TRIGGER_PHASES
-from engine.pod_tasking import (check_aim, check_range, is_aiming, resolve_aim,
-                                apply_set_pod_task)
+from engine.pod_tasking import apply_set_pod_task
+from engine.scanning import (apply_set_org_scan_bearing, apply_set_pod_scan_bearing,
+                             check_aim, check_range, is_aiming, resolve_aim,
+                             resolve_or_clear)
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 import json
 
@@ -39,6 +40,35 @@ def _aimed_sector(cur, org_id: int, offset):
     if not org:
         return None
     return (org["coord_x"] + offset[0], org["coord_y"] + offset[1], org["coord_z"] + offset[2])
+
+
+def _write_aim(sess, org_id: int, subject_id: int, offset, clearing: bool,
+               apply_aim, identity: dict):
+    """
+    The half of aiming a scanner that does not care what carries it: check the
+    range, write the aim, and report where it now points.
+
+    Scanning is scanning, whoever holds the equipment -- an org's own sensors
+    and a pod on the scan task take the same range check and return the same
+    shape, so both scan-bearing tools end here. What differs is only who the
+    aim is about: `apply_aim` is one of engine/scanning.py's two apply_*
+    functions (they share a signature), `subject_id` is the pod or org it
+    writes to, and `identity` names it in the response.
+
+    `org_id` is the org whose position the aim is measured from -- the org
+    itself, or a scan pod's parent.
+    """
+    if clearing:
+        apply_aim(sess.cur, subject_id, sess.player_id, None, get_current_turn())
+        return {"ok": True, **identity, "cleared": True}
+    status, err = check_range(org_id, offset)
+    if err:
+        return err
+    apply_aim(sess.cur, subject_id, sess.player_id, offset, get_current_turn(),
+              bearing=status["bearing"])
+    aimed = _aimed_sector(sess.cur, org_id, offset)
+    return {"ok": True, **identity, "cleared": False,
+            "aimed_at": list(aimed) if aimed else None, **status}
 
 
 @mcp_tool(
@@ -363,33 +393,16 @@ def set_pod_scan_bearing(sess, pod_id: int, bearing: str = None,
     the same bearing after it moves, with no re-aiming. Pass no bearing and no
     offset to clear the aim and stop paying for it.
     """
-    clearing = not is_aiming(bearing, offset_x, offset_y, offset_z)
-    offset = None
-    if not clearing:
-        offset, err = resolve_aim(bearing, offset_x, offset_y, offset_z)
-        if err:
-            return err
-    cur = sess.cur
+    offset, clearing, err = resolve_or_clear(bearing, offset_x, offset_y, offset_z)
+    if err:
+        return err
     pod = sess.own_pod(pod_id, columns="p.id, p.task, p.org_id")
     if not pod:
         return {"error": POD_NOT_OWNED}
     if pod["task"] != "scan":
         return {"error": "Pod is not on the scan task — set its task to 'scan' first"}
-    if clearing:
-        cur.execute("UPDATE pods SET task_params=NULL WHERE id=?", (pod_id,))
-        return {"ok": True, "pod_id": pod_id, "cleared": True}
-    status, err = check_range(pod["org_id"], offset)
-    if err:
-        return err
-    params = {"offset_x": offset[0], "offset_y": offset[1], "offset_z": offset[2]}
-    record_event(
-        event_type="pod.scan_bearing_set",
-        payload={"pod_id": pod_id, **params, "bearing": status["bearing"]},
-        actor_id=sess.player_id, subject_id=pod_id, subject_type="pod")
-    cur.execute("UPDATE pods SET task_params=? WHERE id=?", (json.dumps(params), pod_id))
-    aimed = _aimed_sector(cur, pod["org_id"], offset)
-    return {"ok": True, "pod_id": pod_id, "cleared": False,
-            "aimed_at": list(aimed) if aimed else None, **status}
+    return _write_aim(sess, pod["org_id"], pod_id, offset, clearing,
+                      apply_set_pod_scan_bearing, {"pod_id": pod_id})
 
 
 MAX_ORG_NAME_LENGTH = 24
@@ -470,26 +483,12 @@ def set_org_scan_bearing(sess, org_id: int, bearing: str = None,
     it moves -- set a pattern once and it travels with the hull. Pass neither
     to clear the aim and stop paying for it.
     """
-    clearing = not is_aiming(bearing, offset_x, offset_y, offset_z)
-    offset = None
-    if not clearing:
-        offset, err = resolve_aim(bearing, offset_x, offset_y, offset_z)
-        if err:
-            return err
-    cur = sess.cur
-    cur.execute("SELECT id, name FROM organizations WHERE id=? AND player_id=?",
-                (org_id, sess.player_id))
-    org = cur.fetchone()
-    if not org:
-        return {"error": ORG_NOT_OWNED}
-    if clearing:
-        apply_set_org_scan_bearing(cur, org_id, sess.player_id, None, get_current_turn())
-        return {"ok": True, "org_id": org_id, "name": org["name"], "cleared": True}
-    status, err = check_range(org_id, offset)
+    offset, clearing, err = resolve_or_clear(bearing, offset_x, offset_y, offset_z)
     if err:
         return err
-    apply_set_org_scan_bearing(cur, org_id, sess.player_id, offset,
-                               get_current_turn(), bearing=status["bearing"])
-    aimed = _aimed_sector(cur, org_id, offset)
-    return {"ok": True, "org_id": org_id, "name": org["name"], "cleared": False,
-            "aimed_at": list(aimed) if aimed else None, **status}
+    org = sess.own_org(org_id, columns="id, name")
+    if not org:
+        return {"error": ORG_NOT_OWNED}
+    return _write_aim(sess, org_id, org_id, offset, clearing,
+                      apply_set_org_scan_bearing,
+                      {"org_id": org_id, "name": org["name"]})

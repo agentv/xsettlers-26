@@ -1,7 +1,8 @@
 import json, math
 from db.events import record_event_direct, record_dispatch_failure
 from db.orgs import org_position
-from engine.pod_tasking import apply_set_pod_task, offset_from_params
+from engine.pod_tasking import apply_set_pod_task
+from engine.scanning import offset_from_params
 
 ABSOLUTE_KEYS = ("dest_x", "dest_y", "dest_z")
 RELATIVE_KEYS = ("d_x", "d_y", "d_z")

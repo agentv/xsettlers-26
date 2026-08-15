@@ -18,8 +18,8 @@ import json
 from db.events import record_dispatch_failure, record_command_refused
 from engine.movement import apply_confirm_move, resolve_move_destination
 from engine.missions import apply_colonize
-from engine.org_scanning import apply_set_org_scan_bearing
-from engine.pod_tasking import apply_set_pod_task, offset_from_params
+from engine.scanning import apply_set_org_scan_bearing, offset_from_params
+from engine.pod_tasking import apply_set_pod_task
 
 def _dispatch_move(cur, org_id: int, player_id: int, params: dict, current_turn: int):
     dest_x, dest_y, dest_z = resolve_destination(cur, org_id, params)

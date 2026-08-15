@@ -86,6 +86,10 @@ db/                  connection, schema, sectors, orgs, events
 
 `npc/` holds `strategies.py` (code policies), `script.py` (the YAML program runner), `programs.py` (the named-program library) and `profiles.py` (assignment). `profiles.py` is there rather than under `db/` because validating a program at assign time needs `script.validate_program` — filed under `db/` it would drag the whole NPC layer back underneath the tool layer.
 
+`views/` is a leaf: `format.py` turns one value into the string a player reads (`"E:20, F:20"`, `"P1-01"`, `"03:47"`), `render.py` lays those strings out as a markdown table or grid. Neither imports from `engine/`, `xsettlers_mcp/` or `npc/`. A report in `xsettlers_mcp/tools/organization_reports.py` owns the queries and decides which fields go in the `display` block; it does not do its own string formatting.
+
+`engine/scanning.py` owns everything about aiming — what a legal aim is, and both `apply_*` functions that write one. "Scanning is scanning, whoever carries the equipment" is a rule this codebase states repeatedly; it is implemented once, here, and resolved once in `engine/turn.py`'s `_resolve_scan`. Don't reintroduce a pod-specific copy.
+
 There is **no `gateway.py`** — no central pre-flight wrapper decides who may call what, despite what `docs/mcp_server_layer_design.md` sketches. Instead every gameplay tool carries the `@player_tool` decorator (`xsettlers_mcp/tools/session.py`), which resolves `player_token` against `players`, rejects an unknown token with "Player not found" before the tool body runs, and hands the tool an authenticated `PlayerSession` (open cursor + player row) so it never manages a connection itself. Before a scenario is selected `players` is empty, so every tool naturally rejects — that's the actual gate. `xsettlers_mcp/game_select.select_scenario()` (backed by `xsettlers_mcp/auth.authenticate()`) is the one real gatekeeping call. See `tests/test_gateway.py` for the end-to-end proof.
 
 Two tools call `PlayerSession.release()` to commit and close early before delegating to code that opens its own connection (`set_mission`→`confirm_move`, `declare_end_turn`→`end_of_turn()`); `db/connection.py` sets no busy_timeout, so a second writer fails immediately rather than waiting.
@@ -144,7 +148,7 @@ A strategy is **either a YAML program or a Python function**, and the split is d
 
 Programs are validated at **assign** time (`validate_program()`, called by `assign_npc_profile()`), not when they run — the same reasoning behind `queue_command`'s up-front param validation, one level up: a program is authored by a person and an error must reach them synchronously, not three turns later inside a clock tick. This matters because the whole point of the format is a future NPC builder (tracked in `docs/TODO.md`).
 
-The ship's log (`org_command_queue`, `engine/ship_log.py`) is what makes programs possible; its action whitelist is `{move, set_pod_task, colonize, aim_scan}`, each dispatching into an engine-layer `apply_*` helper (`engine/movement.py`, `engine/pod_tasking.py`, `engine/missions.py`, `engine/org_scanning.py`) rather than the self-connecting tool wrappers, which would deadlock inside the turn transaction. A `move` takes either absolute `dest_x/y/z` or **relative `d_x/d_y/d_z`**, resolved against the org's position at fire time — that's what makes a program portable between home sectors, and it's why the negative-coordinate guard lives at fire time for that form. `colonize` is the one action that can be *refused* rather than only succeeding or raising (a ship that can't pay when the order fires), which is why `alert.queued_command_refused` is a separate event type from `alert.queued_command_failed` — don't merge them.
+The ship's log (`org_command_queue`, `engine/ship_log.py`) is what makes programs possible; its action whitelist is `{move, set_pod_task, colonize, aim_scan}`, each dispatching into an engine-layer `apply_*` helper (`engine/movement.py`, `engine/pod_tasking.py`, `engine/missions.py`, `engine/scanning.py`) rather than the self-connecting tool wrappers, which would deadlock inside the turn transaction. A `move` takes either absolute `dest_x/y/z` or **relative `d_x/d_y/d_z`**, resolved against the org's position at fire time — that's what makes a program portable between home sectors, and it's why the negative-coordinate guard lives at fire time for that form. `colonize` is the one action that can be *refused* rather than only succeeding or raising (a ship that can't pay when the order fires), which is why `alert.queued_command_refused` is a separate event type from `alert.queued_command_failed` — don't merge them.
 
 ### Config
 
@@ -165,6 +169,10 @@ Adding a playable scenario is just adding a `config/game<N>.yaml` — no code ch
 `tests/conftest.py` provides an autouse `fresh_db` fixture (fresh SpatiaLite file per test via `monkeypatch.setenv("DB_PATH", ...)`) plus seed helpers (`seed_player`, `seed_sector`, `seed_ship`, `seed_pod`, `seed_player_sector`). It also auto-seeds an active `games` row so most tests don't need to think about scenario selection — tests that specifically exercise the pre-selection state (`test_game_select.py`) must `DELETE FROM games` to opt back out.
 
 Per `docs/TODO.md`'s TDD rule: **no new function without a corresponding test entry** — `test_navigation.py` and `test_organization.py` are the templates to follow.
+
+**A test file follows a subject, not a module.** `test_scanning.py` covers aiming, legality and end-of-turn resolution together, because an org's sensors and a scan pod are supposed to behave identically and only a shared file proves it. `test_economy.py` covers the production pass and pooled-resource rules together, because production is prorated by what the pool can pay for. Put a new test where its subject lives; don't add it to whichever file happens to import the function.
+
+`test_registry.py` is small but collects 67 of the suite's 382 tests — three parametrized sweeps over all 22 tools. That is one property asserted per tool, not redundancy, and it is what catches schema/signature drift. Leave it alone.
 
 ## Writing comments and docs
 

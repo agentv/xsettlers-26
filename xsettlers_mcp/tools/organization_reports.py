@@ -1,81 +1,39 @@
 """
 Read-only status reports for a player's organizations, and the public
 scoreboard. These three tools mutate nothing -- they read state and shape it
-for display -- and every formatting helper below exists only to serve them.
+for display.
 
 The `display` block each report returns is a presentation hint, not a
 rendering: it names which field holds the rows and which columns to show, so
 views/render.py can draw any of them with no per-tool special-casing. Raw
 fields are always present alongside, for a client that would rather build its
-own view.
+own view. Turning one value into the string a player reads is views/format.py's
+job; what this module owns is the queries and which fields go in the block.
 """
 from xsettlers_mcp.tools.registry import mcp_tool
 from config.loader import load_config
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED
-from engine.production import POD_PRODUCTION, get_production_multiplier
+from engine.production import org_production
 from engine.turn import get_next_tick_at, get_final_scores, TURN_LIMIT
 from engine.scoring import player_standings
 from engine.bearings import bearing_name
-from datetime import datetime, timezone
+from views.format import (RESOURCE_ABBREV, TASK_DISPLAY, resource_summary,
+                          scanner_footer, short_name, tasking_summary,
+                          tick_countdown)
 import json
 import os
 
-def _tick_countdown_display(next_tick_at: str | None) -> str:
-    """
-    "MM:SS" until the next clock tick, or "--:--" when there's nothing
-    ticking -- next_tick_at is None before any scenario is selected or
-    whenever the clock process isn't the one refreshing it (see
-    get_next_tick_at's docstring). Unlike scripts/status.py's _clock_status,
-    this needs no liveness probe: it runs inside the same process the clock
-    does, so a None value here already means "not currently running".
-    """
-    if not next_tick_at:
-        return "--:--"
-    next_dt = datetime.strptime(next_tick_at, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
-    remaining = max(0, round((next_dt - datetime.now(timezone.utc)).total_seconds()))
-    minutes, seconds = divmod(remaining, 60)
-    return f"{minutes:02d}:{seconds:02d}"
-
-# Presentation hints for status-report tools (show_civilization_status,
-# show_game_status): offloads simple, repetitive formatting work onto the
-# server rather than every client (LLM or not) reinventing it. Raw fields
-# are always still present alongside these -- a client that wants its own
-# presentation is free to ignore all of this and build from the raw data.
-RESOURCE_ABBREV = {"energy": "E", "food": "F", "goods": "G"}
-# Legacy bootstrap name prefixes ("Ship-P1-01", "Colony-P1"), stripped for
-# display. Current defaults are already short (S1..Sn, C1).
-_NAME_PREFIXES_TO_STRIP = ("Ship-", "Colony-")
-
-# Locked MVP cargo-table format for a single org's status (see show_organization):
-# columns are Task, Count, Energy, Food, Goods, Capacity -- Capacity as a
-# "current/total" string rather than a bare number. Richer presentations are
-# sketched in docs/ui_and_rendering_design.md; this is the one clients can
-# render today without inventing their own column order or capacity format.
-_TASK_DISPLAY = {"produce_energy": "Energy", "produce_food": "Food",
-                  "produce_goods": "Goods", "idle": "Idle", "scan": "Scan"}
-
-# Spelled-out compass names for the scanners footer (see _scanner_summary) --
-# distinct from the terse codes (SCAN_BEARINGS' "N"/"NE"/"N2") used everywhere
-# else, since this is a summary line meant to read in plain English rather
-# than a compact table cell.
-_BEARING_FULL_NAME = {
-    "N": "North", "NE": "Northeast", "E": "East", "SE": "Southeast",
-    "S": "South", "SW": "Southwest", "W": "West", "NW": "Northwest",
-    "N2": "North (2)", "E2": "East (2)", "S2": "South (2)", "W2": "West (2)",
-}
-
-def _scanner_summary(cur, org: dict) -> tuple[list, str | None]:
+def _scanners_on(cur, org: dict) -> list:
     """
     Every currently-active scanner on this org -- its own innate sensor (see
     organizations.scan_offset_*) plus any pod on the scan task -- as a list of
-    {"source", "bearing", "aimed"} dicts, and a ready-to-render footer line
-    ("Scans: North, South, Southeast") for clients that just want the text.
+    {"source", "bearing", "aimed"} dicts.
 
-    An aimed scanner shows its compass name (or the raw offset if it doesn't
-    land on one of the 12 named bearings); an unaimed scan pod still costs its
-    food and reveals nothing, so it's counted and flagged rather than silently
-    dropped (see set_pod_task's docstring). Returns ([], None) when the org
-    has no scanning capacity in use at all.
+    An aimed scanner shows its compass name, or the raw offset if it doesn't
+    land on one of the 12 named bearings. An unaimed scan pod still costs its
+    food and reveals nothing, so it is listed and flagged rather than silently
+    dropped (see set_pod_task's docstring). views.format.scanner_footer turns
+    this list into the one-line summary.
     """
     scanners = []
     if org["scan_offset_x"] is not None:
@@ -92,65 +50,7 @@ def _scanner_summary(cur, org: dict) -> tuple[list, str | None]:
             scanners.append({"source": f"pod {pod['id']}", "bearing": display, "aimed": True})
         else:
             scanners.append({"source": f"pod {pod['id']}", "bearing": None, "aimed": False})
-    if not scanners:
-        return [], None
-    aimed = [_BEARING_FULL_NAME.get(s["bearing"], s["bearing"]) for s in scanners if s["aimed"]]
-    unaimed = sum(1 for s in scanners if not s["aimed"])
-    footer = f"Scans: {', '.join(aimed)}" if aimed else "Scans: none aimed"
-    if unaimed:
-        footer += f" (+{unaimed} unaimed)"
-    return scanners, footer
-
-def _short_name(name: str) -> str:
-    """"Ship-P1-01" -> "P1-01", "Colony-P1" -> "P1" -- a ready-to-display
-    label so clients don't need their own name-shortening rule."""
-    for prefix in _NAME_PREFIXES_TO_STRIP:
-        if name.startswith(prefix):
-            return name[len(prefix):]
-    return name
-
-def _abbreviated(values: dict, key=lambda k: k) -> str:
-    """{"energy": 20.0, "food": 20.0} -> "E:20, F:20". `key` maps a dict key
-    onto a resource name, which is all that separates a resource-keyed dict
-    from a task-keyed one. Entries naming something that isn't a resource
-    (an idle or scan pod count) are left out rather than shown unabbreviated."""
-    return ", ".join(f"{RESOURCE_ABBREV[key(k)]}:{v:g}"
-                     for k, v in values.items() if key(k) in RESOURCE_ABBREV)
-
-def _tasking_summary(tasking: dict) -> str:
-    """{"produce_energy": 2, "produce_food": 2} -> "E:2, F:2"."""
-    return _abbreviated(tasking, key=lambda task: task.replace("produce_", ""))
-
-def _resource_summary(values: dict) -> str:
-    """{"energy": 20.0, "food": 20.0} -> "E:20, F:20"."""
-    return _abbreviated(values)
-
-def _org_production(tasking: dict, in_transit: bool, org_type: str = "ship") -> dict:
-    """
-    Gross per-turn production an org's current pod deployment would yield at
-    full input availability -- i.e. POD_PRODUCTION's base rate times how many
-    pods are tasked to each producing task, times the org-type multiplier
-    (see get_production_multiplier: colonies out-produce ships). This is the
-    "nameplate" figure, not a prediction of what end_of_turn() will actually
-    credit: it does not account for POD_CONSUMPTION_RECIPE input costs, org
-    upkeep, or storage caps, all of which can prorate the real output down
-    (see engine/turn.py).
-    One real-world exception is applied here: an org in transit is parked at
-    the sentinel sector (id=-1, permanently 0 energy_capacity), so its energy
-    production is always 0 regardless of tasking, matching engine/turn.py's
-    sector-capacity cap -- food/goods aren't sector-sourced and are unaffected.
-    """
-    multiplier = get_production_multiplier(org_type)
-    production = {}
-    for task, outputs in POD_PRODUCTION.items():
-        count = tasking.get(task, 0)
-        if not count:
-            continue
-        for resource, base_amount in outputs.items():
-            amount = (0.0 if (resource == "energy" and in_transit)
-                      else base_amount * count * multiplier)
-            production[resource] = production.get(resource, 0.0) + amount
-    return production
+    return scanners
 
 @mcp_tool(
     "Complete properties of one of the player's own organizations, "
@@ -170,15 +70,14 @@ def show_organization(sess, org_id: int) -> dict:
     can still be holding energy leftover from before a retask. Individual
     pods aren't listed separately; a ship with 6 pods reads as up to 3 task
     rows, not 6 pod rows.
-    display: presentation hints (see RESOURCE_ABBREV/_short_name/_TASK_DISPLAY
-    module docstring) -- a ready-to-render header ("<name> — at (x,y,z), <mission>")
+    display: presentation hints (see views/format.py) -- a ready-to-render header ("<name> — at (x,y,z), <mission>")
     and the locked MVP column order for the cargo table (Task, Count, Energy,
     Food, Goods, Capacity). Each task row also gets task_display (e.g.
     "produce_energy" -> "Energy") and capacity_display ("current/total", e.g.
     "200/200") alongside the raw fields -- all raw fields stay present, this
     is purely additive. `display.rows_key` ("tasks") names which top-level
     field holds the row list, for a generic renderer -- see views/render.py.
-    `scanners` (see _scanner_summary) lists every active scanner on this org
+    `scanners` (see _scanners_on) lists every active scanner on this org
     -- innate sensors plus scan-task pods -- and `display.footer`, when
     present, is that same information as a ready-to-render line below the
     table ("Scans: North, South, Southeast").
@@ -206,14 +105,14 @@ def show_organization(sess, org_id: int) -> dict:
         FROM pods WHERE org_id = ? GROUP BY task""", (org_id,))
     result["tasks"] = [dict(t) for t in cur.fetchall()]
     for t in result["tasks"]:
-        t["task_display"] = _TASK_DISPLAY.get(t["task"], t["task"])
+        t["task_display"] = TASK_DISPLAY.get(t["task"], t["task"])
         current = (t["energy"] or 0) + (t["food"] or 0) + (t["goods"] or 0)
         t["capacity_display"] = f"{current:.0f}/{t['capacity']:.0f}"
     status = (f"at ({org['coord_x']},{org['coord_y']},{org['coord_z']})"
               if org["sector_id"] != -1 else "in transit")
-    result["short_name"] = _short_name(org["name"])
+    result["short_name"] = short_name(org["name"])
     result["status"] = status
-    scanners, scanners_footer = _scanner_summary(cur, org)
+    scanners = _scanners_on(cur, org)
     result["scanners"] = scanners
     result["display"] = {
         "header": f"{org['name']} — {status}, {org['mission']}",
@@ -222,8 +121,9 @@ def show_organization(sess, org_id: int) -> dict:
         "columns": ["task_display", "count", "energy", "food", "goods", "capacity_display"],
         "column_labels": {"task_display": "Task", "capacity_display": "Utilization"},
     }
-    if scanners_footer:
-        result["display"]["footer"] = scanners_footer
+    footer = scanner_footer(scanners)
+    if footer:
+        result["display"]["footer"] = footer
     return result
 
 @mcp_tool(
@@ -250,7 +150,7 @@ def show_civilization_status(sess) -> dict:
       a tasking breakdown (pod count per task, e.g.
       {"produce_energy": 2, "produce_food": 2, "produce_goods": 2} -- this is
       the pod-deployment picture), and a production breakdown (see
-      _org_production -- gross per-turn output at full input availability,
+      engine.production.org_production -- gross per-turn output at full input availability,
       not netted against consumption costs). Ships in
       transit are marked with in_transit=True, destination sector, expected
       arrival turn, and turns_remaining as raw fields -- arrival_turn is the
@@ -264,7 +164,7 @@ def show_civilization_status(sess) -> dict:
       entry for a client that wants to build a richer status string itself.
     - Accumulated assets: aggregate energy, food, goods, and total across all
       pods, plus total capacity and percent_full.
-    - display: presentation hints (see RESOURCE_ABBREV/_short_name/_tasking_summary
+    - display: presentation hints (see views/format.py
       module docstring) -- every org also carries ready-to-use short_name,
       status, cargo_display, tasking_summary, and production_summary fields
       alongside the raw ones, so a client with no LLM in the loop doesn't have
@@ -305,21 +205,21 @@ def show_civilization_status(sess) -> dict:
                            (o["id"],)).fetchall()
         tasking = {t["task"]: t["n"] for t in tasks}
         in_transit = o["sector_id"] == -1
-        production = _org_production(tasking, in_transit, o["org_type"])
+        production = org_production(tasking, in_transit, o["org_type"])
         entry = {
             "id": o["id"],
             "name": o["name"],
-            "short_name": _short_name(o["name"]),
+            "short_name": short_name(o["name"]),
             "org_type": o["org_type"],
             "mission": o["mission"],
             "cargo": {"current": cargo["current"] or 0.0, "capacity": cargo["capacity"] or 0.0},
             "cargo_display": f"{cargo['current'] or 0.0:.0f}/{cargo['capacity'] or 0.0:.0f}",
             "storage": storage,
-            "storage_summary": _resource_summary(storage),
+            "storage_summary": resource_summary(storage),
             "tasking": tasking,
-            "tasking_summary": _tasking_summary(tasking),
+            "tasking_summary": tasking_summary(tasking),
             "production": production,
-            "production_summary": _resource_summary(production),
+            "production_summary": resource_summary(production),
         }
         if o["sector_id"] == -1:
             # In transit — fetch destination and arrival turn from arrival_queue.
@@ -463,7 +363,7 @@ def show_game_status(sess) -> dict:
         for s in standings:
             s.setdefault("utilization",
                          round(s["total"] / s["capacity"] * 100, 1) if s.get("capacity") else 0.0)
-    next_tick_countdown = _tick_countdown_display(next_tick_at)
+    next_tick_countdown = tick_countdown(next_tick_at)
     header = (f"FINAL — game over at turn {final['final_turn']} of {final['turn_limit']}. "
               f"Winner: {final['winner']}" if game_over
               else f"Turn {current_turn} of {TURN_LIMIT} ({next_tick_countdown})")

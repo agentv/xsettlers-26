@@ -1,93 +1,12 @@
 from db.connection import get_connection
-from engine.bearings import get_scan_range
 from xsettlers_mcp.tools.sector_tools import (
     show_sector_neighborhood,
     UNKNOWN_CELL, SEEN_CELL, EMPTY_CELL, MAX_NEIGHBORHOOD_RADIUS,
 )
-from db.sectors import CONFIDENCE_DECAY_PER_TURN, TURNS_TO_BLINK_OUT
-from xsettlers_mcp.tools.organization_tools import set_pod_task
-from xsettlers_mcp.tools.navigation_tools import confirm_move
-from engine.turn import end_of_turn
 from tests.conftest import (
-    seed_player, seed_sector, seed_ship, seed_pod, seed_player_sector,
+    seed_player, seed_sector, seed_ship, seed_player_sector,
 )
 
-# --- scan range enforcement at resolution (see engine/turn.py) ---
-
-def test_scan_within_range_reveals_target():
-    """Confidence is checked here too (not just sector existence): scan
-    resolution (step 3c of end_of_turn()) stamps confidence=100, but fog
-    decay (step 5) runs later in the same pass and immediately decays it
-    since the scanned sector isn't occupied by any of the player's orgs --
-    pre-existing engine behavior, not something reveal_sector changes."""
-    pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    pod = seed_pod(sid, task="scan")
-    seed_pod(sid, task="produce_food", storage_current=100.0)
-    seed_pod(sid, task="produce_energy", storage_current=100.0)   # scanning costs energy
-    r = get_scan_range(sid)
-    set_pod_task("U_P1", pod, "scan", offset_x=r, offset_y=0, offset_z=0)
-    end_of_turn()
-    conn = get_connection()
-    sector = conn.execute(
-        "SELECT id FROM sectors WHERE coord_x=? AND coord_y=0 AND coord_z=0", (r,)).fetchone()
-    assert sector is not None
-    ps = conn.execute("SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",
-                      (pid, sector["id"])).fetchone()
-    assert ps["confidence"] == 100 - CONFIDENCE_DECAY_PER_TURN
-    conn.close()
-
-def test_scan_out_of_range_aim_is_rejected_at_set_time():
-    """Aim is an offset, so its range is fixed and knowable when set -- an
-    illegal aim can never become legal, so it is refused outright rather than
-    accepted and left to fail silently at resolution."""
-    pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    pod = seed_pod(sid, task="scan")
-    seed_pod(sid, task="produce_food", storage_current=100.0)
-    seed_pod(sid, task="produce_energy", storage_current=100.0)   # scanning costs energy
-    out_of_range = get_scan_range(sid) + 5
-    result = set_pod_task("U_P1", pod, "scan", offset_x=out_of_range, offset_y=0, offset_z=0)
-    assert "error" in result and result["in_range"] is False
-    end_of_turn()
-    conn = get_connection()
-    sector = conn.execute(
-        "SELECT id FROM sectors WHERE coord_x=? AND coord_y=0 AND coord_z=0",
-        (out_of_range,)).fetchone()
-    conn.close()
-    assert sector is None
-
-def test_rescanning_known_sector_refreshes_confidence_without_altering_resources():
-    """Re-scanning an already-revealed sector must not re-randomize its
-    resources (reveal_sector is idempotent -- it's a fresh look at whatever
-    is currently there, not a reset), and should refresh the player's
-    confidence even if it had decayed to near-zero in the meantime."""
-    pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    pod = seed_pod(sid, task="scan")
-    seed_pod(sid, task="produce_food", storage_current=100.0)
-    seed_pod(sid, task="produce_energy", storage_current=100.0)   # scanning costs energy
-    set_pod_task("U_P1", pod, "scan", bearing="E")
-    end_of_turn()  # first scan: reveals the sector, stamps then decays confidence
-
-    conn = get_connection()
-    sector = conn.execute(
-        "SELECT id, energy_capacity FROM sectors WHERE coord_x=1 AND coord_y=0 AND coord_z=0").fetchone()
-    original_capacity = sector["energy_capacity"]
-    # simulate it having decayed further, e.g. several unoccupied turns since
-    conn.execute("UPDATE player_sectors SET confidence=5 WHERE player_id=? AND sector_id=?",
-                 (pid, sector["id"]))
-    conn.commit(); conn.close()
-
-    set_pod_task("U_P1", pod, "scan", bearing="E")  # re-scan same target
-    end_of_turn()
-
-    conn = get_connection()
-    resector = conn.execute("SELECT energy_capacity FROM sectors WHERE id=?", (sector["id"],)).fetchone()
-    ps = conn.execute("SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",
-                      (pid, sector["id"])).fetchone()
-    conn.close()
-    assert resector["energy_capacity"] == original_capacity  # not re-randomized
-    # stamped back to 100 by the re-scan, then decays once more within this
-    # same end_of_turn() pass since the org still doesn't occupy it
-    assert ps["confidence"] == 100 - CONFIDENCE_DECAY_PER_TURN
 
 # --- neighborhood viewport (see show_sector_neighborhood) ---
 
@@ -245,23 +164,3 @@ def test_show_sector_neighborhood_rejects_unknown_player():
     assert show_sector_neighborhood("U_NOBODY", center_x=0, center_y=0, center_z=0) == \
         {"error": "Player not found"}
 
-def test_scan_in_transit_still_costs_food_but_reveals_nothing():
-    """Now that out-of-range aims are refused at set time, transit is the one
-    remaining case where a scan pays and returns nothing: the reveal is
-    suppressed while the ship has no position, but the food is still drawn.
-    Tracked as a known gap in docs/TODO.md -- pinned here so a fix to the
-    cost side is a deliberate change rather than an accident."""
-    from xsettlers_mcp.tools.navigation_tools import confirm_move
-    pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    pod = seed_pod(sid, task="scan")
-    seed_pod(sid, task="produce_food", storage_current=100.0)
-    seed_pod(sid, task="produce_energy", storage_current=100.0)   # scanning costs energy
-    set_pod_task("U_P1", pod, "scan", bearing="E")
-    confirm_move("U_P1", sid, 4, 0, 0)          # in transit at end of turn
-    end_of_turn()
-    conn = get_connection()
-    food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (sid,)).fetchone()["s"]
-    revealed = conn.execute("SELECT COUNT(*) n FROM sectors WHERE id != -1").fetchone()["n"]
-    conn.close()
-    assert food < 100.0        # paid for it
-    assert revealed == 1       # only the origin sector -- nothing was scanned

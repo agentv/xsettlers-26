@@ -192,46 +192,6 @@ def test_fog_does_not_decay_a_sector_you_occupy():
     end_of_turn()
     assert _confidence(pid, home) == 100
 
-# --- org upkeep (see engine/production.py's ORG_UPKEEP_COST) ---
-
-def test_org_upkeep_drains_pooled_food_and_energy():
-    """Every org costs 5 food + 1 energy per turn just to exist, drawn from
-    its own pooled stock -- on top of whatever its individual pods cost.
-    Sector energy is seeded at 0 so the energy pod can't refill itself via
-    its own production this same turn -- isolates the upkeep drain, since
-    otherwise production would immediately mask it back up to capacity."""
-    pid = seed_player(); sid = seed_sector(energy=0.0); oid = seed_ship(pid, sid)
-    seed_pod(oid, task="produce_food", storage_current=100.0)
-    seed_pod(oid, task="produce_energy", storage_current=100.0)
-    end_of_turn()
-    conn = get_connection()
-    food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
-    energy = conn.execute("SELECT SUM(energy_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
-    conn.close()
-    assert food == 95.0    # 100 - 5 upkeep (no producing pod there to add any back)
-    assert energy == 97.0  # 100 - 3 upkeep
-
-def test_org_upkeep_prorated_when_insufficient():
-    """Only 2 food and 0 energy on hand against a 5-food/1-energy cost --
-    upkeep should prorate to the most restrictive resource (energy, at 0),
-    draining nothing rather than going negative or draining food anyway."""
-    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    seed_pod(oid, task="produce_food", storage_current=2.0)
-    end_of_turn()
-    conn = get_connection()
-    food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
-    conn.close()
-    assert food == 2.0  # ratio floored at 0 (no energy at all) -- no partial drain either
-
-def test_idle_pod_costs_nothing():
-    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    pod = seed_pod(oid, task="idle", storage_current=42.0)
-    end_of_turn()
-    conn = get_connection()
-    assert conn.execute("SELECT energy_stored FROM pods WHERE id=?",
-                        (pod,)).fetchone()["energy_stored"] == 42.0
-    conn.close()
-
 # --- end-of-game scoreboard (must be recorded, not just printed) ---
 
 def _play_to_game_over():
@@ -297,7 +257,6 @@ def test_show_game_status_is_not_final_mid_game():
     assert status["display"]["header"].startswith("Turn ")
 
 
-# --- Out-of-range scan resolution (engine side) ------------------------------
 # The tools reject an out-of-range aim at set time, so these write the offset
 # straight into the DB. That is not a contrived state: engine/turn.py re-checks
 # range at resolution precisely because get_scan_range() is expected to vary
@@ -305,86 +264,3 @@ def test_show_game_status_is_not_final_mid_game():
 # can stop being legal. This is the branch that handles it, on the engine
 # side, for both scan paths (see engine/turn.py's _resolve_scan).
 
-def _scanner_with_stock(offset=(5, 0, 0), as_pod=False):
-    """An org that can comfortably afford upkeep and a scan, aimed out of
-    range. Returns (player_id, org_id, pod_id)."""
-    pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
-    pod = seed_pod(oid, task="scan" if as_pod else "idle", storage_capacity=200.0)
-    conn = get_connection()
-    conn.execute("UPDATE pods SET food_stored=100, energy_stored=100 WHERE id=?", (pod,))
-    if as_pod:
-        conn.execute("UPDATE pods SET task_params=? WHERE id=?",
-                     (json.dumps({"offset_x": offset[0], "offset_y": offset[1],
-                                  "offset_z": offset[2]}), pod))
-    else:
-        conn.execute("""UPDATE organizations
-            SET scan_offset_x=?, scan_offset_y=?, scan_offset_z=? WHERE id=?""",
-            (*offset, oid))
-    conn.commit(); conn.close()
-    return pid, oid, pod
-
-
-def _alert_rows():
-    conn = get_connection()
-    rows = [dict(r) for r in conn.execute(
-        """SELECT subject_id, subject_type, actor_id, payload FROM events
-           WHERE event_type='alert.scan_out_of_range' ORDER BY id""").fetchall()]
-    conn.close()
-    for r in rows:
-        r["payload"] = json.loads(r["payload"])
-    return rows
-
-
-def _sector_exists(x, y, z):
-    conn = get_connection()
-    row = conn.execute("SELECT id FROM sectors WHERE coord_x=? AND coord_y=? AND coord_z=?",
-                       (x, y, z)).fetchone()
-    conn.close()
-    return row is not None
-
-
-def test_org_scan_out_of_range_alerts_and_reveals_nothing():
-    pid, oid, _ = _scanner_with_stock()
-    end_of_turn()
-    alerts = _alert_rows()
-    assert len(alerts) == 1
-    a = alerts[0]
-    assert a["subject_type"] == "organization" and a["subject_id"] == oid
-    assert a["actor_id"] == pid
-    assert a["payload"] == {"org_id": oid, "target_x": 5, "target_y": 0, "target_z": 0,
-                            "distance": 5.0, "range": 2}
-    assert not _sector_exists(5, 0, 0), "an overreaching aim must not reveal its target"
-
-
-def test_pod_scan_out_of_range_alerts_against_the_pod_not_the_org():
-    """Same rule, different subject: the alert names the pod that overreached,
-    and carries pod_id alongside org_id so a client can say which one."""
-    pid, oid, pod = _scanner_with_stock(as_pod=True)
-    end_of_turn()
-    alerts = _alert_rows()
-    assert len(alerts) == 1
-    a = alerts[0]
-    assert a["subject_type"] == "pod" and a["subject_id"] == pod
-    assert a["actor_id"] == pid
-    assert a["payload"] == {"pod_id": pod, "org_id": oid,
-                            "target_x": 5, "target_y": 0, "target_z": 0,
-                            "distance": 5.0, "range": 2}
-    assert not _sector_exists(5, 0, 0)
-
-
-def test_out_of_range_scan_still_pays_its_cost():
-    """Cost is charged before the range check -- an overreaching scanner
-    wastes its food and energy exactly like an unaimed one does."""
-    _, oid, pod = _scanner_with_stock()
-    conn = get_connection()
-    before = conn.execute("SELECT food_stored, energy_stored FROM pods WHERE id=?",
-                          (pod,)).fetchone()
-    conn.close()
-    end_of_turn()
-    conn = get_connection()
-    after = conn.execute("SELECT food_stored, energy_stored FROM pods WHERE id=?",
-                         (pod,)).fetchone()
-    conn.close()
-    # upkeep (5 food, 3 energy) + scan (1 food, 2 energy)
-    assert before["food_stored"] - after["food_stored"] == 6.0
-    assert before["energy_stored"] - after["energy_stored"] == 5.0

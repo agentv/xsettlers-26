@@ -90,9 +90,38 @@ def get_production(task: str) -> dict:
 def get_production_multiplier(org_type: str) -> float:
     """Output multiplier for a pod aboard an org of this type -- the single
     place the colony bonus is decided, so the live engine (engine/turn.py)
-    and the nameplate figure players see (organization_reports._org_production)
+    and the nameplate figure players see (engine.production.org_production)
     can never drift apart."""
     return COLONY_PRODUCTION_MULTIPLIER if org_type == "colony" else 1.0
 
 def get_consumption_recipe(task: str) -> dict:
     return POD_CONSUMPTION_RECIPE.get(task, {})
+
+def org_production(tasking: dict, in_transit: bool, org_type: str = "ship") -> dict:
+    """
+    Gross per-turn production an org's current pod deployment would yield at
+    full input availability -- POD_PRODUCTION's base rate times how many pods
+    are tasked to each producing task, times the org-type multiplier.
+
+    The "nameplate" figure, not a prediction of what end_of_turn() will
+    actually credit: it does not account for POD_CONSUMPTION_RECIPE input
+    costs, org upkeep, or storage caps, any of which can prorate the real
+    output down (see engine/turn.py).
+
+    One real-world exception is applied: an org in transit is parked at the
+    sentinel sector (id=-1, permanently 0 energy_capacity), so its energy
+    production is always 0 regardless of tasking, matching engine/turn.py's
+    sector-capacity cap. Food and goods aren't sector-sourced and are
+    unaffected.
+    """
+    multiplier = get_production_multiplier(org_type)
+    production = {}
+    for task, outputs in POD_PRODUCTION.items():
+        count = tasking.get(task, 0)
+        if not count:
+            continue
+        for resource, base_amount in outputs.items():
+            amount = (0.0 if (resource == "energy" and in_transit)
+                      else base_amount * count * multiplier)
+            production[resource] = production.get(resource, 0.0) + amount
+    return production

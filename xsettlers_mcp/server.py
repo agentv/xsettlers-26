@@ -29,8 +29,7 @@ from views.render import render_status
 
 # Sent once at MCP initialize, before the client sees any tool response --
 # the strongest available lever for steering how an LLM client displays what
-# this server sends back, short of controlling the client itself (see the
-# "default display" design conversation this codebase settled on 2026-08-05).
+# this server sends back, short of controlling the client itself.
 # Reinforced per-call by a matching directive block in call_tool()'s
 # markdown_view response (below) -- one nudge at session start, one on every
 # single call, since a long session can let a one-time instruction drift out
@@ -311,12 +310,6 @@ def _as_json(result) -> str:
     """
     Serialize a tool's return value as JSON.
 
-    Tools return plain dicts and lists, but this used to go over the wire as
-    `str(result)` -- Python's repr, with single quotes and True/None. An LLM
-    client reads that fine, which is why it survived this long; anything that
-    actually parses the payload cannot, since it is not JSON and never was.
-    Responses are JSON now, which is what a tool result is supposed to be.
-
     `default=str` is a backstop, not a design: every field a tool returns today
     is a primitive out of sqlite3, but a response that fails to serialize would
     fail the whole call, and losing type fidelity on some future stray value is
@@ -325,9 +318,9 @@ def _as_json(result) -> str:
     return json.dumps(result, default=str)
 
 # Streamable HTTP transport -- deployed on Fly.io (see fly.toml), which routes
-# network traffic to internal_port 8080; stdio (piped stdin/stdout) only works
-# for a client that spawns this process locally, which Slackbot calling a
-# remote Fly.io deployment cannot do.
+# network traffic to internal_port 8080. stdio (piped stdin/stdout) only works
+# for a client that spawns this process locally, which a remotely-hosted
+# deployment rules out.
 #
 # stateless=True: each HTTP request gets its own throwaway transport/session,
 # matching how every tool function already re-opens its own DB connection per
@@ -339,28 +332,24 @@ async def health(request):
 
 # SECURITY POSTURE: /mcp IS OPEN. There is no perimeter auth.
 #
-# The `Authorization: Bearer <MCP_SHARED_SECRET>` gate that used to sit here
-# was removed on 2026-07-31, deliberately. It was incompatible with the way
-# MCP clients actually connect: Claude's custom-connector flow accepts a
-# server URL and optionally OAuth, with no field for a static header, so a
-# connector pointed at this server could only ever receive a 401. Choosing
-# between "reachable from Slack" and "has a perimeter", the perimeter went.
+# A static `Authorization: Bearer` gate is not an option here: MCP client
+# connector flows accept a server URL and optionally OAuth, with no field for
+# a static header, so a connector pointed at a header-gated endpoint can only
+# ever receive a 401.
 #
-# What now stands between the internet and the game is `player_token` alone --
-# every tool resolves it against the roster and rejects anything else. That
-# was always the real gate; the shared secret only ever decided who could
-# knock. But note the two things that makes true right now, neither of them
-# comfortable:
+# What stands between the internet and the game is `player_token` alone --
+# every tool resolves it against the roster and rejects anything else. Note
+# the two things that makes true right now, neither of them comfortable:
 #
 #   1. The roster in config/game_config.yaml holds placeholder tokens
 #      (REPLACE_WITH_GENERATED_TOKEN_*) and that file is in a PUBLIC repo, as
 #      is this server's URL. Anyone who reads the repo can play as anyone.
 #   2. There is no rate limiting, so nothing slows a caller down.
 #
-# Accepted knowingly for now: the game holds nothing of value and nobody knows
-# it exists. Both facts stop being true the moment either changes. Real
-# hardening means OAuth on this endpoint plus per-player tokens that live
-# somewhere other than git -- see docs/TODO.md.
+# Accepted knowingly: the game holds nothing of value and nobody knows it
+# exists. Both facts stop being true the moment either changes. Real hardening
+# means OAuth on this endpoint plus per-player tokens that live somewhere
+# other than git -- see docs/TODO.md.
 
 class _MCPASGIApp:
     """
@@ -390,8 +379,8 @@ starlette_app = Starlette(
 )
 
 async def main():
-    # Tables only -- no seeding. bootstrap_game() now runs lazily, triggered
-    # by the first successful select_scenario() call. Until then, players is
+    # Tables only -- no seeding. bootstrap_game() runs lazily, triggered by
+    # the first successful select_scenario() call. Until then, players is
     # empty and every gameplay tool naturally rejects with "Player not found".
     init_schema()
     # Best-effort, not fatal: GAMEHOUSE_URL/XSETTLERS_PUBLIC_URL are both

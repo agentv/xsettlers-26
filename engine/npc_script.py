@@ -6,8 +6,8 @@ A *program* is a list of steps. Each step picks some of the player's ships and
 gives them one order, either immediately or queued on the ship's log for a
 later trigger. That is deliberately the whole vocabulary -- it covers openings
 (a fixed sequence of orders whose timing is computable in advance), which is
-what `turtle`, `fan_out_consolidate` and `burst_and_colonize` always were. It
-does not cover strategies that read the world and decide (`fan_out`'s
+what `turtle`, `fan_out_consolidate` and `burst_and_colonize` are. It does
+not cover strategies that read the world and decide (`fan_out`'s
 wait-for-every-scout-then-converge, `frontier_map_stay_frosty`'s endless
 land-and-redirect); those stay as Python functions in engine/npc.py and sit
 beside these in the same STRATEGIES registry. Adding conditions and repetition

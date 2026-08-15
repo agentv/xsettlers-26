@@ -27,11 +27,9 @@ def _starting_cargo_for_task(task: str, capacity: float, fill: float) -> dict:
     matching resource.
 
     `fill` comes from the scenario, not from here -- how rich a game starts
-    is a scenario characteristic (see config/loader.py's starting_fill).
-    It used to be hardcoded at 100%, which had two costs: every scenario was
-    equally rich whatever its intent, and a fleet at capacity cannot
-    accumulate, so production was pure waste and only consumption could move
-    the score.
+    is a scenario characteristic (see config/loader.py's starting_fill), so
+    that scenarios can differ in intent and so that a fleet does not begin at
+    capacity, where it cannot accumulate and production is pure waste.
 
     Note the floor this trades against: production costs other resources to
     run (engine/production.py's POD_CONSUMPTION_RECIPE -- produce_goods costs
@@ -52,9 +50,8 @@ def _create_org(cur, org_type: str, name: str, player_id: int, sector_id: int,
 
     Ships and the home colony carry an identical loadout (see
     docs/player_guide.md's Outbreak section: "every organization -- each ship
-    and the home colony alike -- carries the same 6-pod loadout"), and the
-    template expansion was written out twice to say so. Saying it once is how
-    it stays true.
+    and the home colony alike -- carries the same 6-pod loadout"), which is
+    why both go through this one expansion.
     """
     cur.execute("""INSERT INTO organizations
         (org_type,name,player_id,sector_id,is_mobile,mission)
@@ -94,10 +91,8 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
 
     This is a live path, not a reserved one: xsettlers_mcp/gamehouse.py's
     start_session() passes a roster_override for every GameHouse handoff, and
-    the game currently on the deployed Fly volume was bootstrapped through it
-    (its players are gamehouse-N@handoff). Both this docstring and the module
-    header above claimed nothing called it, which was true when written and
-    stopped being true on 2026-08-07; corrected 2026-08-11.
+    the game on the deployed Fly volume was bootstrapped through it (its
+    players are gamehouse-N@handoff).
 
     xsettlers_mcp/game_select.py's select_scenario() -- the other bootstrap
     path -- passes no override and always uses the scenario's participants.

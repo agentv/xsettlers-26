@@ -55,25 +55,24 @@ def _cell_marker(known: bool, ships: int, colonies: int, rivals: int) -> str:
     return marker[:2] + "!" if rivals else marker
 
 
-# Euclidean radius a scan can reach from the scanning org's sector. Raised
-# from 1 to 2 on 2026-07-31: at range 1 a Euclidean radius reaches only the
-# four orthogonal neighbours, because a diagonal is sqrt(2) ~= 1.41 > 1. That
-# reads as broken to a player who asked to scan the sector "just there" and
-# was refused. Range 2 reaches 12 sectors -- the 4 orthogonal, the 4 diagonals
-# (sqrt(2)), and the 4 two-out orthogonals -- which is the smallest radius
-# where a scan behaves the way people expect a scan to behave.
+# Euclidean radius a scan can reach from the scanning org's sector. 2 is the
+# smallest radius where a scan behaves the way people expect: at range 1 a
+# Euclidean radius reaches only the four orthogonal neighbours, since a
+# diagonal is sqrt(2) ~= 1.41 > 1, which reads as broken to a player refused
+# the sector "just there". Range 2 reaches 12 sectors -- the 4 orthogonal, the
+# 4 diagonals (sqrt(2)), and the 4 two-out orthogonals.
 SCAN_RANGE = 2
 
 
 # --- Scan bearings ------------------------------------------------------------
 # A scan is aimed by an OFFSET from the scanner's own sector, not by absolute
-# coordinates (2026-07-31). Sensors are mounted on the thing that carries them:
-# they look a fixed direction and distance from wherever it currently is, and a
-# ship flying away from a sector does not keep seeing it. Two consequences fall
-# out: a scan pattern survives a move with no re-aiming, and "in range" becomes
-# a permanent property of the offset rather than something that can silently
-# stop being true when the scanner moves -- so it is validated once, at set
-# time, instead of failing at resolution.
+# coordinates. Sensors are mounted on the thing that carries them: they look a
+# fixed direction and distance from wherever it currently is, and a ship flying
+# away from a sector does not keep seeing it. Two consequences fall out: a scan
+# pattern survives a move with no re-aiming, and "in range" is a permanent
+# property of the offset rather than something that can silently stop being
+# true when the scanner moves -- so it is validated once, at set time, instead
+# of failing at resolution.
 #
 # NORTH IS -Y. Chosen to match how the neighborhood map renders (y ascending
 # downward, so north is up on screen). Arbitrary but fixed; everything
@@ -113,9 +112,9 @@ def get_scan_range(org_id: int) -> int:
     return SCAN_RANGE
 
 
-# Note: `scan_sector` is no longer a player-callable action. Scanning is now
-# executed by the engine at end of turn for all pods on the `scan` task with a
-# valid target. See `engine/turn.py` for scan resolution logic.
+# Scanning is not a player-callable action: the engine resolves it at end of
+# turn for every org sensor and every pod on the `scan` task with a valid
+# target. See `engine/turn.py` for scan resolution logic.
 
 
 @player_tool
@@ -244,8 +243,8 @@ def show_sector_neighborhood(
         s["rival_orgs"] = rivals.get(s["id"], 0) if s["confidence"] >= 100 else 0
         s["coords_display"] = f"({s['coord_x']},{s['coord_y']},{s['coord_z']})"
         # Energy only: it is the sole resource a sector yields (see
-        # db/sectors.py). This used to read "E1000/F1000/G1000", advertising
-        # two pools that could never be harvested from the map.
+        # db/sectors.py). Food and goods are manufactured from stock already
+        # held, never harvested from the map.
         s["resources_display"] = f"E{s['energy_capacity']:.0f}"
         s["cell"] = _cell_marker(True, s["own_ships"], s["own_colonies"], s["rival_orgs"])
         s["in_plane"] = s["coord_z"] == cz

@@ -22,7 +22,7 @@ It serves MCP's streamable HTTP transport (`POST /mcp`, `GET /health`) and is de
 
 ## Documentation
 
-> This repository is the source of truth for XSettlers. The docs below originated as Slack canvases and were migrated here on 2026-07-18; the original canvases are historical reference only.
+> This repository is the source of truth for XSettlers.
 
 - [Player Guide](docs/player_guide.md) — start here if you just want to learn how to play
 - [Product Requirements](docs/product_requirements.md) — the same rules, precisely stated
@@ -31,12 +31,11 @@ It serves MCP's streamable HTTP transport (`POST /mcp`, `GET /health`) and is de
 - [UI & Rendering Design](docs/ui_and_rendering_design.md)
 - [Game Instance: MVP](docs/game_instance_mvp.md)
 - [Known TODOs](docs/TODO.md) — open work, and the design direction behind it
-- [Dev History](docs/dev_history.md) — completed work and the reasoning behind settled decisions
-- [Task Journal](docs/task_journal.md) — *superseded; retained for early project history only*
+- [Dev History](docs/dev_history.md) — settled decisions, findings from play, recovery pointers
 
 ## Status
 
-Playable end to end, solo or multiplayer, but pre-MVP. The significant gaps: combat is unimplemented (`defend`/`attack` are stubs), there is no way to build new ships or pods, every sector holds identical resources so there is no *better* ground to find, and rival detection is not built. `docs/TODO.md` tracks each of these along with the design direction behind it.
+Playable end to end, solo or multiplayer, but pre-MVP. The significant gaps: combat is unimplemented (`defend`/`attack` are stubs), there is no way to build new ships or pods, sector richness varies but not by enough to change outcomes at a 20-turn horizon, and rival detection is not built. `docs/TODO.md` tracks each of these along with the design direction behind it.
 
 **Security note:** `/mcp` has *no* perimeter authentication, and the player tokens in `config/game_config.yaml` are placeholders committed to this public repository. Anyone who knows the URL can play as anyone. That is a knowing tradeoff while the game holds nothing of value — read the SECURITY POSTURE comment in `xsettlers_mcp/server.py` before deploying anything you care about.
 

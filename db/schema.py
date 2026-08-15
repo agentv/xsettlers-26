@@ -7,28 +7,9 @@ def init_schema():
     cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='spatial_ref_sys'")
     if cur.fetchone()[0] == 0:
         cur.execute("SELECT InitSpatialMetaData(1)")
-    # One-time schema migrations lived here until 2026-08-11 -- 137 lines of
-    # them, 44% of this file, re-executed on every server boot and in every
-    # test. They upgraded databases created between 2026-07-22 and 2026-08-02:
-    # players.slack_user_id -> player_token; arrival_queue.dest_sector_id ->
-    # dest_x/y/z; pods.storage_current -> energy/food/goods_stored; pods.mission
-    # -> task; organizations absolute scan_target_* -> relative scan_offset_*
-    # (in columns and in task_params JSON); ADD COLUMN for scan_offset_*,
-    # game_state.next_tick_at and game_state.frozen; DROP for
-    # sectors.food_capacity/goods_capacity.
-    #
-    # Removed after checking the only database they could still apply to. The
-    # deployed Fly volume (/data/xsettlers.db, opened read-only) had every
-    # legacy trigger absent -- no slack_user_id, no dest_sector_id, no
-    # storage_current, no pods.mission, no scan_target_*, zero pods with
-    # absolute task_params, no food/goods_capacity -- and every added column
-    # already present. All 137 lines were no-ops against the live DB, and are
-    # no-ops against a fresh one too, since CREATE TABLE below already declares
-    # the post-migration shape.
-    #
-    # If a database predating 2026-08-02 ever turns up, recover the migrations
-    # from git history (they were last present in 14b5fa2) rather than
-    # rewriting them from memory.
+    # No migration step: the CREATE TABLE statements below are the whole
+    # schema. See docs/dev_history.md if a database older than the current
+    # shape ever turns up.
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS players (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,8 +27,7 @@ def init_schema():
             -- Energy is the ONLY resource drawn from the map; food and goods
             -- are manufactured from resources already held, so a sector has
             -- no food/goods pool to deplete (see engine/production.py's
-            -- RESOURCE_CAPACITY_COLUMN). food_capacity/goods_capacity were
-            -- dropped 2026-08-02.
+            -- RESOURCE_CAPACITY_COLUMN).
             energy_capacity REAL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sector_coords ON sectors(coord_x, coord_y, coord_z);
@@ -77,9 +57,9 @@ def init_schema():
             bootstrapped_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
             CHECK (id = 1)
         );
-        -- GameHouse handoff (added 2026-08-07): the session_token GameHouse
-        -- pushes via start_session() (see xsettlers_mcp/gamehouse.py), stored
-        -- so it exists locally ("the game verifies every request against its
+        -- GameHouse handoff: the session_token GameHouse pushes via
+        -- start_session() (see xsettlers_mcp/gamehouse.py), stored so it
+        -- exists locally ("the game verifies every request against its
         -- own local copy" per GameHouse's docs/data_model.md) -- not yet
         -- wired into any request-gating logic. The existing static-roster
         -- auth (xsettlers_mcp/auth.py) is untouched and remains the only
@@ -102,9 +82,9 @@ def init_schema():
             mission_params TEXT,
             -- Innate scan: every organization can scan one sector per turn on
             -- its own account -- a ship's bridge, a colony's headquarters --
-            -- without spending a pod on it (added 2026-07-31). Aimed by an
-            -- OFFSET from the org's own sector, not absolute coordinates, so
-            -- the aim survives a move (see sector_tools.SCAN_BEARINGS).
+            -- without spending a pod on it. Aimed by an OFFSET from the
+            -- org's own sector, not absolute coordinates, so the aim
+            -- survives a move (see sector_tools.SCAN_BEARINGS).
             -- Persistent across turns until changed or cleared. Costs the same
             -- food as a scan pod and is suppressed in transit, exactly as if
             -- the org carried one scan pod already.
@@ -117,7 +97,7 @@ def init_schema():
             org_id           INTEGER REFERENCES organizations(id),
             -- `task` is what this pod's crew does; the parent organization's
             -- `mission` is what the vehicle does. Deliberately different
-            -- words for deliberately different concepts (renamed 2026-07-31).
+            -- words for deliberately different concepts.
             task             TEXT DEFAULT 'idle'
                              CHECK(task IN ('idle','produce_energy','produce_food','produce_goods','scan')),
             task_params      TEXT,
@@ -153,9 +133,9 @@ def init_schema():
             origin_sector_id INTEGER REFERENCES sectors(id),
             PRIMARY KEY (arrival_turn, org_id)
         );
-        -- Ship's log (added 2026-08-05): one-shot deferred commands attached
-        -- to an org, resolved by engine/turn.py's dispatch_due_commands() at
-        -- the same point arrivals resolve. Four fixed trigger primitives
+        -- Ship's log: one-shot deferred commands attached to an org,
+        -- resolved by engine/turn.py's dispatch_due_commands() at the same
+        -- point arrivals resolve. Four fixed trigger primitives
         -- (see docs/TODO.md) -- during_transit fires the instant the
         -- in-transit flag is applied (event-triggered, dispatched instead
         -- from engine/movement.apply_confirm_move, not the resolve_turn

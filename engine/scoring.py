@@ -1,14 +1,13 @@
 """
 What a player's score is, and what the standings are -- defined once.
 
-Three call sites need this and used to each carry their own copy: the live
-scoreboard (xsettlers_mcp/tools/organization_reports.show_game_status), the
-per-turn ledger (engine/turn._snapshot_holdings), and the game-over result
-(engine/turn._calculate_final_scores). All three promised in their docstrings
-to agree with each other -- "same formula", "must match what show_game_status
-computes" -- but nothing made that true except three people writing the same
-expression. A weights change applied to two of the three would have shown a
-player one standing mid-game and crowned a different winner at the whistle.
+Three call sites need this and must agree: the live scoreboard
+(xsettlers_mcp/tools/organization_reports.show_game_status), the per-turn
+ledger (engine/turn._snapshot_holdings), and the game-over result
+(engine/turn._calculate_final_scores). Sharing one implementation is what
+makes that true -- with a copy each, a weights change applied to two of the
+three would show a player one standing mid-game and crown a different winner
+at the whistle.
 
 Deliberately a leaf module: it imports nothing from engine/, db/, or
 xsettlers_mcp/, and takes an open cursor plus an already-loaded weights dict

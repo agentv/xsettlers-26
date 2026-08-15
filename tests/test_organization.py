@@ -660,11 +660,11 @@ def test_show_organization_notes_unaimed_pods_alongside_aimed_ones():
 
 
 # --- queue_command param validation -----------------------------------------
-# Everything below was unvalidated until 2026-08-11: queue_command checked the
-# trigger phase, the action name and ownership of the ORG, then stored params
-# verbatim. The dispatchers index straight into that dict, so a malformed order
-# detonated inside end_of_turn() -- which is to say, inside the background
-# clock, on everybody's turn at once.
+# queue_command validates the full payload, not just the trigger phase, the
+# action name and ownership of the ORG. The dispatchers index straight into
+# the stored params dict, so an unvalidated malformed order would detonate
+# inside end_of_turn() -- which is to say, inside the background clock, on
+# everybody's turn at once.
 
 def _org_with_pod(token="U_P1", email="p@t.com", task="produce_food"):
     pid = seed_player(email=email, player_token=token)

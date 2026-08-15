@@ -5,13 +5,11 @@ import random
 # --- Sector richness ----------------------------------------------------------
 # Energy in a newly discovered sector is 400 guaranteed plus a d6 worth of
 # hundreds: 500, 600, 700, 800, 900 or 1000, flat 1-in-6 each, mean 750.
-# Replaced the flat 1000 on 2026-08-02; base lowered 600 -> 400 the same day,
-# once home sectors stopped depleting (see HOME_SECTOR_ENERGY in
-# config/loader.py). Those two go together: the frontier can be lean because
-# home is not, so a thin roll out in the field costs a player their expansion,
-# not their footing.
+# The frontier can be this lean only because home is not (see
+# HOME_SECTOR_ENERGY in config/loader.py) -- the two go together, so a thin
+# roll out in the field costs a player their expansion, not their footing.
 #
-# The floor still matters as much as the spread. Every sector is worth taking
+# The floor matters as much as the spread. Every sector is worth taking
 # -- 500 is a living, not a death sentence -- so a bad roll costs you upside
 # rather than viability, and the decision a player faces is "is this one good
 # enough to plant a colony on, or do I keep looking?" rather than "did I get

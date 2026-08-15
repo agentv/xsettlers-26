@@ -9,8 +9,8 @@ from tests.conftest import (seed_player, seed_sector, seed_ship, seed_pod,
                             seed_player_sector)
 
 def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
-    """turn.snapshot events (one per player per turn) persist what was
-    previously print-only: after-state holdings, this turn's weighted score
+    """turn.snapshot events (one per player per turn) persist after-state
+    holdings, this turn's weighted score
     (same formula as show_game_status/_calculate_final_scores), and derived
     per-resource waste (produced - consumed - actual delta).
 
@@ -80,9 +80,9 @@ def test_show_game_status_countdown_formats_mmss_from_next_tick_at():
     assert status["next_tick_countdown"] in ("04:30", "04:29")  # clock-skew tolerant
 
 def test_calculate_final_scores_applies_score_weights():
-    """The actual game-over win condition, previously untested: score is a
-    weighted sum (config/game_config.yaml's score_weights, as of 2026-07-30
-    energy=0/food=1/goods=2), not a flat energy+food+goods total -- must
+    """The game-over win condition: score is a weighted sum
+    (config/game_config.yaml's score_weights -- energy=0/food=1/goods=2),
+    not a flat energy+food+goods total -- must
     match what show_civilization_status/show_game_status compute mid-game
     via the same weights, or the displayed standing and the real winner
     could disagree."""
@@ -302,9 +302,8 @@ def test_show_game_status_is_not_final_mid_game():
 # straight into the DB. That is not a contrived state: engine/turn.py re-checks
 # range at resolution precisely because get_scan_range() is expected to vary
 # per org later (sensor pods), at which point an aim that was legal when set
-# can stop being legal. This is the branch that handles it -- previously
-# untested on the engine side, found while consolidating the two scan paths
-# into _resolve_scan() (2026-08-11).
+# can stop being legal. This is the branch that handles it, on the engine
+# side, for both scan paths (see engine/turn.py's _resolve_scan).
 
 def _scanner_with_stock(offset=(5, 0, 0), as_pod=False):
     """An org that can comfortably afford upkeep and a scan, aimed out of

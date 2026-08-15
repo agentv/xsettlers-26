@@ -6,13 +6,12 @@ from typing import List
 CONFIG_PATH = os.getenv("GAME_CONFIG_PATH", "config/game_config.yaml")
 
 # How full every pod starts when a scenario doesn't say otherwise, as a
-# fraction of storage_capacity. 0.3 (set 2026-07-30, replacing the original
-# hardcoded 1.0): a fleet starting at capacity cannot accumulate anything, so
-# its production is pure waste and only spending moves the score -- measured
-# in play-testing, a 100%-full start held total holdings pinned for the whole
-# game while a lean start grew steadily. Starting lean makes production the
-# game rather than a formality. Scenarios override it freely; this is only
-# the fallback.
+# fraction of storage_capacity. Kept low: a fleet starting at capacity cannot
+# accumulate anything, so its production is pure waste and only spending moves
+# the score -- in play-testing a 100%-full start held total holdings pinned
+# for the whole game while a lean start grew steadily. Starting lean makes
+# production the game rather than a formality. Scenarios override it freely;
+# this is only the fallback.
 DEFAULT_STARTING_FILL = 0.3
 
 # Energy seeded into a player's home sector. Deliberately enormous rather than
@@ -24,10 +23,10 @@ DEFAULT_STARTING_FILL = 0.3
 # played, without needing a special "infinite" case in the production step to
 # get there.
 #
-# This is what lets the frontier be lean (db/sectors.py dropped the discovery
-# base to 400 the same day): a bad roll out in the field costs a player their
-# expansion, not their footing. It is a per-scenario value -- a survival
-# variant is free to make home as poor as anywhere else.
+# This is what lets the frontier be lean (see db/sectors.py's discovery roll):
+# a bad roll out in the field costs a player their expansion, not their
+# footing. It is a per-scenario value -- a survival variant is free to make
+# home as poor as anywhere else.
 #
 # NOTE: this is the HOME sector, meaning the scenario's starting coordinates
 # where the first colony sits. It is NOT the "sentinel sector" (id = -1),
@@ -45,9 +44,8 @@ class GameSettings:
     then shadowed by GAME_TICK_SECONDS/TURN_LIMIT/CONFIDENCE_DECAY_PER_TURN
     -- kept here deliberately, pending the precedence rule (YAML supplies the
     default, env overrides it) that docs/TODO.md tracks applying to all three
-    at once. `dimensions` and `feature_flags` used to sit here too and were
-    removed on 2026-08-11: unlike the other three they had no env counterpart
-    and no consumer anywhere, so there was nothing to reconcile them with.
+    at once. A YAML key with no env counterpart and no consumer has nothing to
+    reconcile against and does not belong here.
     """
     name: str
     tick_seconds: int

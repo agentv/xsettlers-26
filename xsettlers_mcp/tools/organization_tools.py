@@ -97,36 +97,27 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     """
     Validate a queued command's params at QUEUE time and return them
     normalized, as (params, None) -- or (None, error) if the order could
-    never have worked.
+    never work.
 
-    Everything checked here used to be checked nowhere. `queue_command` only
-    validated the trigger phase, the action name and ownership of the *org*,
-    then stored `params` verbatim as JSON; the dispatchers
-    (engine/ship_log.py, engine/movement._dispatch_during_transit) index
-    straight into that dict and hand it to helpers that document themselves
-    as doing "no ownership check, no task-validity check (caller's job)" --
-    and no caller on the queued path was doing that job. Consequences, all
-    reproduced before this was written (2026-08-11):
+    The dispatchers (engine/ship_log.py, engine/movement._dispatch_during_transit)
+    index straight into the stored params dict and hand it to helpers that do
+    no ownership check and no task-validity check of their own, so this is
+    where those checks live. Without them: a bad `task` string reaches the
+    pods CHECK constraint and raises sqlite3.IntegrityError *inside
+    end_of_turn()*, aborting the turn for every player and re-firing on every
+    subsequent tick (the queue row is deleted only after its handler returns);
+    a missing dest_y/dest_z raises KeyError the same way; and a `pod_id`
+    belonging to another player's org would be retasked.
 
-      - a bad `task` string reached the pods CHECK constraint and raised
-        sqlite3.IntegrityError *inside end_of_turn()*, aborting the turn for
-        every player. The queue row is deleted only after its handler
-        returns, so the failing row survived the rollback and re-fired on
-        every subsequent tick: the game could not advance again.
-      - a missing dest_y/dest_z raised KeyError in the same place, same way.
-      - `pod_id` was never checked against the org, so a player could queue a
-        retask of ANOTHER PLAYER'S pod and it would be applied.
+    Validating here rather than at dispatch is also what the player needs: an
+    order rejected three turns later by a background clock has no one to tell.
+    Refusing it in the tool call that created it puts the error in front of
+    the player while they can still fix it -- the same reasoning set_mission
+    uses to charge colonization up front.
 
-    Validating here rather than at dispatch is also what the player actually
-    needs: an order rejected three turns after it was given, by a background
-    clock, has no one to tell. Refusing it in the tool call that created it
-    puts the error in front of the player while they can still fix it -- the
-    same reasoning set_mission uses to charge colonization up front.
-
-    Normalization matters for the same reason: a compass `bearing` is
-    resolved to offset_x/y/z here, because both dispatchers read only the
-    offsets and would silently have dropped a bearing this function's own
-    docstring told players they could pass.
+    Normalization serves the same end: a compass `bearing` is resolved to
+    offset_x/y/z here, because both dispatchers read only the offsets and
+    would otherwise silently drop an aim the player was told they could pass.
     """
     if action == "move":
         absolute = [k for k in ("dest_x", "dest_y", "dest_z") if params.get(k) is not None]
@@ -275,8 +266,8 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
         return {"error": ORG_NOT_OWNED}
 
     # Validate the payload now, not when the clock fires it (see
-    # _normalize_queued_params): a malformed queued order used to surface as
-    # an exception inside end_of_turn(), which stopped the turn for everyone.
+    # _normalize_queued_params): a malformed queued order surfacing as an
+    # exception inside end_of_turn() would stop the turn for everyone.
     params, err = _normalize_queued_params(cur, org_id, action, params or {})
     if err:
         return err

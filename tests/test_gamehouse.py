@@ -3,8 +3,8 @@ GameHouse handoff surface -- see xsettlers_mcp/gamehouse.py. Scoped to
 Diaspora (config/game0.yaml) only for v1, registered with GameHouse as a
 scenario-less game -- start_session's scenario_key is therefore always None
 in real traffic today, but accepted so a real call from GameHouse's
-push_start_session (which always sends the field as of its 2026-08-07
-contract change) doesn't crash on an unexpected keyword argument.
+push_start_session (which always sends the field) doesn't crash on an
+unexpected keyword argument.
 """
 import json
 from db.connection import get_connection
@@ -49,20 +49,18 @@ def test_start_session_rejects_empty_players_list():
     assert "error" in result
 
 def test_start_session_accepts_scenario_key_without_crashing():
-    """The actual bug GameHouse's 2026-08-07 contract change would trigger:
-    push_start_session always sends scenario_key now, so a call missing this
-    kwarg would TypeError instead of returning cleanly."""
+    """push_start_session always sends scenario_key, so a signature missing
+    this kwarg would TypeError instead of returning cleanly."""
     _clear_active_game()
     result = start_session("tok1", [_person(1), _npc("npc-1")], scenario_key=None)
     assert result["ok"] is True
 
 def test_start_session_tool_schema_permits_null_scenario_key():
-    """Regression test for a real bug caught in a live cross-process handoff
-    (2026-08-07): the tool's declared inputSchema said scenario_key was
-    "type":"string", which JSON Schema rejects for None -- so a real call
-    from GameHouse (which always sends scenario_key, null for a
-    scenario-less game) failed the MCP SDK's jsonschema.validate() before
-    xsettlers' own Python code (which already handled None fine) ever ran.
+    """The declared inputSchema must admit null. Declaring scenario_key as
+    "type":"string" makes JSON Schema reject None -- so a real call from
+    GameHouse (which always sends scenario_key, null for a scenario-less
+    game) fails the MCP SDK's jsonschema.validate() before xsettlers' own
+    Python code, which handles None fine, ever runs.
     Calling start_session() directly, or even through call_tool() as a raw
     Python function, doesn't exercise that validation layer at all -- only
     checking the schema declaration itself catches this class of bug.
@@ -174,10 +172,9 @@ def test_start_session_rejects_a_different_token_while_active():
 
 def test_a_program_named_npc_seated_here_actually_plays():
     """The handoff's end of the strategy-name contract. `burst_and_colonize`
-    stopped being a Python function on 2026-08-11 and became
-    config/npc_programs/burst_and_colonize.yaml -- a roster asking for it by
-    name must still seat an NPC that dispatches under a real end_of_turn()
-    loop, with nothing calling the strategy by hand."""
+    is a YAML program (config/npc_programs/), not a Python function -- a
+    roster asking for it by name must still seat an NPC that dispatches under
+    a real end_of_turn() loop, with nothing calling the strategy by hand."""
     from engine.turn import end_of_turn
     _clear_active_game()
     result = start_session("tok1", [_person(42), _npc("npc-1", strategy="burst_and_colonize")])

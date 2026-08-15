@@ -11,11 +11,9 @@ multi-scenario support exists on both sides.
 
 Two directions of traffic:
   - register_with_gamehouse(): xsettlers acts as an MCP CLIENT against
-    GameHouse, once at server startup, to publish its lobby shape. This
-    replaced an earlier describe_lobby() tool (GameHouse *pulling* the
-    shape) once GameHouse's own design moved to a *push* model
-    (2026-08-07) -- describe_lobby() was removed here rather than left as
-    dead surface area that looks like part of the live protocol but isn't.
+    GameHouse, once at server startup, to publish its lobby shape. The
+    registration model is push, not pull -- xsettlers announces itself;
+    GameHouse does not interrogate it.
   - start_session(): xsettlers acts as an MCP SERVER, GameHouse calls this
     once a lobby closes.
 
@@ -116,10 +114,9 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
     """
     The actual handoff: GameHouse closes a lobby and calls this once,
     minting session_token and describing every participant (see
-    ../gamehouse/docs/data_model.md's start_session wire shape -- scenario_key
-    added to that contract 2026-08-07). Builds a roster_override -- the
-    shape db.bootstrap.bootstrap_game() already accepts, previously unused
-    by anything -- rather than modifying bootstrap_game() itself.
+    ../gamehouse/docs/data_model.md's start_session wire shape). Builds a
+    roster_override -- the shape db.bootstrap.bootstrap_game() already
+    accepts -- rather than modifying bootstrap_game() itself.
 
     scenario_key is accepted but not yet acted on: xsettlers registered with
     an empty scenarios list (see register_with_gamehouse), so GameHouse will

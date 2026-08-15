@@ -1,27 +1,13 @@
 """
-The opening five lines every gameplay tool used to write for itself.
+Authentication and connection handling for every gameplay tool.
 
-Before this (2026-08-11) each of the 19 player-facing tools began by opening a
-connection, resolving player_token against the players table, returning
-{"error": "Player not found"} if it missed, and then closing that connection
-by hand on every single return path -- 18 copies of the lookup, 11 of the
-follow-up organization-ownership check, and 69 hand-placed conn.close() calls
-across four modules.
+The gate is per-tool: resolve player_token against `players`, which is empty
+until a scenario is selected, so every tool naturally rejects before bootstrap
+(see xsettlers_mcp/game_select.select_scenario and tests/test_gateway.py).
+There is no central pre-flight wrapper deciding who may call what.
 
-That was not merely repetitive, it was already wrong in one place:
-player_tools.declare_end_turn skipped the check entirely and answered
-{"declared": True} to a token belonging to nobody, while every sibling
-rejected it. A check that must be re-typed in full for each new tool is a
-check that will eventually be mistyped or forgotten; this makes forgetting it
-impossible, because the token never reaches the tool body at all.
-
-This is NOT the central `gateway.py` pre-flight wrapper that
-docs/mcp_server_layer_design.md once sketched and this codebase deliberately
-did not build. The gate is still per-tool and it is still the same gate --
-resolve the token against `players`, which is empty until a scenario is
-selected, so every tool naturally rejects before bootstrap (see
-xsettlers_mcp/game_select.select_scenario and tests/test_gateway.py). Only the
-implementation moved; nothing about who may call what changed.
+Because the token never reaches a tool body at all, a new tool cannot forget
+the check or mistype it.
 """
 import functools
 from db.connection import get_connection
@@ -48,9 +34,8 @@ class PlayerSession:
 
     def own_org(self, org_id: int, columns: str = "id"):
         """
-        One of THIS player's organizations, or None -- the ownership check
-        that used to be copied into eleven tools. `columns` is a literal from
-        the calling code, never player input.
+        One of THIS player's organizations, or None. `columns` is a literal
+        from the calling code, never player input.
         """
         return self.cur.execute(
             f"SELECT {columns} FROM organizations WHERE id=? AND player_id=?",
@@ -60,8 +45,7 @@ class PlayerSession:
         """
         One of THIS player's pods, or None. Ownership is indirect -- a pod
         belongs to an organization, which belongs to a player -- so this is a
-        join rather than a column check, which is exactly why it was worth
-        having in one place instead of two.
+        join rather than a column check.
         """
         return self.cur.execute(
             f"""SELECT {columns} FROM pods p JOIN organizations o ON o.id = p.org_id
@@ -77,8 +61,7 @@ class PlayerSession:
         check_consensus_acceleration(). db/connection.py sets no busy_timeout
         and uses the default rollback-journal isolation, so a second writer
         does not block and wait -- it fails immediately with "database is
-        locked". Both tools released their connection before delegating when
-        they managed it by hand; this is how they keep doing that.
+        locked".
 
         Idempotent, and the decorator skips its own commit/close once set.
         """
@@ -93,15 +76,14 @@ def player_tool(fn):
     Wrap a tool so it receives an authenticated PlayerSession instead of a raw
     player_token, and never manages a connection itself.
 
-    The wrapped function is written as fn(session, ...) but is still CALLED as
+    The wrapped function is written as fn(session, ...) but is CALLED as
     tool(player_token, ...) -- positionally or by keyword, which is what both
-    the MCP dispatch in server.py (fn(**arguments)) and the existing tests
-    rely on. On an unrecognized token the body never runs.
+    the MCP dispatch in server.py (fn(**arguments)) and the tests rely on. On
+    an unrecognized token the body never runs.
 
     Commits on the way out, so a tool that mutates state just mutates it. The
-    write-ahead convention is unaffected: record_event() opens its own
-    connection, and every tool here still calls it before taking a write lock
-    on this one, exactly as before.
+    write-ahead convention holds: record_event() opens its own connection, and
+    every tool calls it before taking a write lock on this one.
     """
     @functools.wraps(fn)
     def wrapper(player_token, *args, **kwargs):

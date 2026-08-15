@@ -22,10 +22,9 @@ def test_bootstrap_creates_players_and_ships_no_colony():
 
 def test_bootstrap_home_colony_gets_same_pod_loadout_as_ship():
     """
-    Regression test: db/bootstrap.py's home_colony step used to create the
-    colony organization but never attach any pods to it (see
-    docs/player_guide.md's Outbreak section, "Implementation note"). Colonies
-    must get the same 6-pod loadout as ships, not zero pods.
+    Colonies must get the same pod loadout as ships, not zero pods -- see
+    docs/player_guide.md's Outbreak section. A home_colony step that creates
+    the organization without attaching pods is the failure this pins.
     """
     _bootstrap(scenario_file="config/game1.yaml", scenario_name="game1")
     conn = get_connection()

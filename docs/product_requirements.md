@@ -10,8 +10,8 @@ XSettlers is a multiplayer, turn-based space strategy game played through any MC
 
 * A game instance is defined by a single scenario file (e.g. `config/game0.yaml`) and a corresponding SQLite/SpatiaLite database — one shared game per deployed instance.
 * The player roster is **fixed at bootstrap time**. There is no mechanism for joining a game already in session through xsettlers' own tools (see GameHouse below for the one exception).
-* Internally, xsettlers still supports several scenario files side by side (`config/game*.yaml`), each declaring its own `participants` against a service-wide player *directory* in `config/game_config.yaml` — player count is a property of the scenario, not the deployment, and a solo, two-player, or five-player game differs only in YAML. **What xsettlers is no longer responsible for is presenting itself as a browsable library to a person** — that role now belongs to a separate sibling service, **GameHouse** (`../gamehouse`), which owns Person-level identity and lobby matchmaking across potentially many hosted games, xsettlers being one of them. See `docs/TODO.md`'s "GameHouse handoff" section for the current integration. `list_scenarios`/`select_scenario` still work as xsettlers-internal tools and aren't being removed — they're just no longer the only, or the primary, way a game gets started.
-* Each player is identified by an opaque `player_token`, not a Slack-specific ID — nothing in the auth path is platform-specific (renamed from `slack_user_id` 2026-07-22). A GameHouse-driven session (see above) generates its own `player_token`s per handoff, entirely separate from `config/game_config.yaml`'s static roster; both paths are live and neither has been retired.
+* Internally, xsettlers still supports several scenario files side by side (`config/game*.yaml`), each declaring its own `participants` against a service-wide player *directory* in `config/game_config.yaml` — player count is a property of the scenario, not the deployment, and a solo, two-player, or five-player game differs only in YAML. **Presenting itself as a browsable library to a person is not xsettlers' job** — that role belongs to a separate sibling service, **GameHouse** (`../gamehouse`), which owns Person-level identity and lobby matchmaking across potentially many hosted games, xsettlers being one of them. See `docs/TODO.md`'s "GameHouse handoff" section for the current integration. `list_scenarios`/`select_scenario` remain live as xsettlers-internal tools; they are simply not the only way a game gets started.
+* Each player is identified by an opaque `player_token`, not a Slack-specific ID — nothing in the auth path is platform-specific. A GameHouse-driven session (see above) generates its own `player_token`s per handoff, entirely separate from `config/game_config.yaml`'s static roster; both paths are live.
 * Roster size is per-scenario, bounded by the engine-wide `max_players` ceiling (currently 8). The shipped scenarios are two-player (`game0`, `game1`) and one-player (`game_solo`). Concurrent multi-game — several games live at once within one xsettlers deployment, rather than one per deployment — is still future scope; GameHouse orchestrates across separately-deployed games, it doesn't make any single xsettlers deployment itself multi-instance.
 
 ---
@@ -19,8 +19,8 @@ XSettlers is a multiplayer, turn-based space strategy game played through any MC
 # The Map
 
 * The game world is a grid of **sectors**, each with integer coordinates `(x, y, z)` — the schema and distance math are fully 3D, but every shipped scenario places its participants and their fleets at `z = 0` only (see Overview above).
-* A sector has exactly one resource capacity: **energy**. Food and goods are manufactured from stock an organization already holds, never harvested from the map, so there is no per-sector pool of them (`food_capacity`/`goods_capacity` dropped 2026-08-02).
-* **Sectors are lazily instantiated and their richness is rolled at discovery** (2026-08-02). No sector row exists until a scan, a ship arrival, or bootstrap placement reveals it via `db/sectors.py`'s `reveal_sector()`. On that first reveal — and only then — its energy is rolled as **400 + d6 × 100**, giving 500 / 600 / 700 / 800 / 900 / 1000 at flat 1-in-6 odds, mean 750. The floor is deliberate: every sector is worth working, so an unlucky roll costs a player upside rather than viability.
+* A sector has exactly one resource capacity: **energy**. Food and goods are manufactured from stock an organization already holds, never harvested from the map, so there is no per-sector pool of them.
+* **Sectors are lazily instantiated and their richness is rolled at discovery.** No sector row exists until a scan, a ship arrival, or bootstrap placement reveals it via `db/sectors.py`'s `reveal_sector()`. On that first reveal — and only then — its energy is rolled as **400 + d6 × 100**, giving 500 / 600 / 700 / 800 / 900 / 1000 at flat 1-in-6 odds, mean 750. The floor is deliberate: every sector is worth working, so an unlucky roll costs a player upside rather than viability.
 * **Home sectors are exempt and effectively bottomless.** Each player's starting sector is seeded flat at `home_sector_energy` (default `HOME_SECTOR_ENERGY` = 100,000, a per-scenario setting) instead of taking the discovery roll — roughly 600 turns of maximum plausible draw, so it does not deplete in any game that will be played. A player's own footing should never be what runs out from under them, and that is precisely what allows the frontier to be lean. **This is the home sector, not the sentinel sector** — see below.
 * **The roll belongs to the sector, not to the finder.** Because `reveal_sector()` is a single get-or-create and the sole path for every reveal, whoever discovers a sector first fixes its value, and every later look by anyone — rivals included — reads that established figure, depletion and all. A rival arriving later cannot re-roll your find or refill what you have drawn down. Set `SECTOR_ROLL_SEED` to make discovery reproducible for experiments and tests.
 * A **sentinel sector** (`id = -1`, coords `(-1,-1,-1)`) serves as the transit state for ships currently moving between sectors. It has 0 energy capacity, which is *how* transit suppresses energy harvesting — there is no special-case branch, so giving the sentinel any energy would silently delete transit stress from the game. Not to be confused with a **home sector**, which is a real playable sector at a scenario's starting coordinates. Players are informed when their ship is in the sentinel sector — it is not hidden.
@@ -47,7 +47,7 @@ Players control **organizations** — the fundamental unit of agency. Two types:
 
 * Stationary. Cannot move once established.
 * Produce resources each turn based on pod tasks and sector capacities, at **1.5× a ship's rate** (`COLONY_PRODUCTION_MULTIPLIER`) — see [Rates](#rates-per-pod-per-turn). This is the whole mechanical payoff for colonizing.
-* Created 3 turns after a ship is given org mission `colonize` (scheduled via a `colonize_complete` event at the moment the mission is set, resolved by the engine 3 turns later) — not on the same turn the mission is set, which the sentence below's "3-turn transition" already implies but this line previously didn't state outright.
+* Created 3 turns after a ship is given org mission `colonize` (scheduled via a `colonize_complete` event at the moment the mission is set, resolved by the engine 3 turns later) — not on the same turn the mission is set.
 * **Colonizing costs 30 energy** (`COLONIZATION_ENERGY_COST`), charged in full from the ship's pooled stock at the moment the mission is set — not spread over the 3-turn transition. Unlike every other cost in the economy this is an all-or-nothing gate rather than a prorated draw: a ship that cannot pay is refused and left untouched, since there is no such thing as half a conversion. The figure is provisional and expected to move with play data.
 
 ---
@@ -57,7 +57,7 @@ Players control **organizations** — the fundamental unit of agency. Two types:
 * Each organization carries one or more **pods**.
 * A pod has no intrinsic type — it is defined entirely by its **task**.
 * Valid pod tasks: `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`.
-* **Pods have `task`; organizations have `mission`.** Two different concepts, two different words, deliberately (renamed 2026-07-31 — one word for both was actively misleading in status reports, where an idle *ship* sat above a table of busy *pods*).
+* **Pods have `task`; organizations have `mission`.** Two different concepts, two different words, deliberately: one word for both is actively misleading in status reports, where an idle *ship* sits above a table of busy *pods*.
 * The colloquial names *energy*, *farm*, and *factory* map to the `produce_energy`, `produce_food`, and `produce_goods` tasks respectively — useful in UI and narrative, not a data field.
 * Each pod has generic storage (`storage_capacity` plus `energy_stored`/`food_stored`/`goods_stored`) — a pod holds any mix of resources regardless of its own task, so retasking never hides or relabels existing cargo.
 * Pods execute their task every turn regardless of whether their parent org is in transit or stationary, with two exceptions in transit: energy cannot be harvested (no sector to harvest from) and scans do not report.
@@ -80,7 +80,7 @@ The following pod tasks are defined in the game model. Only a subset are active 
 
 ### Rates (per pod, per turn)
 
-Retuned 2026-08-02. `engine/production.py` is authoritative; this table is a
+`engine/production.py` is authoritative; this table is a
 convenience.
 
 | Task | Produces | Costs |
@@ -104,8 +104,8 @@ available: half the energy on hand yields half the output, rather than an
 all-or-nothing gate. One consequence worth knowing: **a scanner needs energy**,
 so an organization that runs dry goes blind as well as idle.
 
-**Colonies multiply output by 1.5** (`COLONY_PRODUCTION_MULTIPLIER`, added
-2026-08-02). Every pod aboard a colony produces 1.5× its base rate; ships
+**Colonies multiply output by 1.5** (`COLONY_PRODUCTION_MULTIPLIER`). Every
+pod aboard a colony produces 1.5× its base rate; ships
 produce 1.0×. The multiplier applies to output only — costs and upkeep are
 identical to a ship's — and it applies to the sector draw as well as to what
 lands in storage, so a colony harvesting energy strips its sector 1.5× as
@@ -115,7 +115,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 
 **POC active tasks:** `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. All other entries above are recognized in the data model but are not instantiated in any current game instance.
 
-**Platform note:** The original XSettlers architecture (xsettlers-game-papi) was designed as a Mule application with a System/Process/Experience API layer and an HTML5/D3 front end. That architecture is superseded. The current stack is **Python · SpatiaLite · MCP SDK**, served over streamable HTTP to any MCP-speaking client — Slack was the original intended client but identity and the transport are both client-agnostic (see [Overview](#overview)), not Slack-specific. See [MCP Server Layer Design](mcp_server_layer_design.md) for the current design.
+**Platform note:** The stack is **Python · SpatiaLite · MCP SDK**, served over streamable HTTP to any MCP-speaking client — identity and transport are both client-agnostic (see [Overview](#overview)), not Slack-specific. See [MCP Server Layer Design](mcp_server_layer_design.md).
 
 ---
 
@@ -134,7 +134,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 * **Occupation**: an org present in a sector pins confidence at 100. Full detail shown.
 * **Scan**: executed by a pod with `scan` mission at end of turn. Grants full detail for the targeted sector. Confidence decays from that point.
 * **Fog decay**: unoccupied sectors lose a flat number of confidence points each turn (`CONFIDENCE_DECAY_PER_TURN`, default 20 — see [Data Model & Storage Design](data_model_and_storage_design.md) for why it is subtractive rather than proportional). At confidence = 0 the sector **blinks out**: it leaves the player's map entirely, with no degraded "last known" indicator. The underlying row is retained as history, but nothing player-facing shows it. At the default rate, a sector you stop confirming is gone on the fifth turn.
-* **Rival detection**: if a rival org is present in the scanned sector at time of resolution, that information is surfaced with high priority in the player view. **Not implemented** — no `alert.rival_detected` (or equivalent) event exists anywhere in the codebase, verified by grep 2026-08-08. Presence at confidence 100 (occupation) does already surface rival orgs in `show_sector_neighborhood`; a *scan* specifically flagging a rival's presence with priority does not.
+* **Rival detection**: if a rival org is present in the scanned sector at time of resolution, that information is surfaced with high priority in the player view. **Not implemented** — no `alert.rival_detected` (or equivalent) event exists anywhere in the codebase. Presence at confidence 100 (occupation) does already surface rival orgs in `show_sector_neighborhood`; a *scan* specifically flagging a rival's presence with priority does not.
 
 ---
 
@@ -142,11 +142,11 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 
 * Scanning is performed at end of turn by an organization's own sensors and by any pods on the `scan` task — it is not a discrete player action.
 * A scanner must be **aimed** before end of turn for the scan to execute — via `set_org_scan_bearing` for an organization's own sensors, or `set_pod_scan_bearing` for a pod on the `scan` task. An unaimed scanner still pays its food cost and reveals nothing.
-* Scan range is **fixed at 2 sectors** (Euclidean distance ≤ 2), derived from `get_scan_range(org_id)` — always call it, never hard-code the number. Raised from 1 on 2026-07-31: under a Euclidean metric, range 1 reaches only the four orthogonal neighbours, because a diagonal is √2 ≈ 1.41. Being refused a scan of the sector diagonally adjacent reads as broken. Range 2 reaches **12 sectors** — 4 orthogonal, 4 diagonal, 4 two-out orthogonal — the smallest radius at which scanning behaves the way a player expects.
-* **A scan is aimed by a bearing relative to the scanner, not by absolute coordinates** (2026-07-31). Sensors are mounted on the thing that carries them: they look a fixed direction and distance from wherever it currently is, and a ship flying away from a sector does not keep seeing it. Two consequences: a scan pattern survives a move with no re-aiming, and range becomes a permanent property of the aim rather than something that can silently stop being true — so an out-of-range aim is **rejected when set** instead of failing at resolution.
+* Scan range is **fixed at 2 sectors** (Euclidean distance ≤ 2), derived from `get_scan_range(org_id)` — always call it, never hard-code the number. Under a Euclidean metric, range 1 would reach only the four orthogonal neighbours, because a diagonal is √2 ≈ 1.41, and being refused a scan of the diagonally adjacent sector reads as broken. Range 2 reaches **12 sectors** — 4 orthogonal, 4 diagonal, 4 two-out orthogonal — the smallest radius at which scanning behaves the way a player expects.
+* **A scan is aimed by a bearing relative to the scanner, not by absolute coordinates.** Sensors are mounted on the thing that carries them: they look a fixed direction and distance from wherever it currently is, and a ship flying away from a sector does not keep seeing it. Two consequences: a scan pattern survives a move with no re-aiming, and range becomes a permanent property of the aim rather than something that can silently stop being true — so an out-of-range aim is **rejected when set** instead of failing at resolution.
 * **Bearings**: `N NE E SE S SW W NW` (distance 1 or √2) and `N2 E2 S2 W2` (distance 2) — the 12 names map exactly onto the 12 sectors reachable at range 2. Explicit `offset_x/y/z` is always available for anything the table doesn't name (including off-plane targets). **North is −y**, matching the neighborhood map's rendering; arbitrary but fixed.
 * **Scanning is scanning.** An organization's own sensors and a scan pod's follow identical rules — same bearings, same cost, same range, same suppression in transit. The only difference is what carries the equipment.
-* **A scan reveals the targeted sector only — no halo, no surrounding ring.** Decided 2026-07-31, after considering and rejecting a radius-5 halo. If scanning is to be a meaningful activity with a real cost, it must not also be cheap area coverage: one pod-turn plus its food buys one sector of knowledge, and the player chooses which. Range says how far you can *reach*; it does not widen what you *get*.
+* **A scan reveals the targeted sector only — no halo, no surrounding ring.** A radius-5 halo was considered and rejected. If scanning is to be a meaningful activity with a real cost, it must not also be cheap area coverage: one pod-turn plus its food buys one sector of knowledge, and the player chooses which. Range says how far you can *reach*; it does not widen what you *get*.
 * If the designated target sector is **out of range** at end-of-turn resolution, the scan does not execute and the player receives an alert. The food cost is still paid (see `docs/TODO.md`).
 * Ships in transit cannot scan — the reveal is suppressed for the duration of transit.
 * **Future:** range becomes variable per org once sensor pods exist. The `get_scan_range()` hook is already in place.
@@ -158,7 +158,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 * The game advances in **turns**. The current turn is stored in `game_state`.
 * A player **declares end of turn** when they have no further moves. Once all players have declared, the turn resolves (consensus acceleration).
 * Players may **rescind** their end-of-turn declaration before resolution.
-* End-of-turn engine actions (in order — corrected 2026-08-08, this list had fallen behind two features built since it was last accurate):
+* End-of-turn engine actions, in order:
     * **NPC decisions** — every `is_npc=1` player's registered strategy (see `engine/npc.py`) acts, via the same tool functions a human player would call, before anything else this turn resolves
     * Player declarations reset
     * Arrivals processed
@@ -176,7 +176,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 
 # Player Actions
 
-This section is the canonical design-authority inventory of every action a player can take within a game session. For implementation signatures, see `xsettlers_mcp/tools/` (renamed from `mcp/tools/` 2026-07-22 — it collided with the third-party `mcp` SDK package).
+This section is the canonical design-authority inventory of every action a player can take within a game session. For implementation signatures, see `xsettlers_mcp/tools/` (never `mcp/tools/` — that name collides with the third-party `mcp` SDK package).
 
 **Known gap, not yet reconciled:** this inventory predates several tools that now exist — `list_scenarios`, `select_scenario`, `get_player_state`, `get_sector`, `get_sector_map`, `show_civilization_status`, and `queue_command` (the ship's log — see `docs/TODO.md`'s "Design (Data Model canvas)" section) have no entries below. Left as a flagged gap rather than silently patched in, since closing it properly means either documenting each here or deciding this section's scope should narrow to something TODO.md/dev_history.md already cover better.
 
@@ -285,17 +285,17 @@ Ownership-gated — only the calling player's data is returned. Lives in `organi
 * **Player-action events** (deltas): `ship.move_confirmed`, `ship.move_cancelled`, `mission.set`, `pod.task_set`, `organization.scan_bearing_set`, `pod.scan_bearing_set`, `organization.renamed`
 * **Engine events** (deltas): `ship.colonized`, `colonize_complete` (scheduled 3 turns ahead by `mission.set`, resolved by the engine), `alert.scan_out_of_range`
 * **Snapshots**: `turn.snapshot` — full state written at end of each turn for replay and debug; `game.final_scores` — the persisted, idempotent end-of-game scoreboard.
-* **Corrected 2026-08-08**: the previous version of this list (`ship.move_previewed`, `pod.mission_set`, `pod.scan_target_set`, `turn.declared`, `ship.arrived`, `pod.produced`, `pod.scanned`, `alert.rival_detected`, `fog.decayed`) had zero matches anywhere in the codebase, verified by grep — either renamed away (task/mission split, offset-based scan aiming) with this doc never updated, or never actually implemented in the first place. Rival detection specifically (`alert.rival_detected`) is a real gap: [Visibility & Fog of War](#visibility--fog-of-war) above still describes it as a feature, but no such event is ever written.
+* **Rival detection is a real gap**: [Visibility & Fog of War](#visibility--fog-of-war) above describes it as a feature, but no `alert.rival_detected` event is ever written. The event list above is the complete set the code actually emits — check it against `grep` before relying on any event name.
 
 ---
 
 # Rendering & Views
 
-**Rewritten 2026-08-08 — the previous version of this section described `views/cli_renderer.py`, `views/slack_renderer.py`, and `build_ship_view()`/`build_colony_view()`/`build_sector_view()`. None of that exists anywhere in the codebase (verified by grep); only `views/render.py` does.** Same category of staleness as `docs/mcp_server_layer_design.md`'s abandoned `gateway.py` sketch, per CLAUDE.md — a design that was written down and then superseded by what actually shipped, with this doc never catching up.
+**Rendering lives entirely in `views/render.py`.** There is no `views/cli_renderer.py`, no `views/slack_renderer.py`, and no `build_ship_view()`/`build_colony_view()`/`build_sector_view()` — if you find those named in an older design sketch, they were never built.
 
 What's actually built: every gameplay tool that has something worth displaying returns a `display` dict alongside its raw data — `rows_key`, `columns`, optional `header`/`column_labels`/`footer`, or `kind: "map"` for a grid (see `show_sector_neighborhood`). `views/render.py`'s `render_status()` (tables) and `render_map()` (grids) turn that into markdown, dispatching purely on the *shape* of the `display` block, never on which tool produced it — no per-tool-name branching, so any future tool returning either shape renders with zero changes here.
 
-The response itself is controlled by a `response_format` argument on every tool call (`xsettlers_mcp/server.py`'s `call_tool`, not a per-tool schema property): `markdown_view` (default) returns both the raw JSON and the rendered markdown; `data_only` returns JSON alone; `html_svg` is reserved for a future graphics response and currently falls back to `markdown_view`. Two additional mechanisms steer an LLM client toward actually displaying the rendered markdown rather than reconstructing its own from the JSON — an MCP `instructions` string sent once at session `initialize`, and a repeated directive block appended to every `markdown_view` response — added 2026-08-05 after the alternative (hoping a client renders it verbatim) proved unenforceable by convention alone. See `docs/TODO.md`'s "default display" note if that's still there, or `xsettlers_mcp/server.py`'s `SERVER_INSTRUCTIONS`/`RENDER_DIRECTIVE` directly.
+The response itself is controlled by a `response_format` argument on every tool call (`xsettlers_mcp/server.py`'s `call_tool`, not a per-tool schema property): `markdown_view` (default) returns both the raw JSON and the rendered markdown; `data_only` returns JSON alone; `html_svg` is reserved for a future graphics response and currently falls back to `markdown_view`. Two additional mechanisms steer an LLM client toward actually displaying the rendered markdown rather than reconstructing its own from the JSON — an MCP `instructions` string sent once at session `initialize`, and a repeated directive block appended to every `markdown_view` response. Convention alone does not hold — a client left to its own devices rebuilds its own table from the JSON. See `docs/TODO.md`'s "default display" note if that's still there, or `xsettlers_mcp/server.py`'s `SERVER_INSTRUCTIONS`/`RENDER_DIRECTIVE` directly.
 
 There is no separate debug-vs-player view distinction at the rendering layer — every tool is already ownership-gated to the calling player at the data layer (ownership checks inline in each tool, not a rendering-time filter), so there's nothing left for a render step to additionally hide.
 

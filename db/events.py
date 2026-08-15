@@ -9,10 +9,10 @@ def record_event(event_type, payload, actor_id=None,
     resolve_at_turn is set for scheduled/future events (e.g. colonize_complete)
     that a later end_of_turn() pass must pick up once current_turn reaches it.
     """
-    # Imported here, not at module level: engine.turn now imports
+    # Imported here, not at module level: engine.turn imports
     # record_event_direct (below) from this module, so an eager import here
-    # would be circular. Lazy import mirrors the existing pattern engine/
-    # turn.py already uses for engine.npc, for the same reason.
+    # would be circular. Same lazy-import pattern engine/turn.py uses for
+    # engine.npc, for the same reason.
     from engine.turn import get_current_turn
     conn = get_connection()
     cur  = conn.cursor()
@@ -42,15 +42,13 @@ def record_event_direct(cur, turn: int, event_type: str, actor_id=None,
     while the first holds an open write transaction fails immediately
     ("database is locked") rather than blocking. Takes `turn` as an explicit
     parameter (unlike record_event, which calls get_current_turn() itself)
-    so this module never needs to import engine.turn -- avoids the circular
-    import that motivated keeping this logic out of here until now.
+    so this module never needs to import engine.turn -- avoids a circular
+    import.
 
     resolve_at_turn carries the same meaning it does in record_event -- a
     deferred event a later end_of_turn() pass picks up once current_turn
-    reaches it. Added 2026-08-11 for engine/missions.py's apply_colonize,
-    which schedules colonize_complete from inside the turn transaction; until
-    then every direct-write caller logged only already-resolved facts, so the
-    column was simply omitted from the INSERT and defaulted to NULL.
+    reaches it. engine/missions.py's apply_colonize uses it to schedule
+    colonize_complete from inside the turn transaction.
     """
     cur.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM events WHERE turn=?", (turn,))
     seq = cur.fetchone()[0]
@@ -89,16 +87,15 @@ def record_dispatch_failure(cur, turn: int, command_id: int, org_id: int,
 
     Containment, not diagnosis: queue_command validates its params up front
     (see organization_tools._normalize_queued_params), so nothing reaching a
-    dispatcher should fail any more. This exists for the cases that check
-    cannot cover -- rows queued before that validation existed, rows written
-    directly, and whatever a future action learns to fail at. The rule this
-    upholds is that one player's bad order must never stop the turn for
-    everyone else, which is exactly what used to happen: the exception escaped
-    end_of_turn(), the offending row was never deleted (deletion happens after
-    the handler returns), and it re-fired on every subsequent tick.
+    dispatcher should fail. This exists for the cases that check cannot cover
+    -- rows written directly, and whatever a future action learns to fail at.
+    The rule it upholds: one player's bad order must never stop the turn for
+    everyone else. An escaping exception would leave the offending row
+    undeleted (deletion happens after the handler returns) to re-fire on every
+    subsequent tick, and the game could never advance again.
 
     Lives here rather than in either dispatcher because both need it and they
-    cannot import from each other -- engine/ship_log.py already imports
+    cannot import from each other -- engine/ship_log.py imports
     engine/movement.py for the 'move' action.
     """
     record_event_direct(cur, turn, DISPATCH_FAILURE_EVENT,
@@ -106,16 +103,8 @@ def record_dispatch_failure(cur, turn: int, command_id: int, org_id: int,
         payload={"command_id": command_id, "org_id": org_id,
                  "action": action, "error": error})
 
-# Removed 2026-08-11 (complexity audit): record_turn_snapshot(),
-# get_events_since_turn() and get_last_snapshot(). All three had zero callers
-# and zero tests since the initial commit -- speculative replay/recovery
-# scaffolding for a feature that was never built.
-#
-# record_turn_snapshot() was worse than merely unused. It wrote event_type
-# "turn.snapshot" -- the SAME type engine/turn.py's _snapshot_holdings() writes
-# live, every turn, for every player -- but with an incompatible payload (a
-# full dump of players/organizations/pods/player_sectors, versus the ledger's
-# per-player holdings+score+waste row). get_last_snapshot() read that type
-# back and would have handed a caller a ledger row while calling it a recovery
-# checkpoint. Rebuild both sides together, against one agreed payload, if
-# replay is ever actually wanted.
+# There is no replay/disaster-recovery mechanism. The "turn.snapshot" event
+# type belongs solely to engine/turn.py's _snapshot_holdings() -- a per-player
+# ledger row (holdings + score + waste), not a full-state checkpoint. If
+# replay is ever wanted, build the writer and the reader together against one
+# agreed payload, and do not overload this event type to do both jobs.

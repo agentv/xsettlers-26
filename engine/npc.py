@@ -11,23 +11,20 @@ opens right after this returns (see the comment at that call site).
 
 **A strategy is either data or code, and most are data.** Openings whose whole
 sequence is decided in advance live in config/npc_programs/*.yaml and run
-through engine/npc_script.py -- turtle, burst_and_colonize and
-fan_out_consolidate were all Python functions here until 2026-08-11 and are
-now YAML files, with no change to how they play. What is left in this module
-is the strategies a program genuinely cannot express: ones that read the world
-each turn and decide from it. fan_out waits for every scout's scan to resolve
-and then converges the whole fleet on the richest sector found; frontier_map_
-stay_frosty has no terminal state at all. Both need conditions, repetition and
-cross-org coordination, which is a rule engine rather than a command queue --
-see engine/npc_script.py's module docstring for where that line sits and why.
+through engine/npc_script.py (turtle, burst_and_colonize, fan_out_consolidate).
+What lives in this module is the strategies a program cannot express: ones
+that read the world each turn and decide from it. fan_out waits for every
+scout's scan to resolve and then converges the whole fleet on the richest
+sector found; frontier_map_stay_frosty has no terminal state at all. Both need
+conditions, repetition and cross-org coordination, which is a rule engine
+rather than a command queue -- see engine/npc_script.py's module docstring for
+where that line sits and why.
 
 Write a new strategy as a program first. Only reach for a function here when
 it has to look at the board before it can choose.
 
-Per-NPC working memory (what player2_policy.py, the fan-out prototype, used to
-track in a stray .player2_plan.json file) lives in npc_profiles.memory, a JSON
-blob mutated turn to turn -- same pattern pods.task_params already uses for
-per-pod working state.
+Per-NPC working memory lives in npc_profiles.memory, a JSON blob mutated turn
+to turn -- the same pattern pods.task_params uses for per-pod working state.
 """
 import json
 from db.connection import get_connection
@@ -47,9 +44,9 @@ def _frontier_map_stay_frosty(player_id: int, player_token: str, config: dict, m
     resolution each turn, so aiming "further ahead" before a move already
     resolves correctly once the ship lands -- no ship's-log queuing needed
     for that part.
-    No second-leg/opening-vs-followup split like the other strategies: this
-    one has no terminal state, it just runs the same land-then-redirect
-    check every time run_npc_decisions() calls it (once per turn, per
+    No opening/follow-up split: this strategy has no terminal state, it just
+    runs the same land-then-redirect check every time run_npc_decisions()
+    calls it (once per turn, per
     engine/turn.py's step 0) -- a ship gets roughly one turn of production
     at each waypoint before being redirected again, since arrival resolution
     (which resets mission to 'idle') happens in step 2, one step after this.
@@ -89,10 +86,8 @@ def _frontier_map_stay_frosty(player_id: int, player_token: str, config: dict, m
 def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> dict:
     """
     Distribute outward, scan, then converge on the single best find --
-    distinct from fan_out_consolidate's blind fixed-offset second leg, and
-    from this strategy's own v1 (each scout committing individually to
-    whatever its own scan found, no comparison across scouts -- see
-    docs/TODO.md's 2026-08-10 tournament note for why that changed).
+    distinct from fan_out_consolidate's blind fixed-offset second leg in that
+    the fleet compares every scout's reading before committing.
     Opening: every ship takes a short scout hop in its assigned cardinal
     direction, aimed scanner pointed further out the same way. Once a scout
     lands (mission back to 'idle') and its aimed scan has actually resolved
@@ -207,8 +202,8 @@ STRATEGIES = {
 def strategy_names() -> list:
     """Every strategy_name that can be assigned: code strategies plus the named
     programs. This union is the contract GameHouse validates a roster against
-    and the field scripts/run_tournament.py plays, so a strategy moving from
-    Python into YAML doesn't change what either of them sees."""
+    and the field scripts/run_tournament.py plays, so which side of the
+    data/code line a strategy sits on is invisible to both."""
     return sorted(set(STRATEGIES) | set(load_programs()))
 
 def run_npc_decisions():

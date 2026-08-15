@@ -218,13 +218,12 @@ def test_at_turn_requires_turn_parameter():
 
 
 # --- Dispatch containment ----------------------------------------------------
-# queue_command now validates params up front, so these rows can no longer be
-# created through the tool. They are inserted directly to stand for what that
-# check cannot cover: rows queued before it existed (a live DB may hold some),
-# and any future action that learns to fail. The invariant under test is that
-# one player's bad order cannot stop the turn for everyone -- which is exactly
-# what used to happen, since the exception escaped end_of_turn() and the row
-# was never deleted, so it re-fired on every subsequent tick forever.
+# queue_command validates params up front, so these rows cannot be created
+# through the tool. They are inserted directly to stand for what that check
+# cannot cover: rows written straight to the DB, and any future action that
+# learns to fail. The invariant under test is that one player's bad order
+# cannot stop the turn for everyone -- an exception escaping end_of_turn()
+# would leave the row undeleted, re-firing on every subsequent tick forever.
 
 def _inject_raw_command(org_id, action, params_json, resolve_turn=0,
                         trigger_phase="at_turn"):

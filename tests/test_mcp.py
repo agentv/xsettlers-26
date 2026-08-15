@@ -36,10 +36,10 @@ def test_declare_and_rescind_end_turn():
 # --- MCP dispatch serializes as JSON (see xsettlers_mcp/server.py) ---
 
 def test_tool_responses_are_valid_json_not_python_repr():
-    """These used to go over the wire as str(result) -- Python repr, with
-    single quotes and True/None. An LLM client copes; anything that parses the
-    payload cannot. Pinned because the failure is silent: repr looks fine in a
-    log and only breaks at the client."""
+    """Tool results must be JSON, not str(result) -- Python repr, with single
+    quotes and True/None. An LLM client copes with repr; anything that parses
+    the payload cannot. Pinned because the failure is silent: repr looks fine
+    in a log and only breaks at the client."""
     import json
     from xsettlers_mcp.server import _as_json
     text = _as_json(get_player_state("U_TEST_001"))

@@ -1,13 +1,7 @@
 """
 Read-only status reports for a player's organizations, and the public
-scoreboard.
-
-Split out of organization_tools.py on 2026-08-11, which had grown to 982 lines
-holding four unrelated jobs. These three tools mutate nothing -- they read
-state and shape it for display -- and every formatting helper below exists
-only to serve them, so the two halves shared no code at all: the split moved
-458 lines without a single symbol needing to be referenced across the new
-boundary.
+scoreboard. These three tools mutate nothing -- they read state and shape it
+for display -- and every formatting helper below exists only to serve them.
 
 The `display` block each report returns is a presentation hint, not a
 rendering: it names which field holds the rows and which columns to show, so
@@ -31,9 +25,8 @@ def _tick_countdown_display(next_tick_at: str | None) -> str:
     ticking -- next_tick_at is None before any scenario is selected or
     whenever the clock process isn't the one refreshing it (see
     get_next_tick_at's docstring). Unlike scripts/status.py's _clock_status,
-    this has no way to health-check a separate process -- it runs inside the
-    same process the clock does, so a None value here already means "not
-    currently running," no liveness probe needed.
+    this needs no liveness probe: it runs inside the same process the clock
+    does, so a None value here already means "not currently running".
     """
     if not next_tick_at:
         return "--:--"
@@ -48,16 +41,14 @@ def _tick_countdown_display(next_tick_at: str | None) -> str:
 # are always still present alongside these -- a client that wants its own
 # presentation is free to ignore all of this and build from the raw data.
 RESOURCE_ABBREV = {"energy": "E", "food": "F", "goods": "G"}
-# Legacy bootstrap names ("Ship-P1-01", "Colony-P1"). Defaults are short
-# now (S1..Sn, C1) and players can rename freely, so this only still
-# matters for games bootstrapped before 2026-07-31.
+# Legacy bootstrap name prefixes ("Ship-P1-01", "Colony-P1"), stripped for
+# display. Current defaults are already short (S1..Sn, C1).
 _NAME_PREFIXES_TO_STRIP = ("Ship-", "Colony-")
 
 # Locked MVP cargo-table format for a single org's status (see show_organization):
 # columns are Task, Count, Energy, Food, Goods, Capacity -- Capacity as a
-# "current/total" string rather than a bare number. This is a starting point,
-# not a final design -- richer/graphical presentations are expected later
-# (see docs/ui_and_rendering_design.md), but this is the one clients can
+# "current/total" string rather than a bare number. Richer presentations are
+# sketched in docs/ui_and_rendering_design.md; this is the one clients can
 # render today without inventing their own column order or capacity format.
 _TASK_DISPLAY = {"produce_energy": "Energy", "produce_food": "Food",
                   "produce_goods": "Goods", "idle": "Idle", "scan": "Scan"}
@@ -83,8 +74,7 @@ def _scanner_summary(cur, org: dict) -> tuple[list, str | None]:
     land on one of the 12 named bearings); an unaimed scan pod still costs its
     food and reveals nothing, so it's counted and flagged rather than silently
     dropped (see set_pod_task's docstring). Returns ([], None) when the org
-    has no scanning capacity in use at all -- nothing to show, not an empty
-    line.
+    has no scanning capacity in use at all.
     """
     scanners = []
     if org["scan_offset_x"] is not None:
@@ -254,12 +244,10 @@ def show_civilization_status(sess) -> dict:
       pass performs the landing (that happens one turn earlier; see
       engine/turn.py's arrival resolution). turns_remaining counts down to
       that same turn, so it only reaches 0 once the ship has actually landed
-      and can take a new mission. The
-      display `status` string itself is intentionally terse -- just "in
-      transit", full stop, no destination or ETA -- a player asked for this
-      view to be that minimal; dest_sector/turns_remaining/arrival_turn are
-      still real raw fields on the entry for a client that wants to build a
-      richer status string itself.
+      and can take a new mission. The display `status` string itself is
+      intentionally terse -- just "in transit", full stop, no destination or
+      ETA; dest_sector/turns_remaining/arrival_turn are raw fields on the
+      entry for a client that wants to build a richer status string itself.
     - Accumulated assets: aggregate energy, food, goods, and total across all
       pods, plus total capacity and percent_full.
     - display: presentation hints (see RESOURCE_ABBREV/_short_name/_tasking_summary
@@ -271,7 +259,7 @@ def show_civilization_status(sess) -> dict:
       `display.columns` lists which of each row's fields to render, in order
       -- see views/render.py's render_status() for a renderer driven entirely
       by these hints, with no per-tool special-casing. All raw fields are
-      still present; this is purely additive.
+      present alongside.
     Ownership-gated — only the calling player's data.
     """
     cur = sess.cur
@@ -339,12 +327,8 @@ def show_civilization_status(sess) -> dict:
                 # end_of_turn() pass for arrival_turn-1 (see engine/turn.py).
                 # turns_remaining counts down to arrival_turn directly, so it
                 # reaches 0 exactly when the ship can take a new mission, not
-                # one turn before.
-                # turns_remaining/arrival_turn/dest_sector stay as raw fields
-                # -- no longer folded into the display string. A player asked
-                # for the display status to just say "in transit", full stop
-                # -- destination and ETA are still on the entry for a client
-                # that wants to build its own richer view from the raw data.
+                # one turn before. It stays a raw field: the display string
+                # says only "in transit".
                 entry["turns_remaining"] = max(0, aq["arrival_turn"] - current_turn)
                 entry["status"] = "in transit"
             else:
@@ -408,24 +392,24 @@ def show_game_status(sess) -> dict:
     clock, and next_tick_countdown -- the same value pre-formatted "MM:SS",
     or "--:--" when next_tick_at is None) plus every player's aggregate
     resource totals, side by side.
-    Unlike show_civilization_status
-    (or every other tool in this module), this is NOT ownership-gated to the
-    caller's own data: aggregate totals are treated as public standing, the
-    same information _calculate_final_scores already reveals at game-over,
-    just available on demand throughout the game instead of only at the end.
-    player_token is only used to confirm the caller is a real player in this
-    game -- it does not filter or restrict what's returned. Detailed fleet
-    composition, position, and tasking of other players is NOT included here
-    and stays private -- only aggregate resource totals are public.
+    Unlike show_civilization_status (or every other tool in this module),
+    this is NOT ownership-gated to the caller's own data: aggregate totals
+    are treated as public standing, the same information
+    _calculate_final_scores reveals at game-over, available on demand
+    throughout the game. player_token is only used to confirm the caller is a
+    real player in this game -- it does not filter or restrict what's
+    returned. Detailed fleet composition, position, and tasking of other
+    players is NOT included here and stays private -- only aggregate resource
+    totals are public.
     `score` is the actual game score, not just another resource total:
     energy/food/goods currently held are weighted by `config/game_config.yaml`'s
-    `score_weights` (as of 2026-07-30: 0/1/2 respectively -- energy is a means
-    of production, not a scored asset; goods score double food) and summed.
-    Same formula `engine/turn.py`'s `_calculate_final_scores()` uses to decide
-    the actual winner at game-over -- this tool just makes it checkable on
-    demand throughout the game instead of only at the end. Standings are
-    ranked by `score` (highest first, "rank" field included), NOT by the raw
-    `total` (an unweighted sum, still included for capacity/fullness context).
+    `score_weights` (energy is a means of production, not a scored asset;
+    goods score double food) and summed. Same formula `engine/turn.py`'s
+    `_calculate_final_scores()` uses to decide the winner at game-over, so
+    the standing shown here is checkable against the eventual result.
+    Standings are ranked by `score` (highest first, "rank" field included),
+    NOT by the raw `total` (an unweighted sum, included for
+    capacity/fullness context).
     Carries a display block (resource_abbrev, rows_key="standings", suggested
     column order) for clients that want a ready-to-use presentation instead
     of building one -- see views/render.py's render_status().
@@ -470,8 +454,8 @@ def show_game_status(sess) -> dict:
     # Whole-number display variants -- score/energy/food/goods never carry a
     # meaningful fraction (production and upkeep are integer per-turn amounts),
     # so the raw rounded-to-2dp float is noise in a table meant for a phone
-    # screen. Additive, like every other _display field: the raw floats above
-    # are untouched for a client that wants to compute with them.
+    # screen. The raw floats above are untouched for a client that wants to
+    # compute with them.
     for s in standings:
         s["score_display"] = f"{s['score']:.0f}"
         s["energy_display"] = f"{s['energy']:.0f}"

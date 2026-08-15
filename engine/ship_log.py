@@ -93,8 +93,8 @@ def dispatch_due_commands(cur, current_turn: int):
     (resolve_turn == this turn's arrival_turn, dispatched right after that
     org's own arrival UPDATE lands, so a chained move sees the org's new
     location) and after_arrival (resolve_turn == a prior turn's arrival_turn
-    + 1) with one query -- no need to special-case per-org inside the
-    arrival-resolution loop itself.
+    + 1) with one query, with no per-org special-casing inside the
+    arrival-resolution loop.
     Skips actually dispatching (but still deletes the row -- one-shot, never
     re-fires) if the org no longer exists or its mission is no longer 'idle':
     a player who already gave the org new orders shouldn't have them
@@ -109,10 +109,10 @@ def dispatch_due_commands(cur, current_turn: int):
         if org and org["mission"] == "idle":
             handler = ACTIONS.get(row["action"])
             if handler:
-                # One malformed order must not stop the turn for everyone. An
-                # exception here used to escape end_of_turn() entirely, leaving
-                # the row undeleted (deletion is below, after the handler) so it
-                # re-fired every tick and the game could never advance again.
+                # One malformed order must not stop the turn for everyone: an
+                # exception escaping end_of_turn() would leave this row
+                # undeleted (deletion is below, after the handler) to re-fire
+                # every tick, and the game could never advance again.
                 try:
                     outcome = handler(cur, row["org_id"], org["player_id"],
                                       json.loads(row["params"] or "{}"), current_turn)

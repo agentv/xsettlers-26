@@ -10,7 +10,7 @@ These are the four authoritative rules governing what a player can see. All view
 
 1. **Occupation** — An org physically present in a sector grants full, current detail on that sector. The player's `confidence` in that sector is pinned at 100 as long as any of their orgs occupies it.
 2. **Scan** — Executed at end of turn by an organization's own sensors (every org can scan one sector per turn without a pod) and by any pods on the `scan` task, granting full detail on the target sector at the moment of resolution. Confidence starts decaying from that point forward per the normal fog decay rate (`CONFIDENCE_DECAY_PER_TURN`).
-3. **Fog decay — blink-out** — Any sector not currently occupied loses a flat `CONFIDENCE_DECAY_PER_TURN` points each turn (default 20). At confidence = 0 the sector **leaves the player's view entirely**. There is no degraded "last known" ghost indicator: a sector the player has stopped confirming becomes indistinguishable from one they never visited. The `player_sectors` row survives as history, but every player-facing read filters `confidence > 0`. At the default rate that is five turns from last sighting to gone. (This reverses the earlier ghost-memory design, decided 2026-07-30; see [Data Model & Storage Design](data_model_and_storage_design.md) for why the decay is subtractive rather than proportional.)
+3. **Fog decay — blink-out** — Any sector not currently occupied loses a flat `CONFIDENCE_DECAY_PER_TURN` points each turn (default 20). At confidence = 0 the sector **leaves the player's view entirely**. There is no degraded "last known" ghost indicator: a sector the player has stopped confirming becomes indistinguishable from one they never visited. The `player_sectors` row survives as history, but every player-facing read filters `confidence > 0`. At the default rate that is five turns from last sighting to gone. (See [Data Model & Storage Design](data_model_and_storage_design.md) for why the decay is subtractive rather than proportional.)
 4. **Rival detection** — If a rival org is within the player's scan range at the time of a scan, that org's presence is surfaced with **high priority** in the player view — distinct from ordinary sector data but not a hard alert system.
 
 > **Closed roster rule applies here too:** Player visibility is always computed relative to a fixed player set. There is no concept of an anonymous or guest observer in the player view.
@@ -19,23 +19,20 @@ These are the four authoritative rules governing what a player can see. All view
 
 # Scan Action Design
 
-> **Superseded: scanning is no longer a player-callable action.** The
-> `scan_sector` tool described below was never built as such. Scanning is a
-> *pod mission*: a player sets a pod to `scan` with a target coordinate
-> (`set_pod_task` / `set_pod_scan_bearing` in
-> `xsettlers_mcp/tools/organization_tools.py`), and the engine resolves it at
-> end of turn (`engine/turn.py`, step 3). The range rule, the reveal, and the
-> confidence stamp below all still describe what happens — only the trigger
-> moved from an immediate player call to end-of-turn resolution. `get_scan_range()`
-> is real and lives where this section says.
+> **Scanning is not a player-callable action.** A player aims a scanner
+> (`set_pod_task` / `set_pod_scan_bearing` / `set_org_scan_bearing`) and the
+> engine resolves it at end of turn (`engine/turn.py`, step 3). The range rule,
+> the reveal and the confidence stamp below describe what happens; only the
+> trigger is end-of-turn resolution rather than an immediate call.
 
-## `scan_sector(org_id, target_sector_id)` — *design-only, see note above*
+## Scan resolution
 
-**Location:** `xsettlers_mcp/tools/sector_tools.py`
+**Location:** aiming in `xsettlers_mcp/tools/organization_tools.py`, range and
+bearings in `xsettlers_mcp/tools/sector_tools.py`, resolution in `engine/turn.py`.
 
-**Scan range:** Fixed at 2 sectors (Euclidean distance ≤ 2), derived from `get_scan_range(org_id)`. Raised from 1 on 2026-07-31 — at range 1 a Euclidean radius reaches only the 4 orthogonal neighbours (a diagonal is √2 ≈ 1.41 > 1), which reads as broken. Range 2 reaches 12 sectors.
+**Scan range:** Fixed at 2 sectors (Euclidean distance ≤ 2), derived from `get_scan_range(org_id)`. At range 1 a Euclidean radius reaches only the 4 orthogonal neighbours (a diagonal is √2 ≈ 1.41 > 1), which reads as broken; range 2 reaches 12 sectors.
 
-**A scan reveals only its target sector.** No halo, no ring — range governs reach, not breadth (decided 2026-07-31; a radius-5 halo was considered and rejected as making scanning too cheap for the value it returns).
+**A scan reveals only its target sector.** No halo, no ring — range governs reach, not breadth. A radius-5 halo was considered and rejected as making scanning too cheap for the value it returns.
 
 > **Future hook — sensor pods:** Scan range will eventually be derived from the org's pod manifest. A future `sensor` pod type will contribute range increments, and `get_scan_range(org_id)` will query the pod table instead of returning a constant. Do NOT hard-code the number at the call site — always call `get_scan_range()`.
 
@@ -141,7 +138,7 @@ Each `build_*_view()` function returns a plain dict. The renderer decides how to
 > (not per pod) with columns `Task, Count, Energy, Food, Goods, Capacity`,
 > Capacity shown as `current/total` (e.g. `"200/200"`), plus a header line
 > (`"<name> — at (x,y,z), <mission>"`). This is a deliberate MVP baseline,
-> not a final design — expect it to be superseded once the card/renderer
+> not a final design — expect it to change once the card/renderer
 > architecture below is actually built.
 
 ## Colony View — `build_colony_view(org_id, player_id=None)`
@@ -209,7 +206,7 @@ Each `build_*_view()` function returns a plain dict. The renderer decides how to
 
 Unlike the card/renderer architecture below, this one exists:
 `show_sector_neighborhood()` (`xsettlers_mcp/tools/sector_tools.py`) builds it
-and `render_map()` (`views/render.py`) draws it. Built 2026-07-30.
+and `render_map()` (`views/render.py`) draws it.
 
 ## Why the server pre-renders the grid
 

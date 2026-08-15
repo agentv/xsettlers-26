@@ -6,10 +6,9 @@ reject on their own. These tests verify that combination actually gates access
 end-to-end, which is what a dedicated gateway module's tests would otherwise
 cover.
 
-Since 2026-08-11 the per-tool check is the @player_tool decorator
-(xsettlers_mcp/tools/session.py) rather than a lookup hand-copied into each
-tool. That is an implementation change only -- the gate is still per-tool and
-still the same gate -- and these tests are what say so.
+The per-tool check is the @player_tool decorator
+(xsettlers_mcp/tools/session.py); the gate is per-tool, and these tests are
+what say so.
 """
 from db.connection import get_connection
 from xsettlers_mcp.game_select import select_scenario
@@ -48,11 +47,11 @@ def _stranger_sees_only(result):
 
 def test_argument_validation_never_runs_before_authentication():
     """
-    Several tools used to validate their arguments and return a specific
-    complaint BEFORE checking who was asking, which told an unrecognized
-    caller things they had no business learning: that the neighborhood radius
-    caps at 10, that a name may not be empty, and -- most usefully to someone
-    mapping the API -- the complete list of valid mission names.
+    A tool that validates its arguments BEFORE checking who is asking tells
+    an unrecognized caller things they have no business learning: that the
+    neighborhood radius caps at 10, that a name may not be empty, and -- most
+    usefully to someone mapping the API -- the complete list of valid mission
+    names.
 
     game_select.select_scenario already worked the other way round on purpose
     ("Identity is checked first so an unrecognized token learns nothing about

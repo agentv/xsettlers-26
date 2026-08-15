@@ -7,11 +7,10 @@ POD_PRODUCTION = {
 }
 
 # What a colony gains over a ship: every pod aboard a colony produces this
-# multiple of its base rate (added 2026-08-02). Ships get 1.0. This is the
-# entire mechanical payoff for colonizing -- until now a colony was a ship
-# that had thrown away its mobility for nothing, so planting one was never
-# correct. Stability pays; that advantage is the counterweight to the
-# transit stress a mobile fleet lives with.
+# multiple of its base rate. Ships get 1.0. This is the entire mechanical
+# payoff for colonizing -- without it a colony would be a ship that had
+# thrown away its mobility for nothing. Stability pays; that advantage is the
+# counterweight to the transit stress a mobile fleet lives with.
 #
 # Deliberately output-only: POD_CONSUMPTION_RECIPE and ORG_UPKEEP_COST are
 # untouched, so a colony pays exactly what a ship pays for the same tasking
@@ -27,16 +26,15 @@ COLONY_PRODUCTION_MULTIPLIER = 1.5
 # cannot half-become a colony, so a partial payment has nothing to buy.
 # A ship without this much energy pooled across its pods is refused.
 #
-# 30 is an explicitly provisional starting figure, not a tuned one -- it was
-# picked to establish that colonizing has a price at all, and is expected to
-# move once there is play data on how much a colony is actually worth.
+# 30 is provisional, not tuned -- it establishes that colonizing has a price
+# at all, and should move once there is play data on what a colony is worth.
 COLONIZATION_ENERGY_COST = 30.0
 
 # Only energy is harvested from a sector -- produce_energy is capped by
 # whatever the sector has left (see engine/turn.py's production step), not
-# just the pod's own storage_capacity. Food/goods are no longer sector-
-# sourced at all (see POD_CONSUMPTION_RECIPE below): they're manufactured
-# from other already-stored resources instead.
+# just the pod's own storage_capacity. Food and goods are not sector-sourced
+# at all (see POD_CONSUMPTION_RECIPE below): they are manufactured from other
+# already-stored resources.
 RESOURCE_CAPACITY_COLUMN = {
     "energy": "energy_capacity",
 }
@@ -59,16 +57,16 @@ POD_CONSUMPTION_RECIPE = {
 
 # Per-organization upkeep, once per turn (not per pod) -- every ship/colony
 # costs this to keep running at all, on top of whatever its individual pods
-# cost. Energy raised 1 -> 3 on 2026-08-02: energy supply comfortably
-# outran demand, so a stripped sector cost a player nothing and territory
-# was worth nothing to fight over. Applies regardless of transit state, same pooled/prorated draw as
+# cost. The energy figure is what makes territory worth holding: priced too
+# low, energy supply outruns demand and a stripped sector costs a player
+# nothing. Applies regardless of transit state, same pooled/prorated draw as
 # pod recipes (see engine/turn.py's _apply_org_upkeep).
 ORG_UPKEEP_COST = {"food": 5.0, "energy": 3.0}
 
 # Which pod column holds a resource's stock. Storage is per-pod but generic
 # -- a pod can hold a mix of resource types regardless of its current
 # task, since retasking never clears or relabels existing cargo (see
-# engine/turn.py's _store_org_resource/_available_org_resource).
+# engine/org_resources.py).
 RESOURCE_STORAGE_COLUMN = {
     "energy": "energy_stored",
     "food":   "food_stored",

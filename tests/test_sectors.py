@@ -24,7 +24,7 @@ def test_reveal_sector_rolls_energy_in_band_and_stamps_visibility():
     conn.commit()
     sector = cur.execute("SELECT * FROM sectors WHERE id=?", (sid,)).fetchone()
     assert MIN_SECTOR_ENERGY <= sector["energy_capacity"] <= MAX_SECTOR_ENERGY
-    # Energy is the only capacity a sector carries (2026-08-02).
+    # Energy is the only capacity a sector carries.
     assert "food_capacity" not in sector.keys()
     assert "goods_capacity" not in sector.keys()
     ps = cur.execute("SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",

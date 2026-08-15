@@ -3,13 +3,11 @@ An organization's pooled resource stock: reading it, drawing from it, adding
 to it. Storage is per-pod but an org spends as one purse -- these three
 functions are the only place that pooling rule is implemented.
 
-Split out of engine/turn.py (2026-08-11) so code the turn engine *dispatches
-into* can use them. engine/turn.py imports engine/ship_log.py, so anything
-ship_log dispatches to (engine/missions.py's apply_colonize, which has to
-charge the colonization cost) cannot import from engine.turn without a
-cycle -- turn -> ship_log -> missions -> turn. Both engine/turn.py and
-xsettlers_mcp/tools/organization_tools.py now import from here instead.
-Pure move: no behavior change, no signature change.
+A leaf module so that code the turn engine *dispatches into* can use it:
+engine/turn.py imports engine/ship_log.py, so anything ship_log dispatches to
+(engine/missions.py's apply_colonize, which has to charge the colonization
+cost) cannot import from engine.turn without a cycle --
+turn -> ship_log -> missions -> turn.
 """
 from engine.production import RESOURCE_STORAGE_COLUMN
 

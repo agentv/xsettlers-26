@@ -10,9 +10,8 @@ def test_tables_created():
 
 def test_sentinel_sector_exists():
     """The sentinel sector (id=-1, representing "in transit") is created by
-    init_schema() itself, not by bootstrap_game() -- relocated here from
-    test_bootstrap.py per the 2026-07-29 test-suite audit, since it doesn't
-    call _bootstrap() and was testing db/schema.py, not db/bootstrap.py."""
+    init_schema() itself, not by bootstrap_game() -- which is why it is
+    tested here and not in test_bootstrap.py."""
     conn = get_connection()
     sentinel = conn.execute("SELECT id FROM sectors WHERE id=-1").fetchone()
     assert sentinel is not None

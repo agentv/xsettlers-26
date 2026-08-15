@@ -70,10 +70,10 @@ def _dispatch_during_transit(cur, org_id: int, player_id: int, current_turn: int
     for row in rows:
         if row["action"] == "set_pod_task":
             # Guarded for the same reason as engine/ship_log.py's sweep: a
-            # malformed row must not take down the caller. This one is reached
-            # from confirm_move as well as from the turn engine, so an
-            # unguarded raise here would fail a player's move tool call too,
-            # not just the tick.
+            # malformed row must not take down the caller. This path is
+            # reached from confirm_move as well as from the turn engine, so an
+            # unguarded raise would fail a player's move tool call too, not
+            # just the tick.
             try:
                 params = json.loads(row["params"] or "{}")
                 offset = None

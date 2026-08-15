@@ -21,12 +21,9 @@ def declare_end_turn(sess) -> dict:
     """
     Player declares they have no further moves this tick.
 
-    Until 2026-08-11 this was the one tool that never checked the token
-    existed: it ran a bare UPDATE ... WHERE player_token=?, which matched no
-    rows for a stranger, and then cheerfully answered {"declared": True} --
-    and went on to call check_consensus_acceleration(), which can end the turn
-    for everyone. It is authenticated now for the same reason every sibling
-    is, and by the same code rather than a re-typed copy of it.
+    Authenticated like every sibling tool -- this one can end the turn for
+    everyone via check_consensus_acceleration(), so an unrecognized token must
+    not reach it.
     """
     sess.cur.execute("UPDATE players SET end_turn_declared=1 WHERE id=?", (sess.player_id,))
     # Released before consensus is evaluated: check_consensus_acceleration()

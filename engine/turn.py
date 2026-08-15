@@ -96,10 +96,9 @@ def _pay_for(cur, org_id: int, player_id: int, recipe: dict, consumption: dict,
     the same figure.
 
     Graceful degradation rather than an all-or-nothing gate is the whole
-    point -- half the required input on hand buys half the output. This was
-    written out four separate times (org upkeep, pod production, pod scan,
-    innate org scan) before being pulled together here; a change to how
-    proration works had to be made in four places to be made at all.
+    point -- half the required input on hand buys half the output. Four
+    callers rely on it (org upkeep, pod production, pod scan, innate org
+    scan), so how proration works is decided in exactly one place.
 
     A `cap` below 1.0 lets a caller impose a limit the org's own stock knows
     nothing about -- the production pass passes the sector's remaining energy
@@ -426,13 +425,12 @@ def _snapshot_holdings(cur, turn: int, before_holdings: dict, production: dict, 
     execution, arrivals, and mission dispatch have resolved. Called as step 6
     of end_of_turn() -- never before processing is complete.
 
-    Completes this function's own long-standing TODO (2026-07-30): a
-    turn.snapshot event is now written per player per turn -- previously
-    holdings were only ever printed, never persisted, so reconstructing a
-    game's history (e.g. "how much did each player waste, turn by turn")
-    meant replaying the whole game from bootstrap in a scratch DB. Payload
-    carries the after-state holdings, this turn's score (same score_weights
-    formula as show_game_status/_calculate_final_scores), and derived waste.
+    Writes one turn.snapshot event per player per turn, so a game's history
+    (e.g. "how much did each player waste, turn by turn") can be read back
+    from the events table rather than replayed from bootstrap in a scratch DB.
+    Payload carries the after-state holdings, this turn's score (same
+    score_weights formula as show_game_status/_calculate_final_scores), and
+    derived waste.
 
     Waste is derived, not directly measured -- for each resource:
         wasted = produced - consumed - (after - before)

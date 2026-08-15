@@ -14,9 +14,9 @@ def record_event(event_type, payload, actor_id=None,
     # would be circular. Same lazy-import pattern engine/turn.py uses for
     # engine.npc, for the same reason.
     from engine.turn import get_current_turn
+    turn = get_current_turn()
     conn = get_connection()
     cur  = conn.cursor()
-    turn = get_current_turn()
     cur.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM events WHERE turn=?", (turn,))
     seq  = cur.fetchone()[0]
     cur.execute("""

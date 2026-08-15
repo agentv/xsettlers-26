@@ -7,6 +7,16 @@ def _markdown_table(columns: list, rows: list) -> list:
     return lines
 
 
+def _hinted_table(display: dict, rows: list, columns: list) -> list:
+    """One table, built the way a `display` block asks for it: `columns` names
+    the fields in order, `column_labels` overrides a header where the raw field
+    name isn't what a human should read. Both renderers below draw their rows
+    this way, so a table looks the same wherever it appears."""
+    labels = display.get("column_labels") or {}
+    return _markdown_table([labels.get(c, c) for c in columns],
+                           [[str(r.get(c, "")) for c in columns] for r in rows])
+
+
 def render_status(data: dict) -> str:
     """
     Generic renderer for any tool that follows the display-hints convention:
@@ -52,8 +62,7 @@ def render_status(data: dict) -> str:
         lines.append("(no rows)")
         return "\n".join(lines)
 
-    headers = [labels.get(c, c) for c in columns]
-    lines.extend(_markdown_table(headers, [[str(r.get(c, "")) for c in columns] for r in rows]))
+    lines.extend(_hinted_table(display, rows, columns))
 
     footer = display.get("footer")
     if footer:
@@ -114,8 +123,6 @@ def render_map(data: dict) -> str:
     rows = data.get(display.get("rows_key"), [])
     columns = display.get("columns") or []
     if rows and columns:
-        labels = display.get("column_labels") or {}
-        headers = [labels.get(c, c) for c in columns]
         lines.append("")
-        lines.extend(_markdown_table(headers, [[str(r.get(c, "")) for c in columns] for r in rows]))
+        lines.extend(_hinted_table(display, rows, columns))
     return "\n".join(lines)

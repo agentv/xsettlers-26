@@ -1,6 +1,6 @@
 import glob
 import os
-from db.connection import get_connection
+from db.connection import read_one
 from config.loader import load_starting_configuration
 from db.bootstrap import bootstrap_game
 from xsettlers_mcp.auth import authenticate
@@ -48,10 +48,8 @@ def list_scenarios(player_token: str = None) -> list:
 
 def get_active_game() -> dict:
     """The currently bootstrapped scenario, or None if none has been selected yet."""
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("""SELECT scenario_name,scenario_file,selected_by,bootstrapped_at
+    row = read_one("""SELECT scenario_name,scenario_file,selected_by,bootstrapped_at
         FROM games WHERE id=1""")
-    row = cur.fetchone(); conn.close()
     return dict(row) if row else None
 
 def select_scenario(player_token: str, scenario_name: str) -> dict:

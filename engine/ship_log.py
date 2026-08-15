@@ -16,11 +16,10 @@ already-open transaction; see engine/movement.py's docstring).
 """
 import json
 from db.events import record_dispatch_failure, record_command_refused
-from db.orgs import org_position
-from engine.movement import apply_confirm_move
+from engine.movement import apply_confirm_move, resolve_move_destination
 from engine.missions import apply_colonize
 from engine.org_scanning import apply_set_org_scan_bearing
-from engine.pod_tasking import apply_set_pod_task
+from engine.pod_tasking import apply_set_pod_task, offset_from_params
 
 def _dispatch_move(cur, org_id: int, player_id: int, params: dict, current_turn: int):
     dest_x, dest_y, dest_z = resolve_destination(cur, org_id, params)
@@ -28,11 +27,8 @@ def _dispatch_move(cur, org_id: int, player_id: int, params: dict, current_turn:
         params.get("jump_range_per_turn", 1), current_turn)
 
 def _dispatch_set_pod_task(cur, org_id: int, player_id: int, params: dict, current_turn: int):
-    offset = None
-    if all(k in params for k in ("offset_x", "offset_y", "offset_z")):
-        offset = (params["offset_x"], params["offset_y"], params["offset_z"])
     apply_set_pod_task(cur, params["pod_id"], org_id, player_id,
-        params["task"], offset, current_turn)
+        params["task"], offset_from_params(params), current_turn)
 
 def _dispatch_colonize(cur, org_id: int, player_id: int, params: dict, current_turn: int):
     """
@@ -45,12 +41,13 @@ def _dispatch_colonize(cur, org_id: int, player_id: int, params: dict, current_t
     return apply_colonize(cur, org_id, player_id, org["sector_id"], current_turn)
 
 def _dispatch_aim_scan(cur, org_id: int, player_id: int, params: dict, current_turn: int):
-    offset = None
-    if all(k in params for k in ("offset_x", "offset_y", "offset_z")):
-        offset = (params["offset_x"], params["offset_y"], params["offset_z"])
-    apply_set_org_scan_bearing(cur, org_id, player_id, offset, current_turn,
-                               bearing=params.get("bearing"))
+    apply_set_org_scan_bearing(cur, org_id, player_id, offset_from_params(params),
+                               current_turn, bearing=params.get("bearing"))
 
+# The queued binding of engine/actions.py's vocabulary -- these run inside
+# engine/turn.py's open transaction, so they dispatch into the engine-layer
+# apply_* helpers rather than the self-connecting tool wrappers.
+# engine/npc_script.py holds the immediate binding of the same names.
 ACTIONS = {"move": _dispatch_move, "set_pod_task": _dispatch_set_pod_task,
            "colonize": _dispatch_colonize, "aim_scan": _dispatch_aim_scan}
 
@@ -70,18 +67,13 @@ def resolve_destination(cur, org_id: int, params: dict) -> tuple:
     Raises rather than returning an error: a relative move that lands on a
     negative coordinate, or an org with no position to offset from, is a
     malformed order, and dispatch_due_commands' handler guard turns the raise
-    into an alert.queued_command_failed event without stopping the turn.
+    into an alert.queued_command_failed event without stopping the turn. That
+    is the only thing this adds over engine.movement.resolve_move_destination,
+    which an NPC program calls for the same answer and handles differently.
     """
-    if params.get("dest_x") is not None:
-        return params["dest_x"], params["dest_y"], params["dest_z"]
-    org = org_position(cur, org_id)
-    if not org:
-        raise ValueError(f"org {org_id} has no position to apply a relative move from")
-    dest = (org["coord_x"] + params["d_x"], org["coord_y"] + params["d_y"],
-            org["coord_z"] + params["d_z"])
-    if any(c < 0 for c in dest):
-        raise ValueError(f"relative move from ({org['coord_x']},{org['coord_y']},"
-                         f"{org['coord_z']}) lands at {dest} -- space has no negative indices")
+    dest, err = resolve_move_destination(cur, org_id, params)
+    if err:
+        raise ValueError(err)
     return dest
 
 def dispatch_due_commands(cur, current_turn: int):

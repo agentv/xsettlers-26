@@ -34,17 +34,19 @@ authored by a person -- eventually in a builder UI -- and an error has to
 reach them while they are still looking at it, not surface three turns later
 inside a background clock tick with no one to tell.
 """
-from db.connection import get_connection
-from db.orgs import org_position
+from db.connection import connection, get_connection, read_all
+from engine.actions import ACTION_NAMES, DURING_TRANSIT_ACTIONS, TRIGGER_PHASES
+from engine.movement import move_params_error, resolve_move_destination
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.organization_tools import (
     queue_command, set_mission, set_pod_task, set_org_scan_bearing,
-    VALID_POD_TASKS)
+    VALID_POD_TASKS, _aim_args)
 
-ACTIONS = {"move", "colonize", "set_pod_task", "aim_scan"}
-QUEUED_PHASES = {"during_transit", "before_arrival", "after_arrival", "at_turn"}
+ACTIONS = ACTION_NAMES
+QUEUED_PHASES = TRIGGER_PHASES
 ARRIVAL_RELATIVE = {"before_arrival", "after_arrival"}
 STEP_KEYS = {"ships", "when", "action", "params", "repeat_each"}
+NO_POD_AT_INDEX = "org {org_id} has no pod at the requested index"
 
 
 def _select(selector, ship_ids: list) -> list:
@@ -72,20 +74,6 @@ def _params_for(step: dict, position: int) -> dict:
         return params
     repeat_each = step.get("repeat_each", 1)
     return params[(position // repeat_each) % len(params)]
-
-
-def _resolve_now_destination(cur, org_id: int, params: dict):
-    """Absolute destination for an immediate move, from either params form.
-    The relative form resolves against where the ship is standing right now --
-    the same rule engine.ship_log.resolve_destination applies at fire time for
-    a queued move, just evaluated at once because 'now' is the trigger."""
-    if params.get("dest_x") is not None:
-        return params["dest_x"], params["dest_y"], params["dest_z"]
-    org = org_position(cur, org_id)
-    if not org:
-        return None
-    return (org["coord_x"] + params["d_x"], org["coord_y"] + params["d_y"],
-            org["coord_z"] + params["d_z"])
 
 
 def _pod_id_for(cur, org_id: int, params: dict):
@@ -146,7 +134,7 @@ def validate_program(program) -> dict | None:
             return {"error": f"{where}: invalid 'when' value '{when}'. Valid: 'now', "
                              f"'during_transit', 'before_arrival', 'after_arrival', "
                              f"{{at_turn: N}}"}
-        if phase == "during_transit" and action != "set_pod_task":
+        if phase == "during_transit" and action not in DURING_TRANSIT_ACTIONS:
             return {"error": f"{where}: 'during_transit' only supports set_pod_task -- "
                              f"pod tasking is the one thing a departing org does not lock"}
         # An arrival-relative order can only be queued against a move that is
@@ -214,16 +202,9 @@ def _validate_params(step: dict, action: str, where: str) -> dict | None:
         if not isinstance(entry, dict):
             return {"error": f"{where}: every 'params' entry must be a mapping"}
         if action == "move":
-            absolute = [k for k in ("dest_x", "dest_y", "dest_z") if entry.get(k) is not None]
-            relative = [k for k in ("d_x", "d_y", "d_z") if entry.get(k) is not None]
-            if absolute and relative:
-                return {"error": f"{where}: a move takes dest_x/dest_y/dest_z or "
-                                 f"d_x/d_y/d_z, not both"}
-            if not absolute and not relative:
-                return {"error": f"{where}: a move needs a destination -- "
-                                 f"dest_x/dest_y/dest_z or d_x/d_y/d_z"}
-            if (absolute and len(absolute) < 3) or (relative and len(relative) < 3):
-                return {"error": f"{where}: a move needs all three coordinates"}
+            problem = move_params_error(entry)
+            if problem:
+                return {"error": f"{where}: {problem}"}
         elif action == "set_pod_task":
             task = entry.get("task")
             if task not in VALID_POD_TASKS:
@@ -249,11 +230,9 @@ def run_program(player_id: int, player_token: str, program, memory: dict) -> dic
     if not program:
         return memory
 
-    conn = get_connection(); cur = conn.cursor()
-    ship_ids = [r["id"] for r in cur.execute(
+    ship_ids = [r["id"] for r in read_all(
         "SELECT id FROM organizations WHERE player_id=? AND org_type='ship' ORDER BY id",
-        (player_id,)).fetchall()]
-    conn.close()
+        (player_id,))]
     if not ship_ids:
         return memory
 
@@ -278,48 +257,49 @@ def _dispatch_step(player_token: str, org_id: int, step: dict, params: dict):
     when = step.get("when", "now")
     action = step["action"]
     if when == "now":
-        return _dispatch_now(player_token, org_id, action, params)
+        return IMMEDIATE[action](player_token, org_id, params)
 
     if isinstance(when, dict):
         phase, turn = "at_turn", when["at_turn"]
     else:
         phase, turn = when, None
     if action == "set_pod_task":
-        conn = get_connection(); cur = conn.cursor()
-        params["pod_id"] = _pod_id_for(cur, org_id, params)
-        conn.close()
+        with connection() as conn:
+            params["pod_id"] = _pod_id_for(conn, org_id, params)
         params.pop("pod_index", None)
         if params["pod_id"] is None:
-            return {"error": f"org {org_id} has no pod at the requested index"}
+            return {"error": NO_POD_AT_INDEX.format(org_id=org_id)}
     return queue_command(player_token, org_id, phase, action, params, turn=turn)
 
 
-def _dispatch_now(player_token: str, org_id: int, action: str, params: dict):
-    if action == "move":
-        conn = get_connection(); cur = conn.cursor()
-        dest = _resolve_now_destination(cur, org_id, params)
-        conn.close()
-        if dest is None:
-            return {"error": f"org {org_id} is in transit -- no position to move from"}
-        if any(c < 0 for c in dest):
-            return {"error": f"move lands at {dest} -- space has no negative indices"}
-        return confirm_move(player_token, org_id, dest[0], dest[1], dest[2],
-                            jump_range_per_turn=params.get("jump_range_per_turn", 1))
-    if action == "colonize":
-        return set_mission(player_token, org_id, "colonize")
-    if action == "aim_scan":
-        return set_org_scan_bearing(player_token, org_id, bearing=params.get("bearing"),
-                                    offset_x=params.get("offset_x"),
-                                    offset_y=params.get("offset_y"),
-                                    offset_z=params.get("offset_z"))
-    # action == 'set_pod_task'
-    conn = get_connection(); cur = conn.cursor()
-    pod_id = _pod_id_for(cur, org_id, params)
-    conn.close()
+def _now_move(player_token: str, org_id: int, params: dict):
+    with connection() as conn:
+        dest, err = resolve_move_destination(conn, org_id, params)
+    if err:
+        return {"error": err}
+    return confirm_move(player_token, org_id, dest[0], dest[1], dest[2],
+                        jump_range_per_turn=params.get("jump_range_per_turn", 1))
+
+
+def _now_colonize(player_token: str, org_id: int, params: dict):
+    return set_mission(player_token, org_id, "colonize")
+
+
+def _now_aim_scan(player_token: str, org_id: int, params: dict):
+    return set_org_scan_bearing(player_token, org_id, **_aim_args(params))
+
+
+def _now_set_pod_task(player_token: str, org_id: int, params: dict):
+    with connection() as conn:
+        pod_id = _pod_id_for(conn, org_id, params)
     if pod_id is None:
-        return {"error": f"org {org_id} has no pod at the requested index"}
-    return set_pod_task(player_token, pod_id, params["task"],
-                        bearing=params.get("bearing"),
-                        offset_x=params.get("offset_x"),
-                        offset_y=params.get("offset_y"),
-                        offset_z=params.get("offset_z"))
+        return {"error": NO_POD_AT_INDEX.format(org_id=org_id)}
+    return set_pod_task(player_token, pod_id, params["task"], **_aim_args(params))
+
+
+# The immediate binding of engine/actions.py's vocabulary: these go through the
+# ordinary @player_tool wrappers, since run_npc_decisions() completes before
+# end_of_turn() opens its transaction. engine/ship_log.py holds the queued
+# binding of the same names.
+IMMEDIATE = {"move": _now_move, "colonize": _now_colonize,
+             "aim_scan": _now_aim_scan, "set_pod_task": _now_set_pod_task}

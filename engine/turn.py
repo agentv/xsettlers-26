@@ -1,6 +1,6 @@
 import collections, os, json, math
 from config.loader import load_config
-from db.connection import get_connection
+from db.connection import get_connection, read_one, read_value
 from db.sectors import reveal_sector, CONFIDENCE_DECAY_PER_TURN
 from db.events import record_event_direct
 from db.orgs import org_position
@@ -16,9 +16,7 @@ from xsettlers_mcp.tools.sector_tools import get_scan_range
 TURN_LIMIT = int(os.getenv("TURN_LIMIT", 20))
 
 def get_current_turn() -> int:
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT current_turn FROM game_state WHERE id=1")
-    turn = cur.fetchone()[0]; conn.close(); return turn
+    return read_value("SELECT current_turn FROM game_state WHERE id=1")
 
 def is_game_over() -> bool:
     return get_current_turn() >= TURN_LIMIT
@@ -34,10 +32,7 @@ def get_next_tick_at() -> str | None:
     can't answer on its own -- see scripts/status.py for how a caller
     reconciles this timestamp with a live health check.
     """
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT next_tick_at FROM game_state WHERE id=1")
-    row = cur.fetchone(); conn.close()
-    return row["next_tick_at"] if row else None
+    return read_value("SELECT next_tick_at FROM game_state WHERE id=1")
 
 def _player_holdings(cur) -> dict:
     """
@@ -185,13 +180,11 @@ def _apply_org_upkeep(cur, consumption: dict):
 def end_of_turn():
     if is_game_over():
         print("Turn limit reached — game over."); return
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM games WHERE id=1")
-    if cur.fetchone()[0] == 0:
-        # No scenario selected yet (xsettlers_mcp/game_select.py's select_scenario populates
-        # this on bootstrap). Nothing to process -- don't burn turns on an empty game.
-        conn.close(); return
-    conn.close()
+    if not read_value("SELECT COUNT(*) FROM games WHERE id=1"):
+        # No scenario selected yet (xsettlers_mcp/game_select.py's select_scenario
+        # populates this on bootstrap). Nothing to process -- don't burn turns
+        # on an empty game.
+        return
 
     # 0. NPC decisions -- each is_npc=1 player with a profile acts before
     #    this turn resolves, by calling the same confirm_move/set_pod_task/
@@ -522,10 +515,8 @@ def get_final_scores() -> dict:
     Reads the persisted `game.final_scores` event rather than recomputing, so
     what a player is shown afterwards is what actually happened at the whistle.
     """
-    conn = get_connection()
-    row = conn.execute("SELECT payload FROM events WHERE event_type=? ORDER BY id LIMIT 1",
-                       (FINAL_SCORES_EVENT,)).fetchone()
-    conn.close()
+    row = read_one("SELECT payload FROM events WHERE event_type=? ORDER BY id LIMIT 1",
+                   (FINAL_SCORES_EVENT,))
     return json.loads(row["payload"]) if row else None
 
 def _handle_colonize(cur, org, current_turn):
@@ -542,9 +533,7 @@ def _handle_defend(cur, org, params): pass   # stub
 def _handle_attack(cur, org, params): pass   # stub
 
 def check_consensus_acceleration():
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM players WHERE end_turn_declared=0")
-    undeclared = cur.fetchone()[0]; conn.close()
+    undeclared = read_value("SELECT COUNT(*) FROM players WHERE end_turn_declared=0")
     if undeclared == 0:
         print("All players declared end of turn — accelerating clock.")
         end_of_turn(); return True

@@ -1,5 +1,5 @@
 import json
-from db.connection import get_connection
+from db.connection import connection
 from engine.npc_script import validate_program
 
 def assign_npc_profile(player_id: int, strategy_name: str, config: dict = None) -> dict:
@@ -22,15 +22,14 @@ def assign_npc_profile(player_id: int, strategy_name: str, config: dict = None) 
     program_error = validate_program((config or {}).get("program"))
     if program_error:
         return program_error
-    conn = get_connection(); cur = conn.cursor()
-    cur.execute("UPDATE players SET is_npc=1 WHERE id=?", (player_id,))
-    cur.execute("""
-        INSERT INTO npc_profiles (player_id, strategy_name, config, memory)
-        VALUES (?, ?, ?, '{}')
-        ON CONFLICT(player_id) DO UPDATE SET
-            strategy_name = excluded.strategy_name,
-            config = excluded.config,
-            memory = '{}'
-    """, (player_id, strategy_name, json.dumps(config or {})))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE players SET is_npc=1 WHERE id=?", (player_id,))
+        conn.execute("""
+            INSERT INTO npc_profiles (player_id, strategy_name, config, memory)
+            VALUES (?, ?, ?, '{}')
+            ON CONFLICT(player_id) DO UPDATE SET
+                strategy_name = excluded.strategy_name,
+                config = excluded.config,
+                memory = '{}'
+        """, (player_id, strategy_name, json.dumps(config or {})))
     return {"ok": True, "player_id": player_id, "strategy_name": strategy_name}

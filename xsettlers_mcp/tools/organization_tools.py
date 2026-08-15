@@ -3,16 +3,32 @@ from db.orgs import org_position
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED, POD_NOT_OWNED
 from engine.turn import get_current_turn
 from engine.missions import apply_colonize
+from engine.movement import move_params_error
 from engine.org_scanning import apply_set_org_scan_bearing
-from engine.ship_log import ACTIONS as SHIP_LOG_ACTIONS
-from engine.pod_tasking import resolve_aim, aim_status, apply_set_pod_task
+from engine.actions import ACTION_NAMES, DURING_TRANSIT_ACTIONS, TRIGGER_PHASES
+from engine.pod_tasking import (check_aim, check_range, is_aiming, resolve_aim,
+                                apply_set_pod_task)
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 import json
 
 
 VALID_ORG_MISSIONS = {"idle", "move", "colonize", "defend", "attack"}
 VALID_POD_TASKS = {"idle", "produce_energy", "produce_food", "produce_goods", "scan"}
-VALID_TRIGGER_PHASES = {"during_transit", "before_arrival", "after_arrival", "at_turn"}
+VALID_TRIGGER_PHASES = TRIGGER_PHASES
+
+AIM_KEYS = ("bearing", "offset_x", "offset_y", "offset_z")
+AIM_NOT_A_SCAN = "Only the scan task takes an aim; '{task}' does not"
+
+
+def _aim_args(params: dict) -> dict:
+    """The four aim fields out of a queued command's params, as keyword
+    arguments for check_aim."""
+    return {k: params.get(k) for k in AIM_KEYS}
+
+
+def _params_aiming(params: dict) -> bool:
+    """Whether a queued command's params carry an aim (see is_aiming)."""
+    return is_aiming(**_aim_args(params))
 
 
 def _aimed_sector(cur, org_id: int, offset):
@@ -89,9 +105,6 @@ def set_mission(sess, org_id: int, mission: str, params: dict = None) -> dict:
                 (mission, json.dumps(params) if params else None, org_id))
     return {"ok": True, "org_id": org_id, "mission": mission}
 
-DURING_TRANSIT_ACTIONS = {"set_pod_task"}
-
-
 def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     """
     Validate a queued command's params at QUEUE time and return them
@@ -119,28 +132,8 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     would otherwise silently drop an aim the player was told they could pass.
     """
     if action == "move":
-        absolute = [k for k in ("dest_x", "dest_y", "dest_z") if params.get(k) is not None]
-        relative = [k for k in ("d_x", "d_y", "d_z") if params.get(k) is not None]
-        if absolute and relative:
-            return None, {"error": "action='move' takes either dest_x/dest_y/dest_z "
-                                   "(absolute) or d_x/d_y/d_z (relative to wherever "
-                                   "the org is when the order fires), not both"}
-        if relative:
-            if len(relative) < 3:
-                missing = [k for k in ("d_x", "d_y", "d_z") if params.get(k) is None]
-                return None, {"error": f"action='move' requires params: {', '.join(missing)}"}
-            # No negative check here: a relative move's absolute destination
-            # depends on where the org ends up, which is unknowable now and is
-            # the whole point of the form. engine.ship_log.resolve_destination
-            # checks it at fire time instead.
-            return params, None
-        if len(absolute) < 3:
-            missing = [k for k in ("dest_x", "dest_y", "dest_z") if params.get(k) is None]
-            return None, {"error": f"action='move' requires params: {', '.join(missing)}"}
-        if any(params[k] < 0 for k in ("dest_x", "dest_y", "dest_z")):
-            return None, {"error": "Destination coordinates cannot be negative "
-                                   "-- space has no negative indices"}
-        return params, None
+        problem = move_params_error(params)
+        return (None, {"error": problem}) if problem else (params, None)
 
     if action == "colonize":
         # Takes no params at all -- which ship is colonizing is the org the
@@ -153,18 +146,11 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
         return {}, None
 
     if action == "aim_scan":
-        aiming = params.get("bearing") is not None or any(
-            params.get(c) is not None for c in ("offset_x", "offset_y", "offset_z"))
-        if not aiming:
+        if not _params_aiming(params):
             return {}, None  # clears the org's aim
-        offset, err = resolve_aim(params.get("bearing"), params.get("offset_x"),
-                                  params.get("offset_y"), params.get("offset_z"))
+        offset, status, err = check_aim(org_id, **_aim_args(params))
         if err:
             return None, err
-        status = aim_status(org_id, offset)
-        if not status["in_range"]:
-            return None, {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
-                                   f"{status['scan_range']}", **status}
         return {"offset_x": offset[0], "offset_y": offset[1], "offset_z": offset[2],
                 "bearing": status["bearing"]}, None
 
@@ -182,20 +168,13 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
                        (pod_id, org_id)).fetchone():
         return None, {"error": "Pod not found or not part of this organization"}
 
-    aiming = params.get("bearing") is not None or any(
-        params.get(c) is not None for c in ("offset_x", "offset_y", "offset_z"))
-    if not aiming:
+    if not _params_aiming(params):
         return params, None
     if task != "scan":
-        return None, {"error": f"Only the scan task takes an aim; '{task}' does not"}
-    offset, err = resolve_aim(params.get("bearing"), params.get("offset_x"),
-                              params.get("offset_y"), params.get("offset_z"))
+        return None, {"error": AIM_NOT_A_SCAN.format(task=task)}
+    offset, _status, err = check_aim(org_id, **_aim_args(params))
     if err:
         return None, err
-    status = aim_status(org_id, offset)
-    if not status["in_range"]:
-        return None, {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
-                               f"{status['scan_range']}", **status}
     normalized = {k: v for k, v in params.items() if k != "bearing"}
     normalized.update(offset_x=offset[0], offset_y=offset[1], offset_z=offset[2])
     return normalized, None
@@ -253,8 +232,8 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
     """
     if trigger_phase not in VALID_TRIGGER_PHASES:
         return {"error": f"Invalid trigger_phase '{trigger_phase}'. Valid: {sorted(VALID_TRIGGER_PHASES)}"}
-    if action not in SHIP_LOG_ACTIONS:
-        return {"error": f"Invalid action '{action}'. Valid: {sorted(SHIP_LOG_ACTIONS)}"}
+    if action not in ACTION_NAMES:
+        return {"error": f"Invalid action '{action}'. Valid: {sorted(ACTION_NAMES)}"}
     if trigger_phase == "during_transit" and action not in DURING_TRANSIT_ACTIONS:
         return {"error": f"'during_transit' only supports: {sorted(DURING_TRANSIT_ACTIONS)}"}
     if trigger_phase == "at_turn" and turn is None:
@@ -313,11 +292,10 @@ def set_pod_task(sess, pod_id: int, task: str,
     """
     if task not in VALID_POD_TASKS:
         return {"error": f"Invalid pod task '{task}'. Valid: {sorted(VALID_POD_TASKS)}"}
-    aiming = bearing is not None or any(c is not None for c in (offset_x, offset_y, offset_z))
     offset = None
-    if aiming:
+    if is_aiming(bearing, offset_x, offset_y, offset_z):
         if task != "scan":
-            return {"error": f"Only the scan task takes an aim; '{task}' does not"}
+            return {"error": AIM_NOT_A_SCAN.format(task=task)}
         offset, err = resolve_aim(bearing, offset_x, offset_y, offset_z)
         if err:
             return err
@@ -345,7 +323,7 @@ def set_pod_scan_bearing(sess, pod_id: int, bearing: str = None,
     the same bearing after it moves, with no re-aiming. Pass no bearing and no
     offset to clear the aim and stop paying for it.
     """
-    clearing = bearing is None and all(c is None for c in (offset_x, offset_y, offset_z))
+    clearing = not is_aiming(bearing, offset_x, offset_y, offset_z)
     offset = None
     if not clearing:
         offset, err = resolve_aim(bearing, offset_x, offset_y, offset_z)
@@ -360,10 +338,9 @@ def set_pod_scan_bearing(sess, pod_id: int, bearing: str = None,
     if clearing:
         cur.execute("UPDATE pods SET task_params=NULL WHERE id=?", (pod_id,))
         return {"ok": True, "pod_id": pod_id, "cleared": True}
-    status = aim_status(pod["org_id"], offset)
-    if not status["in_range"]:
-        return {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
-                         f"{status['scan_range']}", **status}
+    status, err = check_range(pod["org_id"], offset)
+    if err:
+        return err
     params = {"offset_x": offset[0], "offset_y": offset[1], "offset_z": offset[2]}
     record_event(
         event_type="pod.scan_bearing_set",
@@ -438,7 +415,7 @@ def set_org_scan_bearing(sess, org_id: int, bearing: str = None,
     it moves -- set a pattern once and it travels with the hull. Pass neither
     to clear the aim and stop paying for it.
     """
-    clearing = bearing is None and all(c is None for c in (offset_x, offset_y, offset_z))
+    clearing = not is_aiming(bearing, offset_x, offset_y, offset_z)
     offset = None
     if not clearing:
         offset, err = resolve_aim(bearing, offset_x, offset_y, offset_z)
@@ -453,10 +430,9 @@ def set_org_scan_bearing(sess, org_id: int, bearing: str = None,
     if clearing:
         apply_set_org_scan_bearing(cur, org_id, sess.player_id, None, get_current_turn())
         return {"ok": True, "org_id": org_id, "name": org["name"], "cleared": True}
-    status = aim_status(org_id, offset)
-    if not status["in_range"]:
-        return {"error": f"Aim reaches {status['distance']:.2f} sectors; scan range is "
-                         f"{status['scan_range']}", **status}
+    status, err = check_range(org_id, offset)
+    if err:
+        return err
     apply_set_org_scan_bearing(cur, org_id, sess.player_id, offset,
                                get_current_turn(), bearing=status["bearing"])
     aimed = _aimed_sector(cur, org_id, offset)

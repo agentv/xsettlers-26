@@ -1,6 +1,6 @@
 import asyncio, os
 from datetime import datetime, timedelta, timezone
-from db.connection import get_connection
+from db.connection import connection, read_value
 from engine.turn import end_of_turn
 TICK_SECONDS = int(os.getenv("GAME_TICK_SECONDS", 300))
 
@@ -19,26 +19,22 @@ def _stamp_next_tick_at(seconds_remaining: int = TICK_SECONDS):
     full TICK_SECONDS.
     """
     next_tick = datetime.now(timezone.utc) + timedelta(seconds=seconds_remaining)
-    conn = get_connection()
-    conn.execute("UPDATE game_state SET next_tick_at=? WHERE id=1",
-                (next_tick.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE game_state SET next_tick_at=? WHERE id=1",
+                     (next_tick.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",))
 
 def is_frozen() -> bool:
-    conn = get_connection()
-    row = conn.execute("SELECT frozen FROM game_state WHERE id=1").fetchone()
-    conn.close()
-    return bool(row and row["frozen"])
+    return bool(read_value("SELECT frozen FROM game_state WHERE id=1"))
 
 def freeze():
-    conn = get_connection()
-    conn.execute("UPDATE game_state SET frozen=1 WHERE id=1")
-    conn.commit(); conn.close()
+    _set_frozen(1)
 
 def unfreeze():
-    conn = get_connection()
-    conn.execute("UPDATE game_state SET frozen=0 WHERE id=1")
-    conn.commit(); conn.close()
+    _set_frozen(0)
+
+def _set_frozen(value: int):
+    with connection() as conn:
+        conn.execute("UPDATE game_state SET frozen=? WHERE id=1", (value,))
 
 async def run_clock():
     """

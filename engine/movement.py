@@ -1,7 +1,69 @@
 import json, math
 from db.events import record_event_direct, record_dispatch_failure
 from db.orgs import org_position
-from engine.pod_tasking import apply_set_pod_task
+from engine.pod_tasking import apply_set_pod_task, offset_from_params
+
+ABSOLUTE_KEYS = ("dest_x", "dest_y", "dest_z")
+RELATIVE_KEYS = ("d_x", "d_y", "d_z")
+NEGATIVE_DEST = "Destination coordinates cannot be negative -- space has no negative indices"
+
+def move_params_error(params: dict) -> str | None:
+    """
+    Why a move's params could never work, or None if they are well-formed.
+
+    A move is addressed one of two ways and never both: absolute
+    dest_x/dest_y/dest_z, or d_x/d_y/d_z relative to wherever the org is
+    standing when the order fires. The relative form is what makes an authored
+    order portable between starting positions, and it is why the
+    negative-coordinate guard only applies to the absolute form here -- a
+    relative move's real destination isn't knowable until it fires, so
+    resolve_move_destination checks it then.
+
+    Returns a bare sentence so callers can frame it: a tool returns it as
+    {"error": ...}, a program validator prefixes it with which step failed.
+    """
+    absolute = [k for k in ABSOLUTE_KEYS if params.get(k) is not None]
+    relative = [k for k in RELATIVE_KEYS if params.get(k) is not None]
+    if absolute and relative:
+        return ("a move takes dest_x/dest_y/dest_z (absolute) or d_x/d_y/d_z "
+                "(relative to wherever the org is when the order fires), not both")
+    if not absolute and not relative:
+        return "a move needs a destination -- dest_x/dest_y/dest_z or d_x/d_y/d_z"
+    missing = [k for k in (ABSOLUTE_KEYS if absolute else RELATIVE_KEYS)
+               if params.get(k) is None]
+    if missing:
+        return f"a move needs all three coordinates -- missing {', '.join(missing)}"
+    if absolute and any(params[k] < 0 for k in ABSOLUTE_KEYS):
+        return NEGATIVE_DEST
+    return None
+
+def resolve_move_destination(cur, org_id: int, params: dict):
+    """
+    A move's absolute destination, from either params form: (dest, None), or
+    (None, error) if it cannot be resolved.
+
+    The relative form resolves against where the org is standing at the moment
+    this runs -- which is the whole point of that form, and why it cannot be
+    resolved when the order is given. Both the ship's log firing a queued move
+    and an NPC program dispatching an immediate one land here, so "three
+    further out the way I'm heading" means the same thing either way.
+
+    Returns the error rather than raising, because the two callers want
+    opposite things with it: engine/ship_log.py raises so its handler guard
+    logs alert.queued_command_failed without stopping the turn, while a
+    program collects it into the profile's error list.
+    """
+    if params.get("dest_x") is not None:
+        return (params["dest_x"], params["dest_y"], params["dest_z"]), None
+    org = org_position(cur, org_id)
+    if not org:
+        return None, f"org {org_id} is in transit -- no position to apply a relative move from"
+    dest = (org["coord_x"] + params["d_x"], org["coord_y"] + params["d_y"],
+            org["coord_z"] + params["d_z"])
+    if any(c < 0 for c in dest):
+        return None, (f"relative move from ({org['coord_x']},{org['coord_y']},"
+                      f"{org['coord_z']}) lands at {dest} -- space has no negative indices")
+    return dest, None
 
 def plan_move(origin, dest, jump_range_per_turn: int, current_turn: int) -> dict:
     """
@@ -92,11 +154,9 @@ def _dispatch_during_transit(cur, org_id: int, player_id: int, current_turn: int
             # just the tick.
             try:
                 params = json.loads(row["params"] or "{}")
-                offset = None
-                if all(k in params for k in ("offset_x", "offset_y", "offset_z")):
-                    offset = (params["offset_x"], params["offset_y"], params["offset_z"])
                 apply_set_pod_task(cur, params["pod_id"], org_id, player_id,
-                                   params["task"], offset, current_turn)
+                                   params["task"], offset_from_params(params),
+                                   current_turn)
             except Exception as exc:
                 record_dispatch_failure(cur, current_turn, row["id"], org_id,
                                         player_id, row["action"], repr(exc))

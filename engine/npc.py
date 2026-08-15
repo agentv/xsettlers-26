@@ -27,7 +27,7 @@ Per-NPC working memory lives in npc_profiles.memory, a JSON blob mutated turn
 to turn -- the same pattern pods.task_params uses for per-pod working state.
 """
 import json
-from db.connection import get_connection
+from db.connection import connection, get_connection, read_all
 from db.orgs import org_position
 from engine.npc_programs import load_programs
 from engine.npc_script import run_program
@@ -65,12 +65,10 @@ def _frontier_map_stay_frosty(player_id: int, player_token: str, config: dict, m
     bearing_cycle = ["N", "S", "E", "W"]
     offsets = {"N": (0, -leg, 0), "S": (0, leg, 0), "E": (leg, 0, 0), "W": (-leg, 0, 0)}
 
-    conn = get_connection(); cur = conn.cursor()
-    ships = cur.execute("""SELECT o.id, s.coord_x, s.coord_y, s.coord_z
+    ships = read_all("""SELECT o.id, s.coord_x, s.coord_y, s.coord_z
         FROM organizations o JOIN sectors s ON s.id=o.sector_id
         WHERE o.player_id=? AND o.org_type='ship' AND o.sector_id!=-1 AND o.mission='idle'
-        ORDER BY o.id""", (player_id,)).fetchall()
-    conn.close()
+        ORDER BY o.id""", (player_id,))
 
     directions = memory.setdefault("directions", {})
     for ship in ships:
@@ -223,13 +221,11 @@ def run_npc_decisions():
     library; a named program runs through the same scripted runner as a
     profile carrying its own inline program.
     """
-    conn = get_connection(); cur = conn.cursor()
-    npcs = cur.execute("""
+    npcs = read_all("""
         SELECT pl.id AS player_id, pl.player_token, np.strategy_name, np.config, np.memory
         FROM players pl JOIN npc_profiles np ON np.player_id = pl.id
         WHERE pl.is_npc = 1
-    """).fetchall()
-    conn.close()
+    """)
 
     programs = load_programs()
     for row in npcs:
@@ -244,7 +240,6 @@ def run_npc_decisions():
                                  programs[name], memory)
         else:
             continue
-        conn = get_connection()
-        conn.execute("UPDATE npc_profiles SET memory=? WHERE player_id=?",
-                     (json.dumps(memory), row["player_id"]))
-        conn.commit(); conn.close()
+        with connection() as conn:
+            conn.execute("UPDATE npc_profiles SET memory=? WHERE player_id=?",
+                         (json.dumps(memory), row["player_id"]))

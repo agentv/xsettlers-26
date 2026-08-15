@@ -12,7 +12,7 @@ own view.
 from config.loader import load_config
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED
 from engine.production import POD_PRODUCTION, get_production_multiplier
-from engine.turn import get_next_tick_at, get_final_scores
+from engine.turn import get_next_tick_at, get_final_scores, TURN_LIMIT
 from engine.scoring import player_standings
 from xsettlers_mcp.tools.sector_tools import bearing_name
 from datetime import datetime, timezone
@@ -108,18 +108,21 @@ def _short_name(name: str) -> str:
             return name[len(prefix):]
     return name
 
+def _abbreviated(values: dict, key=lambda k: k) -> str:
+    """{"energy": 20.0, "food": 20.0} -> "E:20, F:20". `key` maps a dict key
+    onto a resource name, which is all that separates a resource-keyed dict
+    from a task-keyed one. Entries naming something that isn't a resource
+    (an idle or scan pod count) are left out rather than shown unabbreviated."""
+    return ", ".join(f"{RESOURCE_ABBREV[key(k)]}:{v:g}"
+                     for k, v in values.items() if key(k) in RESOURCE_ABBREV)
+
 def _tasking_summary(tasking: dict) -> str:
-    """{"produce_energy": 2, "produce_food": 2} -> "E:2, F:2" -- a
-    ready-to-display string using RESOURCE_ABBREV, so clients don't need to
-    do the mission-name-to-abbreviation lookup themselves."""
-    return ", ".join(f"{RESOURCE_ABBREV[m.replace('produce_', '')]}:{n}"
-                     for m, n in tasking.items() if m.replace("produce_", "") in RESOURCE_ABBREV)
+    """{"produce_energy": 2, "produce_food": 2} -> "E:2, F:2"."""
+    return _abbreviated(tasking, key=lambda task: task.replace("produce_", ""))
 
 def _resource_summary(values: dict) -> str:
-    """{"energy": 20.0, "food": 20.0} -> "E:20, F:20" -- same abbreviation
-    convention as _tasking_summary, for any resource-keyed dict (e.g. a
-    production breakdown) rather than a mission-keyed one."""
-    return ", ".join(f"{RESOURCE_ABBREV[r]}:{v:g}" for r, v in values.items() if r in RESOURCE_ABBREV)
+    """{"energy": 20.0, "food": 20.0} -> "E:20, F:20"."""
+    return _abbreviated(values)
 
 def _org_production(tasking: dict, in_transit: bool, org_type: str = "ship") -> dict:
     """
@@ -267,7 +270,6 @@ def show_civilization_status(sess) -> dict:
     # Turn context
     cur.execute("SELECT current_turn FROM game_state WHERE id=1")
     current_turn = cur.fetchone()["current_turn"]
-    turn_limit = int(os.getenv("TURN_LIMIT", 20))
     next_tick_at = get_next_tick_at()
 
     # Organizations
@@ -367,7 +369,7 @@ def show_civilization_status(sess) -> dict:
 
     return {
         "turn": current_turn,
-        "turn_limit": turn_limit,
+        "turn_limit": TURN_LIMIT,
         "next_tick_at": next_tick_at,
         "organizations": orgs,
         "assets": assets,
@@ -418,7 +420,6 @@ def show_game_status(sess) -> dict:
 
     cur.execute("SELECT current_turn FROM game_state WHERE id=1")
     current_turn = cur.fetchone()["current_turn"]
-    turn_limit = int(os.getenv("TURN_LIMIT", 20))
     next_tick_at = get_next_tick_at()
     weights = load_config().game.score_weights
 
@@ -449,7 +450,7 @@ def show_game_status(sess) -> dict:
     next_tick_countdown = _tick_countdown_display(next_tick_at)
     header = (f"FINAL — game over at turn {final['final_turn']} of {final['turn_limit']}. "
               f"Winner: {final['winner']}" if game_over
-              else f"Turn {current_turn} of {turn_limit} ({next_tick_countdown})")
+              else f"Turn {current_turn} of {TURN_LIMIT} ({next_tick_countdown})")
 
     # Whole-number display variants -- score/energy/food/goods never carry a
     # meaningful fraction (production and upkeep are integer per-turn amounts),
@@ -464,7 +465,7 @@ def show_game_status(sess) -> dict:
 
     return {
         "turn": current_turn,
-        "turn_limit": turn_limit,
+        "turn_limit": TURN_LIMIT,
         "next_tick_at": next_tick_at,
         "next_tick_countdown": next_tick_countdown,
         "game_over": game_over,

@@ -1,3 +1,4 @@
+from xsettlers_mcp.tools.registry import mcp_tool
 from db.connection import get_connection
 from db.sectors import TURNS_TO_BLINK_OUT
 from xsettlers_mcp.tools.session import player_tool
@@ -117,6 +118,8 @@ def get_scan_range(org_id: int) -> int:
 # target. See `engine/turn.py` for scan resolution logic.
 
 
+@mcp_tool(
+    "Get a specific sector (player-scoped visibility)")
 @player_tool
 def get_sector(sess, sector_id: int) -> dict:
     """Return sector info — only if the player has visibility (confidence > 0)."""
@@ -128,6 +131,8 @@ def get_sector(sess, sector_id: int) -> dict:
         return {"error": "Sector not visible or does not exist"}
     return dict(sector)
 
+@mcp_tool(
+    "All sectors visible to the calling player")
 @player_tool
 def get_sector_map(sess) -> list:
     """Return all sectors visible to this player, ordered by confidence."""
@@ -138,6 +143,17 @@ def get_sector_map(sess) -> list:
         (sess.player_id,)).fetchall()]
 
 
+@mcp_tool(
+    "Map the neighborhood around one of your organizations (aka "
+    "view/visualize the neighborhood). Center is either an org_id -- the "
+    "normal way to call it -- or explicit (center_x, center_y, center_z) "
+    "coordinates; a ship in transit has no location and can't be a center. "
+    "Default radius 5 (an 11x11 grid), max 10. Returns the complete "
+    "lattice, not just known sectors: display.grid holds a ready-to-draw "
+    "grid with absolute coordinates on both axes and one <=3-character "
+    "marker per cell (your orgs, rival presence, '*' for seen-and-empty, "
+    "'·' for never seen, or blank for out of range), plus display.legend. "
+    "Pure view -- reveals nothing, costs nothing, changes no confidence.")
 @player_tool
 def show_sector_neighborhood(
         sess,

@@ -1,3 +1,4 @@
+from xsettlers_mcp.tools.registry import mcp_tool
 import glob
 import os
 from db.connection import read_one
@@ -8,6 +9,11 @@ from xsettlers_mcp.auth import authenticate
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _SCENARIO_GLOB = os.path.join(_REPO_ROOT, "config", "game*.yaml")
 
+@mcp_tool(
+    "List available game scenarios a player can choose to start/join. Must "
+    "be called (and select_scenario used to pick one) before any other tool "
+    "works -- until a scenario is selected, no game exists and every other "
+    "tool will report 'Player not found'.")
 def list_scenarios(player_token: str = None) -> list:
     """
     Enumerate the game library by scanning config/game*.yaml (excluding
@@ -52,6 +58,11 @@ def get_active_game() -> dict:
         FROM games WHERE id=1""")
     return dict(row) if row else None
 
+@mcp_tool(
+    "Choose a scenario by name (see list_scenarios) to start playing. "
+    "Bootstraps the game on first selection; the MVP runs one shared game "
+    "per deployed instance, so this can't be used to switch scenarios once "
+    "one is already active.")
 def select_scenario(player_token: str, scenario_name: str) -> dict:
     """
     The one real gate a player must pass before anything else works: must be

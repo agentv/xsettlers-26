@@ -1,3 +1,4 @@
+from xsettlers_mcp.tools.registry import mcp_tool
 from db.events import record_event
 from db.orgs import org_position
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED, POD_NOT_OWNED
@@ -40,6 +41,11 @@ def _aimed_sector(cur, org_id: int, offset):
     return (org["coord_x"] + offset[0], org["coord_y"] + offset[1], org["coord_z"] + offset[2])
 
 
+@mcp_tool(
+    "Set an organization's mission (idle/move/colonize/defend/attack). For "
+    "mission='move', params must include dest_x/dest_y/dest_z (optionally "
+    "jump_range_per_turn) -- delegates to the same confirm_move flow as the "
+    "dedicated tool, so prefer preview_move first to check travel time.")
 @player_tool
 def set_mission(sess, org_id: int, mission: str, params: dict = None) -> dict:
     """
@@ -179,6 +185,28 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     normalized.update(offset_x=offset[0], offset_y=offset[1], offset_z=offset[2])
     return normalized, None
 
+@mcp_tool(
+    "Queue a one-shot command for an organization, resolved automatically "
+    "by the engine instead of you having to call the underlying tool again "
+    "by hand. Four trigger_phase values: 'during_transit' fires the instant "
+    "this org next enters transit (only action='set_pod_task' is legal here "
+    "-- pod tasking is the one thing not locked by a departing org); "
+    "'before_arrival' fires the same tick this org's current move resolves; "
+    "'after_arrival' fires exactly one turn later -- both require the org "
+    "to already be in transit; 'at_turn' fires at an explicit absolute turn "
+    "(pass `turn`), independent of any move, for orders that don't fit the "
+    "arrival-relative phases (e.g. \"on turn 7, jump somewhere else\"). "
+    "Action whitelist: 'move' (either dest_x/dest_y/dest_z absolute or "
+    "d_x/d_y/d_z relative to wherever the org is when the order fires, "
+    "never both, plus optional jump_range_per_turn); 'set_pod_task' "
+    "(params: pod_id, task, optionally bearing/offset_x/y/z -- same shape "
+    "set_pod_task takes); 'colonize' (no params -- commits the ship at "
+    "whatever sector it occupies when the order fires, and is refused if it "
+    "cannot afford the energy by then); 'aim_scan' (optionally "
+    "bearing/offset_x/y/z, same shape set_org_scan_bearing takes; pass none "
+    "to clear the aim). If you give the org new orders before a "
+    "before_arrival/after_arrival/at_turn command fires, the queued one is "
+    "silently dropped rather than overriding your manual orders.")
 @player_tool
 def queue_command(sess, org_id: int, trigger_phase: str, action: str,
                   params: dict = None, turn: int = None) -> dict:
@@ -271,6 +299,13 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
     return {"ok": True, "command_id": command_id, "org_id": org_id, "trigger_phase": trigger_phase,
             "action": action, "resolve_turn": resolve_turn}
 
+@mcp_tool(
+    "Set a pod's task -- what its crew does, as distinct from the parent "
+    "organization's mission, which is what the vehicle does "
+    "(idle/produce_energy/produce_food/produce_goods/scan). For scan, "
+    "optionally aim it in the same call with a compass bearing "
+    "(N/NE/E/SE/S/SW/W/NW/N2/E2/S2/W2) or explicit offset_x/y/z -- aim is "
+    "relative to the pod's organization and survives a move.")
 @player_tool
 def set_pod_task(sess, pod_id: int, task: str,
                  bearing: str = None,
@@ -310,6 +345,11 @@ def set_pod_task(sess, pod_id: int, task: str,
     return result
 
 
+@mcp_tool(
+    "Aim a pod already on the scan task. Same rules and same bearing "
+    "vocabulary as set_org_scan_bearing -- scanning is scanning, whoever "
+    "carries the equipment. Relative aim, persists across turns, out-of- "
+    "range rejected. Pass neither bearing nor offset to clear.")
 @player_tool
 def set_pod_scan_bearing(sess, pod_id: int, bearing: str = None,
                          offset_x: int = None, offset_y: int = None,
@@ -354,6 +394,11 @@ def set_pod_scan_bearing(sess, pod_id: int, bearing: str = None,
 
 MAX_ORG_NAME_LENGTH = 24
 
+@mcp_tool(
+    "Give one of your own ships or colonies a name of your choosing (max 24 "
+    "chars). Names are how a player refers to a unit, so they must be "
+    "unique among your own organizations; defaults are short and sayable "
+    "(S1..Sn for ships, C1 for a colony).")
 @player_tool
 def rename_organization(sess, org_id: int, name: str) -> dict:
     """
@@ -395,6 +440,16 @@ def rename_organization(sess, org_id: int, name: str) -> dict:
     return {"ok": True, "org_id": org_id, "previous_name": previous, "name": name}
 
 
+@mcp_tool(
+    "Aim an organization's own sensors. Every ship and colony can scan one "
+    "sector per turn on its own account -- a ship's bridge, a colony's "
+    "headquarters -- without dedicating a pod to it. Scanning is scanning: "
+    "identical rules to a scan pod (same food cost, range, transit "
+    "suppression). Aim by compass bearing (N/NE/E/SE/S/SW/W/NW, or "
+    "N2/E2/S2/W2 for two sectors out) or by explicit offset_x/y/z. The aim "
+    "is RELATIVE to the org's own sector and persists across turns, so it "
+    "survives a move with no re-aiming. Out-of-range aims are rejected "
+    "outright. Pass neither bearing nor offset to clear it.")
 @player_tool
 def set_org_scan_bearing(sess, org_id: int, bearing: str = None,
                          offset_x: int = None, offset_y: int = None,

@@ -1,3 +1,4 @@
+from xsettlers_mcp.tools.registry import mcp_tool
 from db.events import record_event
 from engine.turn import get_current_turn
 from engine.movement import apply_confirm_move, plan_move
@@ -32,6 +33,8 @@ def _departable_ship(sess, ship_id: int, dest):
     return ship, None
 
 
+@mcp_tool(
+    "Preview a move: calculate travel time without committing")
 @player_tool
 def preview_move(sess, ship_id: int,
                  dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
@@ -62,6 +65,8 @@ def preview_move(sess, ship_id: int,
             "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z,
             "turns_needed": plan["turns_needed"], "arrival_turn": plan["arrival_turn"]}
 
+@mcp_tool(
+    "Commit a previewed move. Ship enters transit until arrival turn.")
 @player_tool
 def confirm_move(sess, ship_id: int,
                  dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
@@ -81,6 +86,8 @@ def confirm_move(sess, ship_id: int,
     return apply_confirm_move(sess.cur, ship_id, sess.player_id, dest_x, dest_y, dest_z,
                               jump_range_per_turn, get_current_turn())
 
+@mcp_tool(
+    "Cancel a move in progress. Rubber-bands ship to origin sector.")
 @player_tool
 def cancel_move(sess, ship_id: int) -> dict:
     """

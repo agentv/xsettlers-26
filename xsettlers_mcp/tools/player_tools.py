@@ -1,3 +1,4 @@
+from xsettlers_mcp.tools.registry import mcp_tool
 from db.events import record_event
 from engine.turn import check_consensus_acceleration
 from xsettlers_mcp.tools.session import player_tool
@@ -6,6 +7,8 @@ from xsettlers_mcp.tools.session import player_tool
 # fleet-report/leaderboard column on a phone" constraint.
 MAX_DISPLAY_NAME_LENGTH = 24
 
+@mcp_tool(
+    "Dashboard: player record, all organizations, all pods")
 @player_tool
 def get_player_state(sess) -> dict:
     """Full state: player record, all organizations, all pods."""
@@ -16,6 +19,8 @@ def get_player_state(sess) -> dict:
             "SELECT * FROM pods WHERE org_id=?", (org["id"],)).fetchall()]
     return {"player": dict(sess.player), "organizations": orgs}
 
+@mcp_tool(
+    "Player declares no further moves this tick")
 @player_tool
 def declare_end_turn(sess) -> dict:
     """
@@ -32,12 +37,18 @@ def declare_end_turn(sess) -> dict:
     sess.release()
     return {"declared": True, "clock_accelerated": check_consensus_acceleration()}
 
+@mcp_tool(
+    "Player rescinds their end turn declaration")
 @player_tool
 def rescind_end_turn(sess) -> dict:
     """Player takes back their end turn declaration."""
     sess.cur.execute("UPDATE players SET end_turn_declared=0 WHERE id=?", (sess.player_id,))
     return {"rescinded": True}
 
+@mcp_tool(
+    "Choose your own in-game display name, shown to every player on the "
+    "leaderboard -- independent of any name GameHouse or bootstrap "
+    "supplied. Must be unique game-wide.")
 @player_tool
 def set_display_name(sess, display_name: str) -> dict:
     """

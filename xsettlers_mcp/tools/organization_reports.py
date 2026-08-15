@@ -9,6 +9,7 @@ views/render.py can draw any of them with no per-tool special-casing. Raw
 fields are always present alongside, for a client that would rather build its
 own view.
 """
+from xsettlers_mcp.tools.registry import mcp_tool
 from config.loader import load_config
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED
 from engine.production import POD_PRODUCTION, get_production_multiplier
@@ -151,6 +152,11 @@ def _org_production(tasking: dict, in_transit: bool, org_type: str = "ship") -> 
             production[resource] = production.get(resource, 0.0) + amount
     return production
 
+@mcp_tool(
+    "Complete properties of one of the player's own organizations, "
+    "including all pods. Includes a display block with a ready-to-render "
+    "header and the locked MVP cargo-table column order (Task, Count, "
+    "Energy, Food, Goods, Capacity as current/total).")
 @player_tool
 def show_organization(sess, org_id: int) -> dict:
     """
@@ -220,6 +226,11 @@ def show_organization(sess, org_id: int) -> dict:
         result["display"]["footer"] = scanners_footer
     return result
 
+@mcp_tool(
+    "Player-scoped fleet report (aka fleet status / my status): turn "
+    "context, all organizations (in-transit marked, with per-org tasking "
+    "breakdown), and fleet-wide aggregate assets (including capacity and "
+    "percent_full).")
 @player_tool
 def show_civilization_status(sess) -> dict:
     """
@@ -386,6 +397,11 @@ def show_civilization_status(sess) -> dict:
         },
     }
 
+@mcp_tool(
+    "Public scoreboard: turn context plus every player's aggregate resource "
+    "totals (energy/food/goods/total/percent_full), ranked highest-first. "
+    "Does not reveal other players' fleet composition or position -- only "
+    "aggregate totals are public.")
 @player_tool
 def show_game_status(sess) -> dict:
     """

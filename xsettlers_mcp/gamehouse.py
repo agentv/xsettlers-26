@@ -23,6 +23,7 @@ additional bootstrap path alongside select_scenario(), not a replacement --
 it still produces ordinary player_token-based players rows that every
 existing gameplay tool already knows how to check.
 """
+from xsettlers_mcp.tools.registry import mcp_tool
 import os
 import secrets
 from mcp import ClientSession
@@ -110,6 +111,18 @@ def _validate_players(players: list, lobby) -> dict | None:
                                  f"Valid: {valid}"}
     return None
 
+@mcp_tool(
+    "GameHouse handoff: called once GameHouse closes a lobby, to actually "
+    "hand the game off. players is a list of {player_id, kind: "
+    "'person'|'npc', profile?} entries -- person player_ids are GameHouse's "
+    "real person.id, npc player_ids are GameHouse-minted ephemeral labels "
+    "with a profile.strategy_name matching the npc_profile_schema this game "
+    "registered via register_game. Bootstraps the game and returns each "
+    "entry's xsettlers_player_id, plus a freshly generated player_token for "
+    "person-kind entries -- GameHouse is responsible for relaying that "
+    "token back to the actual human player. Not something a player calls "
+    "directly.",
+    players={"type": "array", "items": {"type": "object"}})
 def start_session(session_token: str, players: list, scenario_key: str = None) -> dict:
     """
     The actual handoff: GameHouse closes a lobby and calls this once,

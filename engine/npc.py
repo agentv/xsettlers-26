@@ -33,6 +33,30 @@ from engine.npc_programs import load_programs
 from engine.npc_script import run_program
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.organization_tools import set_org_scan_bearing
+from xsettlers_mcp.tools.sector_tools import SCAN_BEARINGS
+
+CARDINALS = ("N", "S", "E", "W")
+
+
+def cardinal_offset(bearing: str, distance: int) -> tuple:
+    """A cardinal compass name scaled to `distance`, from the one bearing table
+    the whole codebase uses (sector_tools.SCAN_BEARINGS). Both policies below
+    used to carry their own four-entry offsets dict; the compass belongs in one
+    place, and this keeps "north is -y" a single fact."""
+    dx, dy, dz = SCAN_BEARINGS[bearing]
+    return (dx * distance, dy * distance, dz * distance)
+
+
+def assigned_direction(memory: dict, ship_id) -> str:
+    """This ship's cardinal, assigned round-robin the first time it is seen and
+    remembered thereafter -- so a ship keeps heading the same way turn over turn
+    rather than being reassigned as the idle set changes."""
+    directions = memory.setdefault("directions", {})
+    key = str(ship_id)
+    if key not in directions:
+        directions[key] = CARDINALS[len(directions) % len(CARDINALS)]
+    return directions[key]
+
 
 def _frontier_map_stay_frosty(player_id: int, player_token: str, config: dict, memory: dict) -> dict:
     """
@@ -62,21 +86,15 @@ def _frontier_map_stay_frosty(player_id: int, player_token: str, config: dict, m
     """
     leg = config.get("leg_distance", 3)
     jump_range = config.get("jump_range_per_turn", 1)
-    bearing_cycle = ["N", "S", "E", "W"]
-    offsets = {"N": (0, -leg, 0), "S": (0, leg, 0), "E": (leg, 0, 0), "W": (-leg, 0, 0)}
 
     ships = read_all("""SELECT o.id, s.coord_x, s.coord_y, s.coord_z
         FROM organizations o JOIN sectors s ON s.id=o.sector_id
         WHERE o.player_id=? AND o.org_type='ship' AND o.sector_id!=-1 AND o.mission='idle'
         ORDER BY o.id""", (player_id,))
 
-    directions = memory.setdefault("directions", {})
     for ship in ships:
-        key = str(ship["id"])
-        if key not in directions:
-            directions[key] = bearing_cycle[len(directions) % len(bearing_cycle)]
-        bearing = directions[key]
-        dx, dy, dz = offsets[bearing]
+        bearing = assigned_direction(memory, ship["id"])
+        dx, dy, dz = cardinal_offset(bearing, leg)
         confirm_move(player_token, ship["id"], ship["coord_x"]+dx, ship["coord_y"]+dy, ship["coord_z"]+dz,
                     jump_range_per_turn=jump_range)
         set_org_scan_bearing(player_token, ship["id"], bearing=bearing+"2")
@@ -105,9 +123,6 @@ def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> d
     """
     scout_distance = config.get("scout_distance", 2)
     jump_range = config.get("jump_range_per_turn", 1)
-    bearing_cycle = ["N", "S", "E", "W"]
-    offsets = {"N": (0, -scout_distance, 0), "S": (0, scout_distance, 0),
-               "E": (scout_distance, 0, 0), "W": (-scout_distance, 0, 0)}
 
     if memory.get("converged"):
         return memory
@@ -132,9 +147,9 @@ def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> d
         hx, hy, hz = home["coord_x"], home["coord_y"], home["coord_z"]
 
         scouts = {}
-        for i, ship_id in enumerate(ship_ids):
-            bearing = bearing_cycle[i % len(bearing_cycle)]
-            dx, dy, dz = offsets[bearing]
+        for ship_id in ship_ids:
+            bearing = assigned_direction(memory, ship_id)
+            dx, dy, dz = cardinal_offset(bearing, scout_distance)
             confirm_move(player_token, ship_id, hx+dx, hy+dy, hz+dz, jump_range_per_turn=jump_range)
             # Aim is the "X2" bearing (2 sectors -- SCAN_RANGE's max), not the
             # plain 1-sector bearing: with scout_distance defaulting to 2 this

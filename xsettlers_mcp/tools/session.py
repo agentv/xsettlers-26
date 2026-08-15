@@ -103,4 +103,8 @@ def player_tool(fn):
         finally:
             if session is None or not session.released:
                 conn.close()
+    # Tells the MCP registry to describe this tool as taking player_token in
+    # place of the session parameter it is written with (see
+    # xsettlers_mcp/tools/registry.py's _schema_for).
+    wrapper.takes_player_token = True
     return wrapper

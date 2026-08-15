@@ -11,13 +11,13 @@ opens right after this returns (see the comment at that call site).
 
 **A strategy is either data or code, and most are data.** Openings whose whole
 sequence is decided in advance live in config/npc_programs/*.yaml and run
-through engine/npc_script.py (turtle, burst_and_colonize, fan_out_consolidate).
+through npc/script.py (turtle, burst_and_colonize, fan_out_consolidate).
 What lives in this module is the strategies a program cannot express: ones
 that read the world each turn and decide from it. fan_out waits for every
 scout's scan to resolve and then converges the whole fleet on the richest
 sector found; frontier_map_stay_frosty has no terminal state at all. Both need
 conditions, repetition and cross-org coordination, which is a rule engine
-rather than a command queue -- see engine/npc_script.py's module docstring for
+rather than a command queue -- see npc/script.py's module docstring for
 where that line sits and why.
 
 Write a new strategy as a program first. Only reach for a function here when
@@ -29,18 +29,18 @@ to turn -- the same pattern pods.task_params uses for per-pod working state.
 import json
 from db.connection import connection, get_connection, read_all
 from db.orgs import org_position
-from engine.npc_programs import load_programs
-from engine.npc_script import run_program
+from npc.programs import load_programs
+from npc.script import run_program
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.organization_tools import set_org_scan_bearing
-from xsettlers_mcp.tools.sector_tools import SCAN_BEARINGS
+from engine.bearings import SCAN_BEARINGS
 
 CARDINALS = ("N", "S", "E", "W")
 
 
 def cardinal_offset(bearing: str, distance: int) -> tuple:
     """A cardinal compass name scaled to `distance`, from the one bearing table
-    the whole codebase uses (sector_tools.SCAN_BEARINGS). Both policies below
+    the whole codebase uses (bearings.SCAN_BEARINGS). Both policies below
     used to carry their own four-entry offsets dict; the compass belongs in one
     place, and this keeps "north is -y" a single fact."""
     dx, dy, dz = SCAN_BEARINGS[bearing]
@@ -203,12 +203,12 @@ def _scripted(player_id: int, player_token: str, config: dict, memory: dict) -> 
     point for a program that has no name in the library, which is what an NPC
     builder will produce. A named program from config/npc_programs/ arrives
     here too, resolved by run_npc_decisions below.
-    Config: program (see engine/npc_script.py for the step format).
+    Config: program (see npc/script.py for the step format).
     """
     return run_program(player_id, player_token, config.get("program"), memory)
 
 # Code strategies: the ones that read the world and decide, which a program
-# cannot express (see engine/npc_script.py's module docstring on why that line
+# cannot express (see npc/script.py's module docstring on why that line
 # is drawn where it is rather than filled in). Everything scripted lives in
 # config/npc_programs/ instead.
 STRATEGIES = {

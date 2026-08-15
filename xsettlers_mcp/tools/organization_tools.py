@@ -316,7 +316,7 @@ def set_pod_task(sess, pod_id: int, task: str,
     ownership and task type.
 
     For task='scan', optionally aim it in the same call with either a compass
-    `bearing` ("N", "NE", "W2" -- see sector_tools.SCAN_BEARINGS) or an
+    `bearing` ("N", "NE", "W2" -- see bearings.SCAN_BEARINGS) or an
     explicit `offset_x/y/z`. Aim is relative to the pod's own organization, not
     absolute coordinates, so it survives the ship moving. Out-of-range aims are
     rejected here rather than accepted-and-warned: an offset's range is fixed,
@@ -464,7 +464,7 @@ def set_org_scan_bearing(sess, org_id: int, bearing: str = None,
     transit, same relative aiming. An org that also carries scan pods gets
     both, and each pays its own way.
 
-    Aim by compass `bearing` ("N", "NE", "W2" -- see sector_tools.SCAN_BEARINGS)
+    Aim by compass `bearing` ("N", "NE", "W2" -- see bearings.SCAN_BEARINGS)
     or by explicit `offset_x/y/z`. The aim is relative to the org's own sector
     and persists across turns, so a ship keeps scanning the same bearing after
     it moves -- set a pattern once and it travels with the hull. Pass neither

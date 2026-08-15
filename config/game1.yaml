@@ -50,7 +50,7 @@ lobby:
   # Confirmed 2026-08-06: 120s is fine as a starting value (360s also
   # acceptable if it ever needs lengthening).
   wait_window_seconds: 120
-  # All five strategies registered in engine/npc.py's STRATEGIES dict --
+  # All five strategies registered in npc/strategies.py's STRATEGIES dict --
   # see docs/TODO.md's fleet-strategy taxonomy and config/game0.yaml for
   # the fuller comment on this block.
   npc_profile_schema:

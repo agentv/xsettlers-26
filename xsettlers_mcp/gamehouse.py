@@ -31,8 +31,8 @@ from mcp.client.streamable_http import streamablehttp_client
 from config.loader import load_starting_configuration
 from db.connection import get_connection
 from db.bootstrap import bootstrap_game
-from db.npc_profiles import assign_npc_profile
-from engine.npc import strategy_names
+from npc.profiles import assign_npc_profile
+from npc.strategies import strategy_names
 from xsettlers_mcp.game_select import get_active_game
 
 SCENARIO_FILE = "config/game0.yaml"

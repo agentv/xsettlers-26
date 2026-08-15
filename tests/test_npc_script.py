@@ -1,9 +1,9 @@
 import json
 from db.connection import get_connection
-from db.npc_profiles import assign_npc_profile
-from engine.npc import run_npc_decisions, strategy_names
-from engine.npc_programs import load_programs
-from engine.npc_script import validate_program, _select, _params_for
+from npc.profiles import assign_npc_profile
+from npc.strategies import run_npc_decisions, strategy_names
+from npc.programs import load_programs
+from npc.script import validate_program, _select, _params_for
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
 
 def _seed_fleet(player_id, sector_id, n=8):
@@ -191,7 +191,7 @@ def test_inline_program_runs_through_the_scripted_strategy():
 
     orgs = _orgs(pid)
     for ship in ships[2:]:
-        # North is -y (see sector_tools.SCAN_BEARINGS); "N2" reaches 2 sectors.
+        # North is -y (see bearings.SCAN_BEARINGS); "N2" reaches 2 sectors.
         assert (orgs[ship]["scan_offset_x"], orgs[ship]["scan_offset_y"]) == (0, -2)
 
 def test_a_program_runs_only_once():

@@ -9,7 +9,7 @@ later trigger. That is deliberately the whole vocabulary -- it covers openings
 what `turtle`, `fan_out_consolidate` and `burst_and_colonize` are. It does
 not cover strategies that read the world and decide (`fan_out`'s
 wait-for-every-scout-then-converge, `frontier_map_stay_frosty`'s endless
-land-and-redirect); those stay as Python functions in engine/npc.py and sit
+land-and-redirect); those stay as Python functions in npc/strategies.py and sit
 beside these in the same STRATEGIES registry. Adding conditions and repetition
 here would be building a rule engine inside a command queue.
 
@@ -28,7 +28,7 @@ its own copy of (`directions[i % 4]`, four-entry group dicts) without
 introducing a compass vocabulary this layer would then have to own.
 
 Programs are validated when they are *assigned* (see validate_program, called
-from db/npc_profiles.assign_npc_profile), not when they run. Same reasoning as
+from npc/profiles.py's assign_npc_profile), not when they run. Same reasoning as
 queue_command's own up-front param validation, one level up: a program is
 authored by a person -- eventually in a builder UI -- and an error has to
 reach them while they are still looking at it, not surface three turns later

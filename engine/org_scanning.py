@@ -10,7 +10,7 @@ own transaction without a second connection failing on "database is locked".
 
 Range is deliberately NOT re-checked here: aim_status() needs the org's
 current sector, and by design the aim is a relative offset whose reach never
-changes with position (see sector_tools.SCAN_BEARINGS -- "north is -y", and an
+changes with position (see bearings.SCAN_BEARINGS -- "north is -y", and an
 offset's range is fixed), so an aim validated when the order was given is
 still in range wherever the ship ends up. queue_command validates it at queue
 time for exactly that reason.

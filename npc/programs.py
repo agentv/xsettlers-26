@@ -1,13 +1,13 @@
 """
 The library of named NPC programs: config/npc_programs/<name>.yaml, each one a
-`program:` key holding the step list engine/npc_script.py executes.
+`program:` key holding the step list npc/script.py executes.
 
 Named programs are what keeps a strategy's *name* a stable contract while its
 implementation moves from Python into data. GameHouse validates an incoming
 roster's strategy_name against the registry before a session starts
 (xsettlers_mcp/gamehouse.py) and scripts/run_tournament.py enumerates it, so
 'turtle' has to keep meaning turtle whether a function or a YAML file is behind
-it. engine/npc.py's STRATEGY_NAMES is that union.
+it. npc/strategies.py's STRATEGY_NAMES is that union.
 
 Adding a scripted strategy is adding a file here -- no code change, the same
 property config/game<N>.yaml already has for scenarios.

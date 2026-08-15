@@ -84,7 +84,7 @@ def init_schema():
             -- its own account -- a ship's bridge, a colony's headquarters --
             -- without spending a pod on it. Aimed by an OFFSET from the
             -- org's own sector, not absolute coordinates, so the aim
-            -- survives a move (see sector_tools.SCAN_BEARINGS).
+            -- survives a move (see bearings.SCAN_BEARINGS).
             -- Persistent across turns until changed or cleared. Costs the same
             -- food as a scan pod and is suppressed in transit, exactly as if
             -- the org carried one scan pod already.

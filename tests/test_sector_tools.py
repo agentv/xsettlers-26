@@ -1,6 +1,7 @@
 from db.connection import get_connection
+from engine.bearings import get_scan_range
 from xsettlers_mcp.tools.sector_tools import (
-    get_scan_range, show_sector_neighborhood,
+    show_sector_neighborhood,
     UNKNOWN_CELL, SEEN_CELL, EMPTY_CELL, MAX_NEIGHBORHOOD_RADIUS,
 )
 from db.sectors import CONFIDENCE_DECAY_PER_TURN, TURNS_TO_BLINK_OUT

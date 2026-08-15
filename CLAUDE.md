@@ -68,6 +68,24 @@ Any MCP client (Slack, curl, an LLM agent) → POST /mcp (carries player_token)
                     db/connection.py → SpatiaLite (.db file)
 ```
 
+### Layering — imports point one way
+
+```
+npc/                 strategies act by calling tool functions, so they sit ABOVE the tools
+  ↓
+xsettlers_mcp/       server.py, tools/*.py
+  ↓
+engine/              turn resolution, movement, production, bearings, ship's log
+  ↓
+db/                  connection, schema, sectors, orgs, events
+```
+
+**Nothing in `engine/`, `db/`, `views/` or `config/` may import from `xsettlers_mcp/` or `npc/`.** There is exactly one exception, and it is a function-level import: `engine/turn.py`'s step 0 calls `npc.strategies.run_npc_decisions`, deferred to call time because a module-level import would close the loop `engine → npc → tools → engine`. Adding a second such import is how the previous tangle started — nine circular-import workarounds routing around a cycle nobody had named.
+
+`engine/bearings.py` is why the scan vocabulary (`SCAN_RANGE`, `SCAN_BEARINGS`, `resolve_bearing`, `bearing_name`, `get_scan_range`) lives below both consumers rather than in `sector_tools.py`: the engine resolves scans and the tool layer displays them, so the compass belongs under both. It is a leaf module and should stay one.
+
+`npc/` holds `strategies.py` (code policies), `script.py` (the YAML program runner), `programs.py` (the named-program library) and `profiles.py` (assignment). `profiles.py` is there rather than under `db/` because validating a program at assign time needs `script.validate_program` — filed under `db/` it would drag the whole NPC layer back underneath the tool layer.
+
 There is **no `gateway.py`** — no central pre-flight wrapper decides who may call what, despite what `docs/mcp_server_layer_design.md` sketches. Instead every gameplay tool carries the `@player_tool` decorator (`xsettlers_mcp/tools/session.py`), which resolves `player_token` against `players`, rejects an unknown token with "Player not found" before the tool body runs, and hands the tool an authenticated `PlayerSession` (open cursor + player row) so it never manages a connection itself. Before a scenario is selected `players` is empty, so every tool naturally rejects — that's the actual gate. `xsettlers_mcp/game_select.select_scenario()` (backed by `xsettlers_mcp/auth.authenticate()`) is the one real gatekeeping call. See `tests/test_gateway.py` for the end-to-end proof.
 
 Two tools call `PlayerSession.release()` to commit and close early before delegating to code that opens its own connection (`set_mission`→`confirm_move`, `declare_end_turn`→`end_of_turn()`); `db/connection.py` sets no busy_timeout, so a second writer fails immediately rather than waiting.
@@ -93,8 +111,8 @@ Key fields and their split responsibilities:
 - **Three org-lock states**, all keyed off `is_mobile`/`sector_id`, enforced in `set_mission` (`xsettlers_mcp/tools/organization_tools.py`): in-transit (`sector_id == -1`, locked entirely — must `cancel_move` first), colony (locked against `move` only), mid-colonization (locked entirely for the 3-turn window).
 - **Organizations have a `mission`; pods have a `task`.** One word for each of two different concepts: `organizations.mission` is what the *vehicle* is doing (`idle`/`move`/`colonize`/`defend`/`attack`), `pods.task` is what the *crew* is doing (`idle`/`produce_energy`/`produce_food`/`produce_goods`/`scan`). The tool is `set_pod_task`. One word covering both is actively misleading: a player reading "mission: idle" on a ship report reasonably concludes its pods are idle too. `docs/mcp_server_layer_design.md` uses the older vocabulary and is superseded on this point by `docs/product_requirements.md` and `docs/data_model_and_storage_design.md`.
 - Sectors use a sparse/lazy model — only instantiated on interaction — plus a `POINTZ` geometry column (`sectors.location`) for spatial queries. A sentinel sector `(-1,-1,-1)` represents "in transit" and is created by `db/schema.init_schema()`.
-- **Scanning**: every organization has innate sensors (one sector per turn, no pod required), and pods may additionally take the `scan` task — identical rules either way. Aim is an **offset from the scanner's own sector**, not absolute coordinates, so it survives a move; `xsettlers_mcp/tools/sector_tools.SCAN_BEARINGS` maps the 12 compass names onto the 12 sectors reachable at `SCAN_RANGE` 2, and **north is −y**. Because an offset's range is fixed, out-of-range aims are rejected at set time rather than failing at end-of-turn resolution. A scan reveals only its target sector — range governs reach, not breadth.
-- `player_sectors` is the fog-of-war table: sparse, confidence-scored (100 on discovery/presence; an unoccupied sector loses a flat `CONFIDENCE_DECAY_PER_TURN` points per tick — subtraction, *not* a fraction of what remains, which on an integer column never reaches 0). At confidence 0 the sector **blinks out**: the row is never deleted, but every player-facing read filters `confidence > 0`, so it leaves the map entirely rather than showing as a stale "ghost". At the default 20/turn that's five turns from last sighting to gone. The constant lives in `db/sectors.py`, not `engine/turn.py`, because `engine/turn.py` imports `sector_tools` and the read side needs it too.
+- **Scanning**: every organization has innate sensors (one sector per turn, no pod required), and pods may additionally take the `scan` task — identical rules either way. Aim is an **offset from the scanner's own sector**, not absolute coordinates, so it survives a move; `engine/bearings.SCAN_BEARINGS` maps the 12 compass names onto the 12 sectors reachable at `SCAN_RANGE` 2, and **north is −y**. Because an offset's range is fixed, out-of-range aims are rejected at set time rather than failing at end-of-turn resolution. A scan reveals only its target sector — range governs reach, not breadth.
+- `player_sectors` is the fog-of-war table: sparse, confidence-scored (100 on discovery/presence; an unoccupied sector loses a flat `CONFIDENCE_DECAY_PER_TURN` points per tick — subtraction, *not* a fraction of what remains, which on an integer column never reaches 0). At confidence 0 the sector **blinks out**: the row is never deleted, but every player-facing read filters `confidence > 0`, so it leaves the map entirely rather than showing as a stale "ghost". At the default 20/turn that's five turns from last sighting to gone. The constant lives in `db/sectors.py`, not `engine/turn.py`, because the read side needs it too.
 - `events` is a write-ahead log: player-action events store deltas, and `turn.snapshot` events store a **per-player ledger row** each turn (holdings, score, derived waste — written by `engine/turn.py`'s `_snapshot_holdings`). This is *not* a full-state recovery checkpoint; there is no replay mechanism. `events.resolve_at_turn` drives deferred resolution (e.g. `colonize_complete` fires 3 turns after `set_mission('colonize', ...)`).
 - **There is no `models/` package.** CRUD logic lives directly in `xsettlers_mcp/tools/*.py`. Pulling it out into a real model layer is tracked in `docs/TODO.md` — create the package then, not before.
 
@@ -119,10 +137,10 @@ The clock (`engine/clock.py`) calls `end_of_turn()` on a fixed interval (`GAME_T
 
 A strategy is **either a YAML program or a Python function**, and the split is deliberate:
 
-- **Plans** — fixed openings whose whole sequence is decided in advance — are data: `config/npc_programs/*.yaml`, executed by `engine/npc_script.py`. `turtle`, `burst_and_colonize` and `fan_out_consolidate` all live here. Adding one is adding a file, no code change.
-- **Policies** — strategies that read the world each turn and decide from it — stay as functions in `engine/npc.py`. `fan_out` (waits for every scout's scan, then converges the fleet on the richest find) and `frontier_map_stay_frosty` (no terminal state) need conditions, repetition and cross-org coordination, which the ship's log deliberately isn't. **Write a new strategy as a program first**; only reach for a function when it has to look at the board before choosing.
+- **Plans** — fixed openings whose whole sequence is decided in advance — are data: `config/npc_programs/*.yaml`, executed by `npc/script.py`. `turtle`, `burst_and_colonize` and `fan_out_consolidate` all live here. Adding one is adding a file, no code change.
+- **Policies** — strategies that read the world each turn and decide from it — stay as functions in `npc/strategies.py`. `fan_out` (waits for every scout's scan, then converges the fleet on the richest find) and `frontier_map_stay_frosty` (no terminal state) need conditions, repetition and cross-org coordination, which the ship's log deliberately isn't. **Write a new strategy as a program first**; only reach for a function when it has to look at the board before choosing.
 
-`engine/npc.strategy_names()` is the union of both and is what `xsettlers_mcp/gamehouse.py` validates rosters against and `scripts/run_tournament.py` plays — so a strategy crossing the data/code line never changes what callers may ask for. Don't reintroduce a bare `STRATEGIES` lookup in those callers.
+`npc/strategies.strategy_names()` is the union of both and is what `xsettlers_mcp/gamehouse.py` validates rosters against and `scripts/run_tournament.py` plays — so a strategy crossing the data/code line never changes what callers may ask for. Don't reintroduce a bare `STRATEGIES` lookup in those callers.
 
 Programs are validated at **assign** time (`validate_program()`, called by `assign_npc_profile()`), not when they run — the same reasoning behind `queue_command`'s up-front param validation, one level up: a program is authored by a person and an error must reach them synchronously, not three turns later inside a clock tick. This matters because the whole point of the format is a future NPC builder (tracked in `docs/TODO.md`).
 

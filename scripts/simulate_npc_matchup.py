@@ -2,7 +2,7 @@
 """
 Fast-forwarded local NPC strategy matchup. Bootstraps a scratch DB (never
 xsettlers.db / the production volume), assigns each of a scenario's
-participants a named strategy from engine/npc.py's STRATEGIES registry, then
+participants a named strategy from npc/strategies.py's STRATEGIES registry, then
 calls end_of_turn() in a loop -- no real clock, no MCP server, no waiting on
 GAME_TICK_SECONDS -- so a full game's worth of turns resolves in seconds.
 Reporting is whatever end_of_turn() already prints (per-turn holdings, final
@@ -30,7 +30,7 @@ def main():
                         help="Scenario file to bootstrap (default: config/game0.yaml, Diaspora).")
     parser.add_argument("--strategy", nargs="+", required=True, metavar="STRATEGY_NAME",
                         help="One strategy name per scenario participant, in participant order "
-                             "(see engine/npc.py's STRATEGIES). Diaspora has 2 participants.")
+                             "(see npc/strategies.py's STRATEGIES). Diaspora has 2 participants.")
     parser.add_argument("--turns", type=int, default=None,
                         help="Overrides TURN_LIMIT (default: env TURN_LIMIT or 20).")
     parser.add_argument("--db", default="/tmp/xsettlers_sim.db",
@@ -55,7 +55,7 @@ def main():
 
     from db.schema import init_schema
     from db.bootstrap import bootstrap_game
-    from db.npc_profiles import assign_npc_profile
+    from npc.profiles import assign_npc_profile
     from db.connection import get_connection
     from engine.turn import end_of_turn, is_game_over, TURN_LIMIT
 

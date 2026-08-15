@@ -2,7 +2,7 @@ import json
 import pytest
 from db.connection import get_connection
 from engine.turn import end_of_turn
-from xsettlers_mcp.tools.sector_tools import SCAN_RANGE
+from engine.bearings import SCAN_RANGE
 from xsettlers_mcp.tools.organization_tools import (
     set_mission, set_pod_task, rename_organization,
     set_org_scan_bearing, set_pod_scan_bearing, queue_command

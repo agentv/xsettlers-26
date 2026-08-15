@@ -47,7 +47,7 @@ def _dispatch_aim_scan(cur, org_id: int, player_id: int, params: dict, current_t
 # The queued binding of engine/actions.py's vocabulary -- these run inside
 # engine/turn.py's open transaction, so they dispatch into the engine-layer
 # apply_* helpers rather than the self-connecting tool wrappers.
-# engine/npc_script.py holds the immediate binding of the same names.
+# npc/script.py holds the immediate binding of the same names.
 ACTIONS = {"move": _dispatch_move, "set_pod_task": _dispatch_set_pod_task,
            "colonize": _dispatch_colonize, "aim_scan": _dispatch_aim_scan}
 
@@ -61,7 +61,7 @@ def resolve_destination(cur, org_id: int, params: dict) -> tuple:
     The relative form is what makes an authored order portable -- the same
     "jump three further out" works from any starting sector, the same reason
     scan aims are stored as offsets rather than coordinates (see
-    sector_tools.SCAN_BEARINGS). It cannot be resolved at queue time because
+    bearings.SCAN_BEARINGS). It cannot be resolved at queue time because
     the origin is whatever sector the org reaches, which is the point.
 
     Raises rather than returning an error: a relative move that lands on a

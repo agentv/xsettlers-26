@@ -153,7 +153,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
     #    A separate pass over the players rather than part of the loop above,
     #    deliberately: that ordering gives every player's ships contiguous,
     #    lower organization ids than any colony, and NPC strategies select
-    #    ships with ORDER BY id (see engine/npc.py). Folding the colony into
+    #    ships with ORDER BY id (see npc/strategies.py). Folding the colony into
     #    the loop above would renumber every org and silently change which
     #    ship each strategy picks.
     if sc.home_colony:

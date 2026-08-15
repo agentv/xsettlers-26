@@ -363,13 +363,13 @@ versions expose explicit assignment to human players.
 
 Not designed: the `fleet_id` schema, how a fleet is defined/assigned, or
 concrete parameters for any of the four registered styles beyond their
-behavioural descriptions (see `engine/npc.py` and `config/npc_programs/`).
+behavioural descriptions (see `npc/strategies.py` and `config/npc_programs/`).
 
 ### NPC builder — what the program format still needs
 
 The point of strategies-as-data is a later phase where a strategy is *authored*
 rather than written. What exists is the format and its validator
-(`engine/npc_script.validate_program`, run at assign time by
+(`npc/script.validate_program`, run at assign time by
 `assign_npc_profile()` so an authoring tool gets errors synchronously).
 Outstanding before a builder is worth writing:
 

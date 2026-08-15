@@ -1,7 +1,7 @@
 import json
 from db.connection import get_connection
-from db.npc_profiles import assign_npc_profile
-from engine.npc import run_npc_decisions
+from npc.profiles import assign_npc_profile
+from npc.strategies import run_npc_decisions
 from engine.turn import end_of_turn
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
 

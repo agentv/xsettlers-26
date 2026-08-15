@@ -159,7 +159,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 * A player **declares end of turn** when they have no further moves. Once all players have declared, the turn resolves (consensus acceleration).
 * Players may **rescind** their end-of-turn declaration before resolution.
 * End-of-turn engine actions, in order:
-    * **NPC decisions** — every `is_npc=1` player's registered strategy (see `engine/npc.py`) acts, via the same tool functions a human player would call, before anything else this turn resolves
+    * **NPC decisions** — every `is_npc=1` player's registered strategy (see `npc/strategies.py`) acts, via the same tool functions a human player would call, before anything else this turn resolves
     * Player declarations reset
     * Arrivals processed
     * **Ship's log dispatch** — any `queue_command`-deferred action due this turn (`before_arrival`/`after_arrival`/`at_turn`) fires here, right after arrivals so a chained action sees an org's just-landed state, and before production so a re-departing org's production is correctly suppressed that turn

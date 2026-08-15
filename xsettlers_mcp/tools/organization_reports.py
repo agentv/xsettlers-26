@@ -15,7 +15,7 @@ from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED
 from engine.production import POD_PRODUCTION, get_production_multiplier
 from engine.turn import get_next_tick_at, get_final_scores, TURN_LIMIT
 from engine.scoring import player_standings
-from xsettlers_mcp.tools.sector_tools import bearing_name
+from engine.bearings import bearing_name
 from datetime import datetime, timezone
 import json
 import os

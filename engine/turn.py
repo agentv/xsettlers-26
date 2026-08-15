@@ -11,7 +11,7 @@ from engine.production import (get_production, get_consumption_recipe,
 from engine.org_resources import (available_org_resource, drain_org_resource,
                                   store_org_resource)
 from engine.scoring import score_for, player_standings
-from xsettlers_mcp.tools.sector_tools import get_scan_range
+from engine.bearings import get_scan_range
 
 TURN_LIMIT = int(os.getenv("TURN_LIMIT", 20))
 
@@ -140,7 +140,7 @@ def _resolve_scan(cur, current_turn: int, org_id: int, player_id: int, origin,
     is why those are parameters and nothing else is.
 
     `origin` is the scanning org's absolute (x,y,z); `offset` is the relative
-    aim (see sector_tools.SCAN_BEARINGS -- aim is relative so it survives a
+    aim (see bearings.SCAN_BEARINGS -- aim is relative so it survives a
     move). Range is re-checked here even though it was validated at set time
     and cannot drift, because get_scan_range() will eventually vary per org.
     """
@@ -188,15 +188,21 @@ def end_of_turn():
 
     # 0. NPC decisions -- each is_npc=1 player with a profile acts before
     #    this turn resolves, by calling the same confirm_move/set_pod_task/
-    #    set_mission tool functions a human player would (see engine/npc.py).
+    #    set_mission tool functions a human player would (see npc/strategies.py).
     #    Each of those calls opens and commits its own connection, so this
     #    runs to completion with nothing left open before the turn's own
     #    conn/cur (below) starts -- no shared transaction, no lock contention.
-    #    Imported here rather than at module level to avoid a circular import:
-    #    engine/npc.py's use of navigation_tools.confirm_move needs
-    #    get_current_turn from this module, which isn't defined yet while
-    #    this module is still executing its own top-level imports.
-    from engine.npc import run_npc_decisions
+    #    Function-level import, and the one place anything below the tool
+    #    layer reaches up through it. npc/ sits ABOVE xsettlers_mcp/tools/ (a
+    #    strategy acts by calling the same tool functions a human does, so
+    #    every ownership check applies unmodified), and those tools import
+    #    this module -- so a module-level import here would close the loop
+    #    engine -> npc -> tools -> engine while this module is still executing
+    #    its own top-level imports. Deferring it to call time is what keeps
+    #    that legal. Closing the loop for real means the caller of
+    #    end_of_turn() driving NPC decisions instead, which changes what a
+    #    direct end_of_turn() call does -- a behavior change, not a move.
+    from npc.strategies import run_npc_decisions
     run_npc_decisions()
 
     conn = get_connection(); cur = conn.cursor()

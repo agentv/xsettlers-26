@@ -5,7 +5,7 @@ to one binding and forgotten in the other -- the failure mode being an order a
 player can queue but the engine cannot fire, or vice versa.
 """
 from engine.actions import ACTION_NAMES, DURING_TRANSIT_ACTIONS, TRIGGER_PHASES
-from engine.npc_script import ACTIONS as PROGRAM_ACTIONS, IMMEDIATE
+from npc.script import ACTIONS as PROGRAM_ACTIONS, IMMEDIATE
 from engine.ship_log import ACTIONS as QUEUED
 from xsettlers_mcp.tools.organization_tools import VALID_TRIGGER_PHASES
 
@@ -16,7 +16,7 @@ def test_queued_binding_covers_exactly_the_named_actions():
 
 
 def test_immediate_binding_covers_exactly_the_named_actions():
-    """engine/npc_script.py: what a program can order right now."""
+    """npc/script.py: what a program can order right now."""
     assert set(IMMEDIATE) == set(ACTION_NAMES)
 
 

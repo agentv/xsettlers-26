@@ -317,7 +317,7 @@ def test_during_transit_dispatch_is_guarded_too():
 # The absolute form pins an order to one starting position; the relative form
 # is resolved against wherever the org actually is when the command fires,
 # which is what lets the same authored order be reused from any home sector
-# (see engine/npc_script.py).
+# (see npc/script.py).
 
 def test_queue_command_rejects_mixing_absolute_and_relative_destinations():
     p1 = seed_player()
@@ -447,7 +447,7 @@ def test_queued_aim_scan_points_the_org_sensors():
     end_of_turn(); end_of_turn()
 
     org = _org_row(ship)
-    # North is -y (see sector_tools.SCAN_BEARINGS), and "N2" reaches 2 sectors.
+    # North is -y (see bearings.SCAN_BEARINGS), and "N2" reaches 2 sectors.
     assert (org["scan_offset_x"], org["scan_offset_y"], org["scan_offset_z"]) == (0, -2, 0)
     assert _queue_count() == 0
 

@@ -12,7 +12,7 @@ def record_event(event_type, payload, actor_id=None,
     # Imported here, not at module level: engine.turn imports
     # record_event_direct (below) from this module, so an eager import here
     # would be circular. Same lazy-import pattern engine/turn.py uses for
-    # engine.npc, for the same reason.
+    # npc.strategies, for the same reason.
     from engine.turn import get_current_turn
     turn = get_current_turn()
     conn = get_connection()

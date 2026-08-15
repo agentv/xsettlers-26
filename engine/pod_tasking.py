@@ -1,6 +1,6 @@
 import json, math
 from db.events import record_event_direct
-from xsettlers_mcp.tools.sector_tools import get_scan_range, resolve_bearing, bearing_name, SCAN_BEARINGS
+from engine.bearings import get_scan_range, resolve_bearing, bearing_name, SCAN_BEARINGS
 
 def resolve_aim(bearing, offset_x, offset_y, offset_z):
     """

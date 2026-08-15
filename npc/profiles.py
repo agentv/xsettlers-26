@@ -1,11 +1,11 @@
 import json
 from db.connection import connection
-from engine.npc_script import validate_program
+from npc.script import validate_program
 
 def assign_npc_profile(player_id: int, strategy_name: str, config: dict = None) -> dict:
     """
     Mark a player as NPC-controlled and give it a named strategy profile
-    (see engine/npc.py's strategy_names() for valid names). Reassigning a
+    (see npc/strategies.py's strategy_names() for valid names). Reassigning a
     strategy to a player that already has one replaces it and resets memory
     to {} -- a strategy's working memory is only meaningful to that strategy,
     so carrying it over to a different one would be a foreign, unparseable

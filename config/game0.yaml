@@ -68,11 +68,11 @@ lobby:
   # acceptable if it ever needs lengthening) -- how long GameHouse should
   # wait for a second human before backfilling with an NPC.
   wait_window_seconds: 120
-  # All five strategies registered in engine/npc.py's STRATEGIES dict --
+  # All five strategies registered in npc/strategies.py's STRATEGIES dict --
   # see docs/TODO.md's fleet-strategy taxonomy for what each one does.
   # config's properties vary by strategy_name (e.g. colonize_fraction only
   # means anything for burst_and_colonize) -- not modeled as a conditional
-  # schema here, just documented per-strategy in engine/npc.py's docstrings.
+  # schema here, just documented per-strategy in npc/strategies.py's docstrings.
   npc_profile_schema:
     type: object
     required: [strategy_name]

@@ -1,12 +1,11 @@
 from xsettlers_mcp.tools.registry import mcp_tool
 from db.events import record_event
 from engine.turn import get_current_turn
-from engine.movement import apply_confirm_move, plan_move
+from engine.movement import apply_confirm_move, plan_move, NEGATIVE_DEST
 from xsettlers_mcp.tools.session import player_tool
 
 NOT_MOVABLE = "Ship not found, not owned by player, or already in transit"
 LOCKED = "This organization is locked (colony or mid-colonization) and cannot move"
-NEGATIVE_DEST = "Destination coordinates cannot be negative -- space has no negative indices"
 
 
 def _departable_ship(sess, ship_id: int, dest):

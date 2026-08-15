@@ -1,4 +1,5 @@
 from db.events import record_event
+from db.orgs import org_position
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED, POD_NOT_OWNED
 from engine.turn import get_current_turn
 from engine.missions import apply_colonize
@@ -17,9 +18,7 @@ VALID_TRIGGER_PHASES = {"during_transit", "before_arrival", "after_arrival", "at
 def _aimed_sector(cur, org_id: int, offset):
     """Absolute coordinates an org's aim currently points at, or None if it
     is in transit (no position to offset from)."""
-    org = cur.execute("""SELECT s.coord_x, s.coord_y, s.coord_z FROM organizations o
-        JOIN sectors s ON s.id = o.sector_id WHERE o.id=? AND o.sector_id!=-1""",
-        (org_id,)).fetchone()
+    org = org_position(cur, org_id)
     if not org:
         return None
     return (org["coord_x"] + offset[0], org["coord_y"] + offset[1], org["coord_z"] + offset[2])

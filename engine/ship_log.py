@@ -16,6 +16,7 @@ already-open transaction; see engine/movement.py's docstring).
 """
 import json
 from db.events import record_dispatch_failure, record_command_refused
+from db.orgs import org_position
 from engine.movement import apply_confirm_move
 from engine.missions import apply_colonize
 from engine.org_scanning import apply_set_org_scan_bearing
@@ -73,9 +74,7 @@ def resolve_destination(cur, org_id: int, params: dict) -> tuple:
     """
     if params.get("dest_x") is not None:
         return params["dest_x"], params["dest_y"], params["dest_z"]
-    org = cur.execute("""SELECT s.coord_x, s.coord_y, s.coord_z
-        FROM organizations o JOIN sectors s ON s.id=o.sector_id
-        WHERE o.id=? AND o.sector_id!=-1""", (org_id,)).fetchone()
+    org = org_position(cur, org_id)
     if not org:
         raise ValueError(f"org {org_id} has no position to apply a relative move from")
     dest = (org["coord_x"] + params["d_x"], org["coord_y"] + params["d_y"],

@@ -28,6 +28,7 @@ to turn -- the same pattern pods.task_params uses for per-pod working state.
 """
 import json
 from db.connection import get_connection
+from db.orgs import org_position
 from engine.npc_programs import load_programs
 from engine.npc_script import run_program
 from xsettlers_mcp.tools.navigation_tools import confirm_move
@@ -123,9 +124,13 @@ def _fan_out(player_id: int, player_token: str, config: dict, memory: dict) -> d
             memory["opening_dispatched"] = True
             memory["converged"] = True
             return memory
-        home = cur.execute("""SELECT s.coord_x,s.coord_y,s.coord_z FROM organizations o
-            JOIN sectors s ON s.id=o.sector_id WHERE o.id=?""", (ship_ids[0],)).fetchone()
+        home = org_position(cur, ship_ids[0])
         conn.close()
+        if not home:
+            # First ship is in transit, so there is no home to fan out from
+            # yet. Leave opening_dispatched unset and try again next turn
+            # rather than measuring from the sentinel sector's (-1,-1,-1).
+            return memory
         hx, hy, hz = home["coord_x"], home["coord_y"], home["coord_z"]
 
         scouts = {}

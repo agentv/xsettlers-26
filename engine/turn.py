@@ -3,6 +3,7 @@ from config.loader import load_config
 from db.connection import get_connection
 from db.sectors import reveal_sector, CONFIDENCE_DECAY_PER_TURN
 from db.events import record_event_direct
+from db.orgs import org_position
 from engine.ship_log import dispatch_due_commands
 from engine.production import (get_production, get_consumption_recipe,
                                get_production_multiplier, ORG_UPKEEP_COST,
@@ -325,10 +326,11 @@ def end_of_turn():
             ratio = _pay_for(cur, org_id, player_id, get_consumption_recipe(task),
                              consumption)
 
-            org = cur.execute(
-                "SELECT o.sector_id,o.player_id,s.coord_x,s.coord_y,s.coord_z FROM organizations o "
-                "JOIN sectors s ON s.id=o.sector_id WHERE o.id=?", (org_id,)).fetchone()
-            if ratio > 0 and org and org["sector_id"] != -1:
+            # org_position returns None for an in-transit org (parked at the
+            # sentinel sector), which is the same suppression the explicit
+            # sector_id check used to spell out.
+            org = org_position(cur, org_id)
+            if ratio > 0 and org:
                 params = json.loads(pod["task_params"] or "{}")
                 offset = (params.get("offset_x"), params.get("offset_y"),
                           params.get("offset_z"))

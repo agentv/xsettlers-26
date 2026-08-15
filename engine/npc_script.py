@@ -35,6 +35,7 @@ reach them while they are still looking at it, not surface three turns later
 inside a background clock tick with no one to tell.
 """
 from db.connection import get_connection
+from db.orgs import org_position
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.organization_tools import (
     queue_command, set_mission, set_pod_task, set_org_scan_bearing,
@@ -80,9 +81,7 @@ def _resolve_now_destination(cur, org_id: int, params: dict):
     a queued move, just evaluated at once because 'now' is the trigger."""
     if params.get("dest_x") is not None:
         return params["dest_x"], params["dest_y"], params["dest_z"]
-    org = cur.execute("""SELECT s.coord_x, s.coord_y, s.coord_z
-        FROM organizations o JOIN sectors s ON s.id=o.sector_id
-        WHERE o.id=? AND o.sector_id!=-1""", (org_id,)).fetchone()
+    org = org_position(cur, org_id)
     if not org:
         return None
     return (org["coord_x"] + params["d_x"], org["coord_y"] + params["d_y"],

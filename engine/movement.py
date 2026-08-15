@@ -1,6 +1,30 @@
 import json, math
 from db.events import record_event_direct, record_dispatch_failure
+from db.orgs import org_position
 from engine.pod_tasking import apply_set_pod_task
+
+def plan_move(origin, dest, jump_range_per_turn: int, current_turn: int) -> dict:
+    """
+    What a move would cost, as pure arithmetic: straight-line distance, whole
+    turns needed, and the turn the org is free to act again. No DB, no writes.
+
+    Both halves of the two-step move flow call this -- preview_move to quote a
+    move, apply_confirm_move to commit one -- so a quote and the move that
+    follows it cannot disagree about travel time. Computed independently in two
+    places, they could.
+
+    arrival_turn is the turn the org becomes free to act, one turn AFTER the
+    end_of_turn() pass that performs the landing (engine/turn.py's arrival
+    resolution query is offset to match). A player reading it can plan that
+    turn's orders directly rather than accounting for a hidden lag.
+
+    turns_needed floors at 1: even a move to an adjacent sector -- or to the
+    org's own -- takes a turn.
+    """
+    distance = math.dist(origin, dest)
+    turns_needed = max(1, math.ceil(distance / jump_range_per_turn))
+    return {"distance": distance, "turns_needed": turns_needed,
+            "arrival_turn": current_turn + turns_needed + 1}
 
 def apply_confirm_move(cur, org_id: int, player_id: int,
                        dest_x: int, dest_y: int, dest_z: int,
@@ -19,21 +43,13 @@ def apply_confirm_move(cur, org_id: int, player_id: int,
     engine.turn.get_current_turn() itself, so this module has nothing to
     import from engine.turn -- no circular import.
     """
-    org = cur.execute("""SELECT s.coord_x,s.coord_y,s.coord_z,s.id AS sector_id
-        FROM organizations o JOIN sectors s ON s.id=o.sector_id
-        WHERE o.id=? AND o.sector_id!=-1""", (org_id,)).fetchone()
+    org = org_position(cur, org_id)
     if not org:
         return {"error": "Organization not found or already in transit"}
     origin_sector_id = org["sector_id"]
-    distance = math.sqrt(
-        (dest_x-org["coord_x"])**2 +
-        (dest_y-org["coord_y"])**2 +
-        (dest_z-org["coord_z"])**2)
-    turns_needed = max(1, math.ceil(distance / jump_range_per_turn))
-    # +1: arrival_turn names the turn the org is free to act, one turn after
-    # the end_of_turn() pass that actually performs the landing (see
-    # engine/turn.py's arrival resolution query, which is offset to match).
-    arrival_turn = current_turn + turns_needed + 1
+    plan = plan_move((org["coord_x"], org["coord_y"], org["coord_z"]),
+                     (dest_x, dest_y, dest_z), jump_range_per_turn, current_turn)
+    turns_needed, arrival_turn = plan["turns_needed"], plan["arrival_turn"]
     record_event_direct(cur, current_turn, "ship.move_confirmed",
         payload={"org_id": org_id, "from_sector_id": origin_sector_id,
                  "to_x": dest_x, "to_y": dest_y, "to_z": dest_z, "arrival_turn": arrival_turn},

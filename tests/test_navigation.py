@@ -1,7 +1,34 @@
 from db.connection import get_connection
+from engine.movement import plan_move
 from engine.turn import get_current_turn
 from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
 from tests.conftest import seed_player, seed_sector, seed_ship
+
+# --- plan_move (the arithmetic preview_move quotes and confirm_move commits) ---
+
+def test_plan_move_costs_whole_turns_and_floors_at_one():
+    assert plan_move((0, 0, 0), (3, 0, 0), 1, 0)["turns_needed"] == 3
+    # A diagonal is sqrt(8) ~= 2.83, rounded up to 3 whole turns.
+    assert plan_move((0, 0, 0), (2, 2, 0), 1, 0)["turns_needed"] == 3
+    # Jump range divides the distance.
+    assert plan_move((0, 0, 0), (6, 0, 0), 3, 0)["turns_needed"] == 2
+    # Even a zero-distance move takes a turn.
+    assert plan_move((5, 5, 0), (5, 5, 0), 1, 0)["turns_needed"] == 1
+
+def test_plan_move_arrival_turn_is_one_past_the_landing_pass():
+    """arrival_turn names the turn the org is free to act, one turn after the
+    end_of_turn() pass that performs the landing (see engine/turn.py)."""
+    assert plan_move((0, 0, 0), (3, 0, 0), 1, 10)["arrival_turn"] == 10 + 3 + 1
+
+def test_preview_and_confirm_quote_the_same_travel_time():
+    """The quote and the move that follows it must agree -- they share
+    plan_move precisely so they cannot drift apart."""
+    pid = seed_player(); oid = seed_sector(0, 0, 0)
+    sid = seed_ship(pid, oid)
+    quoted = preview_move("U_P1", sid, 4, 3, 0, jump_range_per_turn=2)
+    committed = confirm_move("U_P1", sid, 4, 3, 0, jump_range_per_turn=2)
+    assert quoted["turns_needed"] == committed["turns_needed"]
+    assert quoted["arrival_turn"] == committed["arrival_turn"]
 
 # --- preview_move ---
 

@@ -1,8 +1,7 @@
 from db.events import record_event
 from engine.turn import get_current_turn
-from engine.movement import apply_confirm_move
+from engine.movement import apply_confirm_move, plan_move
 from xsettlers_mcp.tools.session import player_tool
-import math
 
 NOT_MOVABLE = "Ship not found, not owned by player, or already in transit"
 LOCKED = "This organization is locked (colony or mid-colonization) and cannot move"
@@ -37,29 +36,31 @@ def _departable_ship(sess, ship_id: int, dest):
 def preview_move(sess, ship_id: int,
                  dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
     """
-    Pure read — calculates travel time WITHOUT committing anything.
-    Returns turns_needed and arrival_turn. No DB writes, no event logged.
-    Destination is any coordinate triple -- sectors are lazily instantiated
-    (see db/sectors.py), so the destination need not exist yet.
+    Quote a move without committing to it: same ownership, mobility and
+    destination checks confirm_move applies, then the travel cost it would
+    charge. No DB writes, no event logged.
 
-    arrival_turn is the turn number the ship is actually free to act again --
-    not the turn whose end_of_turn() pass performs the landing. Landing
-    happens one turn earlier than that (see engine/turn.py's arrival
-    resolution, which fires a turn ahead of the stored value for exactly this
-    reason), so a player reading "arrival_turn: 5" can plan the ship's turn-5
-    orders directly instead of accounting for a hidden one-turn lag.
+    A separate tool rather than a flag on confirm_move, deliberately: the
+    caller is usually a language model, and `preview_move` cannot launch a
+    fleet however it is invoked, whereas one forgotten `dry_run=True` can. The
+    arithmetic itself is shared (engine.movement.plan_move), so the quote and
+    the commit cannot disagree about travel time.
+
+    Worth quoting first because commitment is expensive: a moving ship
+    produces no energy, and undoing a move (cancel_move) rubber-bands it back
+    to where it started, having burned the turns for nothing.
+
+    Destination is any coordinate triple -- sectors are lazily instantiated
+    (see db/sectors.py), so it need not exist yet.
     """
     ship, err = _departable_ship(sess, ship_id, (dest_x, dest_y, dest_z))
     if err:
         return err
-    distance = math.sqrt(
-        (dest_x-ship["coord_x"])**2 +
-        (dest_y-ship["coord_y"])**2 +
-        (dest_z-ship["coord_z"])**2)
-    turns_needed = max(1, math.ceil(distance / jump_range_per_turn))
+    plan = plan_move((ship["coord_x"], ship["coord_y"], ship["coord_z"]),
+                     (dest_x, dest_y, dest_z), jump_range_per_turn, get_current_turn())
     return {"preview": True, "ship_id": ship_id, "from_sector_id": ship["sector_id"],
-            "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z, "turns_needed": turns_needed,
-            "arrival_turn": get_current_turn() + turns_needed + 1}
+            "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z,
+            "turns_needed": plan["turns_needed"], "arrival_turn": plan["arrival_turn"]}
 
 @player_tool
 def confirm_move(sess, ship_id: int,

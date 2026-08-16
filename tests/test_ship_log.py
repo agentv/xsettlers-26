@@ -317,7 +317,7 @@ def test_during_transit_dispatch_is_guarded_too():
 # The absolute form pins an order to one starting position; the relative form
 # is resolved against wherever the org actually is when the command fires,
 # which is what lets the same authored order be reused from any home sector
-# (see npc/script.py).
+# (see npc/strategy.py).
 
 def test_queue_command_rejects_mixing_absolute_and_relative_destinations():
     p1 = seed_player()

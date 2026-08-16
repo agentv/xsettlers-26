@@ -50,20 +50,5 @@ lobby:
   # Confirmed 2026-08-06: 120s is fine as a starting value (360s also
   # acceptable if it ever needs lengthening).
   wait_window_seconds: 120
-  # All five strategies registered in npc/strategies.py's STRATEGIES dict --
-  # see docs/TODO.md's fleet-strategy taxonomy and config/game0.yaml for
-  # the fuller comment on this block.
-  npc_profile_schema:
-    type: object
-    required: [strategy_name]
-    properties:
-      strategy_name:
-        type: string
-        enum: [fan_out_consolidate, turtle, burst_and_colonize, frontier_map_stay_frosty, fan_out]
-      config:
-        type: object
-        properties:
-          leg_distance: {type: integer}
-          jump_range_per_turn: {type: integer}
-          colonize_fraction: {type: number}
-          scout_distance: {type: integer}
+  # No npc_profile_schema here -- derived from the strategy library by
+  # xsettlers_mcp/gamehouse.py. See config/game0.yaml.

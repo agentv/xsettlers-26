@@ -334,19 +334,15 @@ decided even though none of it is built:
 
 ## NPC strategies
 
-* [ ] **A program cannot size a selection relative to the fleet.**
-  `config/npc_programs/burst_and_colonize.yaml` names a fixed `slice: [0, 2]`
-  where the Python it replaced computed `round(len(ships) * colonize_fraction)`.
-  Identical for the 8-ship fleets every scenario uses, divergent elsewhere — a
-  1-ship fleet now colonizes where the Python fanned out. A fractional selector
-  (`{fraction: 0.25}` beside `slice`/`stride`/`offset`) is the obvious fix,
-  deferred rather than smuggled in since nothing in play needs it. A test
-  asserts the divergence so it cannot become a silent surprise.
-* [ ] **`fan_out_consolidate`'s 8-ship floor is gone, not ported.** The Python
-  refused to act below 8 ships (4 directions × 2); a slice just selects fewer.
-  Nothing depends on the old behaviour and no scenario runs a short fleet — but
-  if a minimum-fleet precondition is ever wanted, it belongs in the program
-  format as a guard, not rediscovered per strategy.
+* [ ] **A document cannot size a selection relative to the fleet.** `ships`
+  takes `all`, `idle`, or a fixed `slice`/`stride`/`offset` — there is no way
+  to say "a quarter of whatever fleet I have". A fractional selector
+  (`{fraction: 0.25}`) is the obvious fix, deferred since nothing shipped
+  needs it.
+* [ ] **No minimum-fleet guard.** A document written for 8 ships just selects
+  fewer on a short fleet rather than declining to act. If a precondition is
+  ever wanted it belongs in the document format, not rediscovered per
+  strategy.
 
 ### Fleet strategies, not player strategies
 
@@ -363,30 +359,31 @@ versions expose explicit assignment to human players.
 
 Not designed: the `fleet_id` schema, how a fleet is defined/assigned, or
 concrete parameters for any of the four registered styles beyond their
-behavioural descriptions (see `npc/strategies.py` and `config/npc_programs/`).
+behavioural descriptions (see `config/npc_strategies/`).
 
-### NPC builder — what the program format still needs
+### NPC builder — what the document format still needs
 
 The point of strategies-as-data is a later phase where a strategy is *authored*
-rather than written. What exists is the format and its validator
-(`npc/script.validate_program`, run at assign time by
+rather than written — and eventually authored by a *player* and traded. Two
+properties the current model already has that make that possible: a document
+carries no expressions, so accepting one grants no capability; and every
+`decide` source is fog-limited in `npc/decide.py`, so an authored strategy
+cannot see what its owner has not scanned. What exists is the format and its
+validator (`npc/strategy.validate_strategy`, run at assign time by
 `assign_npc_profile()` so an authoring tool gets errors synchronously).
 Outstanding before a builder is worth writing:
 
 * [ ] **No way to list or describe the vocabulary programmatically.** A builder
-  needs the legal actions, phases and selector keys as data it can render into a
-  form. They are constants (`ACTIONS`, `QUEUED_PHASES`, `STEP_KEYS`) plus prose
-  in the module docstring.
-* [ ] **Programs are single-phase by construction.** `run_program` dispatches
-  once and sets `memory["dispatched"]`. Exactly right for an opening, exactly
-  wrong for anything with a second act not expressible as a ship's-log trigger.
-  Whether the format grows phases, or reactive strategies simply stay code, is
-  the open design question — don't answer it by accident.
-* [ ] **`assign_npc_profile()` is dev/test-only**, so an authored program has no
-  path into a live game except through the GameHouse handoff's roster. A builder
-  needs one.
-* [ ] Fleet-relative selectors (see the `burst_and_colonize` divergence above)
-  and a fleet-minimum guard.
+  needs the legal actions, phases, selector keys, gates, sources, rank fields
+  and picks as data it can render into a form. They are constants
+  (`ACTION_NAMES`, `TRIGGER_PHASES`, `ORDER_KEYS`, `DECIDE_KEYS`, and
+  `npc/decide.py`'s `GATES`/`SOURCES`/`RANK_FIELDS`/`PICKS`) plus prose in the
+  module docstrings.
+* [ ] **`assign_npc_profile()` is dev/test-only**, so an authored document has
+  no path into a live game except through the GameHouse handoff's roster. A
+  builder needs one — and it is the piece that turns "a player can write a
+  strategy" into "a player can play one".
+* [ ] Fleet-relative selectors and a fleet-minimum guard (see above).
 
 ### Tournament standing — stale, needs a re-run
 
@@ -402,13 +399,16 @@ unseeded tournament compares strategies on different boards and part of the
 resulting ranking is noise — which is worth keeping in mind when reading the
 standings below, since they were produced before that flag existed.
 
-Every strategy scored identically regardless of opponent — no combat, no
+Every strategy scores identically regardless of opponent — no combat, no
 resource contention at this map scale — so the standings are a fixed, transitive
-ranking of solo performance, not real head-to-head play: `burst_and_colonize`
-(2582) beats `fan_out_consolidate` (2296) beats `fan_out` (2277) beats `turtle`
-(2240) beats `frontier_map_stay_frosty` (1864, energy collapses to ~0 by turn 5
-from constant movement).
+ranking of solo performance, not real head-to-head play. Seeded (`--seed 42`)
+on Diaspora: `turtle` (2240) beats `fan_out` (2108.3) beats
+`frontier_map_stay_frosty` (1864, energy collapses to ~0 by turn 5 from
+constant movement).
 
-* [ ] **These numbers predate the `fan_out` rewrite** that made scouts wait and
-  converge on the best find across the whole fleet, instead of each committing
-  individually to its own scan. Re-run the field before trusting the ranking.
+* [ ] **Doing nothing still wins.** The field is 3 strategies and the control
+  beats both of them, which says the cost of movement outweighs anything
+  scouting currently buys. That is a finding about the *economy*, not about the
+  strategies: until moving somewhere richer pays for the fuel, no reconnaissance
+  strategy can justify itself. Worth resolving before adding more strategies to
+  a field none of them can win.

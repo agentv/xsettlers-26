@@ -78,10 +78,9 @@ class ParticipantDef:
 @dataclass
 class LobbyDef:
     """
-    The shape a scenario reports to GameHouse via describe_lobby() (see
-    xsettlers_mcp/gamehouse.py) -- min/max player counts, how long GameHouse
-    should wait for a second human before backfilling with an NPC, and the
-    JSON schema an NPC profile must match for this scenario.
+    The shape a scenario reports to GameHouse (see xsettlers_mcp/gamehouse.py)
+    -- min/max player counts and how long GameHouse should wait for a second
+    human before backfilling with an NPC.
 
     min_players/max_players are DERIVED from len(participants), never read
     from YAML -- resolve_seats() already requires an exact roster match, not
@@ -91,16 +90,23 @@ class LobbyDef:
     expecting it to take effect" trap this codebase already warns against
     elsewhere (see CLAUDE.md on game_config.yaml's dead `game:` fields).
 
-    wait_window_seconds/npc_profile_schema ARE scenario-authored (nothing to
-    derive them from) but optional -- a scenario silent on `lobby:` entirely
-    gets sensible defaults (120s, no NPC support) rather than being unable to
-    load at all, so ad hoc/minimal scenarios (test fixtures included) don't
-    need to declare a GameHouse-specific block just to parse.
+    The NPC profile schema is NOT here, for the same derivation reason: the
+    strategy library is service-wide, not per-scenario, so every scenario
+    would restate the same enum and each copy would go stale the moment a
+    strategy was added. gamehouse.py builds it from npc/library.py at
+    registration time instead. `config/` may not import from `npc/`
+    (see CLAUDE.md's layering rule), which is the other reason it cannot be
+    derived in this module.
+
+    wait_window_seconds IS scenario-authored (nothing to derive it from) but
+    optional -- a scenario silent on `lobby:` entirely gets a sensible default
+    rather than being unable to load at all, so ad hoc/minimal scenarios (test
+    fixtures included) don't need to declare a GameHouse-specific block just
+    to parse.
     """
     min_players: int
     max_players: int
     wait_window_seconds: int
-    npc_profile_schema: dict
 
 DEFAULT_LOBBY_WAIT_WINDOW_SECONDS = 120
 
@@ -182,7 +188,6 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
         max_players=len(participants),
         wait_window_seconds=int(lobby_raw.get("wait_window_seconds",
                                               DEFAULT_LOBBY_WAIT_WINDOW_SECONDS)),
-        npc_profile_schema=lobby_raw.get("npc_profile_schema", {}),
     )
     return StartingConfiguration(
         name=_require(sc_raw, "name", "name"),

@@ -1,0 +1,51 @@
+# Distribute outward, scan, then converge on the single best find.
+#
+# The reference adaptive strategy: the fleet does not commit until every
+# scout's reading is in, and then the whole fleet -- not just whichever ship
+# found it -- goes to the richest sector anyone saw. That wait-then-evaluate
+# shape is why the `decide` step exists, and this is the document that forced
+# each part of its vocabulary.
+#
+# Two scouts sharing a bearing (8 ships over 4 directions) share an aim too,
+# so they independently confirm the same reading. That is redundancy, not two
+# candidates -- scan_targets deduplicates by coordinate.
+name: fan_out
+description: Scatter, scan, then send the whole fleet to the richest sector anyone found.
+config:
+  jump_range_per_turn: 1
+steps:
+  # Scout hop, one cardinal per ship, cycling N/S/E/W by fleet index.
+  # North is -y (engine/bearings.py). Offsets are relative, so the same
+  # document works from any home sector.
+  - order:
+      ships: all
+      action: move
+      params:
+        - {d_x: 0,  d_y: -2, d_z: 0, jump_range_per_turn: 1}
+        - {d_x: 0,  d_y: 2,  d_z: 0, jump_range_per_turn: 1}
+        - {d_x: 2,  d_y: 0,  d_z: 0, jump_range_per_turn: 1}
+        - {d_x: -2, d_y: 0,  d_z: 0, jump_range_per_turn: 1}
+  # Scanner aimed further out the same way. The "X2" bearings are 2 sectors --
+  # the maximum SCAN_RANGE allows. Aim distance is governed by scan range, not
+  # by however far the scout hop happens to be.
+  - order:
+      ships: all
+      action: aim_scan
+      params:
+        - {bearing: N2}
+        - {bearing: S2}
+        - {bearing: E2}
+        - {bearing: W2}
+  # Hold until every aimed scan has come back, then take the richest sector
+  # the fleet collectively found. Nobody moves while this is waiting.
+  - decide:
+      await: all_scans_resolved
+      from: scan_targets
+      rank_by: energy_capacity
+      pick: max
+      bind: target
+  # Everyone converges, including the ships that found nothing special.
+  - order:
+      ships: all
+      action: move
+      params: {dest: $target, jump_range_per_turn: $jump_range_per_turn}

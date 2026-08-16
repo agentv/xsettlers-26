@@ -8,7 +8,7 @@ from two places that cannot share an implementation:
   already-open transaction, so it dispatches into the engine-layer `apply_*`
   helpers. A self-connecting call there fails outright -- db/connection.py sets
   no busy_timeout, so a second writer errors rather than waiting.
-* **immediate** (`npc/script.py`'s IMMEDIATE) runs before the turn
+* **immediate** (`npc/strategy.py`'s IMMEDIATE) runs before the turn
   transaction opens, so it goes through the ordinary @player_tool wrappers --
   the same path a human player's MCP call takes, ownership checks and all.
 

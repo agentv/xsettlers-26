@@ -1,0 +1,41 @@
+# Continuous reconnaissance: ships never settle.
+#
+# No terminal state -- which is what `loop: true` is for. Every turn, any ship
+# that has landed and is otherwise idle gets sent further out in its assigned
+# direction with its scanner aimed the same way. No colonizing, ever;
+# mobility is the identity.
+#
+# A ship gets roughly one turn of production at each waypoint before being
+# redirected, since arrival resolution (which resets mission to idle) happens
+# at step 2 of the turn and this runs at step 0.
+#
+# `ships: idle` is a live filter, so the selected set changes every turn --
+# which is exactly why params cycle on a ship's fleet index rather than its
+# position in the selection. A ship keeps its heading for the whole game
+# instead of being reassigned whenever its neighbours happen to be in transit.
+name: frontier_map_stay_frosty
+description: Never settle. Every landed ship is immediately sent further out, scanning ahead.
+loop: true
+steps:
+  # Movement has no range cap but scanning does, so leg distance (3) and aim
+  # distance (2, the SCAN_RANGE maximum) are deliberately decoupled rather
+  # than one being made to match the other.
+  - order:
+      ships: idle
+      action: move
+      params:
+        - {d_x: 0,  d_y: -3, d_z: 0, jump_range_per_turn: 1}
+        - {d_x: 0,  d_y: 3,  d_z: 0, jump_range_per_turn: 1}
+        - {d_x: 3,  d_y: 0,  d_z: 0, jump_range_per_turn: 1}
+        - {d_x: -3, d_y: 0,  d_z: 0, jump_range_per_turn: 1}
+  # Same ships as the step above: the fleet is snapshotted once per turn, so
+  # these are still the ships that were idle when the pass began, not the
+  # (empty) set that is still idle after they were ordered to move.
+  - order:
+      ships: idle
+      action: aim_scan
+      params:
+        - {bearing: N2}
+        - {bearing: S2}
+        - {bearing: E2}
+        - {bearing: W2}

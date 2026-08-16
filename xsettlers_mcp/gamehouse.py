@@ -74,7 +74,7 @@ async def register_with_gamehouse() -> dict:
                     "min_players": lobby.min_players,
                     "max_players": lobby.max_players,
                     "wait_window_seconds": lobby.wait_window_seconds,
-                    "npc_profile_schema": lobby.npc_profile_schema,
+                    "npc_profile_schema": npc_profile_schema(),
                     "scenarios": [],
                 })
     except Exception as exc:
@@ -86,6 +86,32 @@ async def register_with_gamehouse() -> dict:
             text = block.text
             break
     return {"ok": True, "response": text}
+
+def npc_profile_schema() -> dict:
+    """
+    The JSON schema an NPC roster entry must match, built from the strategy
+    library rather than authored.
+
+    Every scenario used to restate this enum in its own `lobby:` block, and
+    each copy went stale the moment a strategy was added or renamed -- the
+    same drift the loader already refuses for min_players. The library is
+    service-wide, not per-scenario, so there is nothing for a scenario to say
+    about it.
+
+    `config` is intentionally unconstrained: it overlays the strategy
+    document's own config block, whose keys differ per strategy, and a
+    conditional schema keyed on strategy_ref would be a second copy of the
+    library to keep in step.
+    """
+    return {
+        "type": "object",
+        "required": ["strategy_ref"],
+        "properties": {
+            "strategy_ref": {"type": "string", "enum": strategy_names()},
+            "config": {"type": "object"},
+        },
+    }
+
 
 def _validate_players(players: list, lobby) -> dict | None:
     """Returns an error dict if the players list is malformed, else None."""
@@ -101,13 +127,15 @@ def _validate_players(players: list, lobby) -> dict | None:
             return {"error": f"Invalid kind '{p['kind']}'. Valid: {sorted(VALID_KINDS)}"}
         if p["kind"] == "npc":
             profile = p.get("profile") or {}
-            strategy_name = profile.get("strategy_name")
-            # strategy_names() is the union of code strategies and the named
-            # programs in config/npc_programs/ -- a strategy moving from
-            # Python into YAML must not change what a roster may ask for.
+            strategy_ref = profile.get("strategy_ref")
+            # strategy_ref is opaque to GameHouse -- it carries the value and
+            # never interprets it, the same way it treats a score object.
+            # xsettlers owns the catalogue and is the only side that can say
+            # whether a reference resolves, so adding a strategy never
+            # requires telling GameHouse anything.
             valid = strategy_names()
-            if strategy_name not in valid:
-                return {"error": f"Unknown npc strategy_name '{strategy_name}'. "
+            if strategy_ref not in valid:
+                return {"error": f"Unknown npc strategy_ref '{strategy_ref}'. "
                                  f"Valid: {valid}"}
     return None
 
@@ -116,7 +144,7 @@ def _validate_players(players: list, lobby) -> dict | None:
     "hand the game off. players is a list of {player_id, kind: "
     "'person'|'npc', profile?} entries -- person player_ids are GameHouse's "
     "real person.id, npc player_ids are GameHouse-minted ephemeral labels "
-    "with a profile.strategy_name matching the npc_profile_schema this game "
+    "with a profile.strategy_ref matching the npc_profile_schema this game "
     "registered via register_game. Bootstraps the game and returns each "
     "entry's xsettlers_player_id, plus a freshly generated player_token for "
     "person-kind entries -- GameHouse is responsible for relaying that "
@@ -202,7 +230,7 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
             entry["player_token"] = generated_tokens[p["player_id"]]
         else:
             profile = p.get("profile") or {}
-            assign_npc_profile(xsettlers_id, profile["strategy_name"], config=profile.get("config"))
+            assign_npc_profile(xsettlers_id, profile["strategy_ref"], config=profile.get("config"))
         result_players.append(entry)
 
     conn = get_connection(); cur = conn.cursor()

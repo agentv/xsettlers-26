@@ -15,7 +15,7 @@ def _scenario(participants, name="Test Scenario"):
         name=name, description="d", participants=participants,
         ships_per_player=1, pods_per_ship=[], home_colony=False,
         lobby=LobbyDef(min_players=len(participants), max_players=len(participants),
-                       wait_window_seconds=120, npc_profile_schema={}))
+                       wait_window_seconds=120))
 
 # --- resolve_seats: pairing participants with directory identities ---
 

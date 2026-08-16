@@ -57,11 +57,31 @@ so every sector a player had ever seen lingered forever and every
 redefined, so an existing `.env` carrying `0.9` fails loudly instead of
 silently meaning "111 turns to forget".
 
-**NPC strategies: plans are data, policies are code.** A fixed opening whose
-whole sequence is decided in advance is a YAML program; a strategy that reads
-the world each turn and decides from it stays a Python function. Forcing the
-latter into `org_command_queue` means conditions, repetition and cross-org
-coordination — a rule engine inside a command queue.
+**NPC strategies are data, all of them.** An earlier split — fixed openings as
+YAML, anything reactive as a Python function — was collapsed once it was clear
+the *reactive* shape is the one future NPCs need, not the fixed openings. A
+strategy is a document of `order` and `decide` steps (`config/npc_strategies/`,
+walked by `npc/strategy.py`).
+
+The thing that made this possible without turning `org_command_queue` into a
+rule engine: conditions live in the *interpreter*, one layer above the log,
+which stays one-shot and unconditional. The interpreter decides, then emits
+ordinary orders.
+
+Two properties this was chosen for, beyond removing the split. A document
+carries no expressions, so accepting a strategy someone else wrote grants no
+capability — which is what would make trading them safe. And fog of war becomes
+structural: every `decide` source in `npc/decide.py` requires
+`player_sectors.confidence > 0`, so no document can name a sector its owner has
+not scanned, where a Python strategy could always have queried `sectors`
+directly and cheated.
+
+The vocabulary is deliberately minimal and grows by adding *names* to
+`npc/decide.py`'s registries, never expressions. Rejected: putting gates on
+queue rows; a general expression language; `known_sectors` as the decide source
+(a player's home sector carries `HOME_SECTOR_ENERGY`, so ranking all known
+sectors by energy picks home every time and no strategy could ever choose to go
+anywhere — the source is `scan_targets`, what the fleet's own scans found).
 
 **NPC profile assignment is dev/test-only**, deliberately not an MCP tool —
 the same boundary as the clock-pause mechanism. Game setup is not something a
@@ -91,19 +111,24 @@ scale (16 orgs, 96 pods) including the per-player ledger writes — about 0.007%
 of a 300s tick. Moving any of this to a task queue or background thread would
 be over-engineering; everything runs synchronously and inline.
 
-**The NPC data/code port was proven equivalent, not assumed.** Each ported
-strategy scored identically to the Python it replaced (`turtle` 2240,
-`fan_out_consolidate` 2296, `burst_and_colonize` 2582), and the `events` tables
-from paired runs — one worktree at the prior commit, one at the port — were
-byte-identical across all 53 rows: same orders, same turns, same payloads,
-same `seq`. This is the verification pattern to repeat for any refactor
+**Both NPC ports were proven equivalent, not assumed.** The pattern: seeded
+runs (`--seed`) of the same matchup before and after, diffing standings,
+per-turn holdings, *and* the `events` table. Repeat it for any refactor
 claiming to change nothing.
 
-**One known divergence in that port:** `_burst_and_colonize` sized its
-colonizing cohort as `round(len(ships) * colonize_fraction)`; the program names
-a fixed `slice: [0, 2]`. Identical at the 8-ship fleets every scenario uses,
-different elsewhere. A test asserts the divergence so it cannot become a silent
-surprise. Fleet-relative selectors are tracked in `docs/TODO.md`.
+The first port (openings from Python into YAML) was byte-identical including
+`seq`. The second (every strategy into a document) was identical in standings,
+per-turn holdings and events — 65 rows for `fan_out`, 121 for
+`frontier_map_stay_frosty` — with one expected difference: intra-turn `seq`
+renumbers, because a document orders all moves then all aims where the Python
+interleaved move-then-aim per ship. Same events, same turns, same payloads,
+different order within the turn.
+
+**Retired rather than ported:** `burst_and_colonize` and `fan_out_consolidate`.
+Both are fixed openings, already analysed, and not interesting to play against.
+Retiring them also avoided the one thing the document model cannot express at
+bootstrap — an `after_arrival` order, which `queue_command` will only accept
+against a move already under way.
 
 **The game-design harness is a separate codebase** (`../xsettlers-designer`), and the
 split is between gameplay code and designer activity, not between "app" and
@@ -116,7 +141,7 @@ in-process. Alternatives rejected: driving it over MCP (there is no "resolve a
 turn now" tool, and adding one means an admin surface on an endpoint with no
 perimeter auth — and it would be slow besides); vendoring a copy of the engine
 (guaranteed drift); a built wheel rather than an editable install
-(`npc/programs.py` resolves `config/npc_programs/` relative to `__file__` and
+(`npc/library.py` resolves `config/npc_strategies/` relative to `__file__` and
 scenarios are read as ordinary files, so a wheel would need every YAML declared
 as package data and would still hand the designer repo a frozen copy of the scenarios it
 exists to edit).

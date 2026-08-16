@@ -21,7 +21,7 @@ def _person(pid):
     return {"player_id": pid, "kind": "person"}
 
 def _npc(label, strategy="turtle", config=None):
-    profile = {"strategy_name": strategy}
+    profile = {"strategy_ref": strategy}
     if config is not None:
         profile["config"] = config
     return {"player_id": label, "kind": "npc", "profile": profile}
@@ -126,16 +126,16 @@ def test_start_session_bootstraps_ships_and_pods():
 
 def test_start_session_assigns_npc_profile_with_config():
     _clear_active_game()
-    result = start_session("tok1", [_person(1), _npc("npc-1", strategy="burst_and_colonize",
-                                                       config={"colonize_fraction": 0.5})])
+    result = start_session("tok1", [_person(1), _npc("npc-1", strategy="fan_out",
+                                                       config={"jump_range_per_turn": 2})])
     npc_id = next(p for p in result["players"] if p["kind"] == "npc")["xsettlers_player_id"]
     conn = get_connection()
     profile = conn.execute("SELECT strategy_name, config FROM npc_profiles WHERE player_id=?",
                            (npc_id,)).fetchone()
     conn.close()
     import json
-    assert profile["strategy_name"] == "burst_and_colonize"
-    assert json.loads(profile["config"]) == {"colonize_fraction": 0.5}
+    assert profile["strategy_name"] == "fan_out"
+    assert json.loads(profile["config"]) == {"jump_range_per_turn": 2}
 
 def test_start_session_stores_the_session_token():
     _clear_active_game()
@@ -170,28 +170,31 @@ def test_start_session_rejects_a_different_token_while_active():
     assert "error" in result
 
 
-def test_a_program_named_npc_seated_here_actually_plays():
-    """The handoff's end of the strategy-name contract. `burst_and_colonize`
-    is a YAML program (config/npc_programs/), not a Python function -- a
-    roster asking for it by name must still seat an NPC that dispatches under
-    a real end_of_turn() loop, with nothing calling the strategy by hand."""
+def test_a_referenced_npc_seated_here_actually_plays():
+    """The handoff's end of the strategy_ref contract: a roster naming a
+    strategy must seat an NPC that plays it under a real end_of_turn() loop,
+    with nothing calling the strategy by hand."""
     from engine.turn import end_of_turn
     _clear_active_game()
-    result = start_session("tok1", [_person(42), _npc("npc-1", strategy="burst_and_colonize")])
+    result = start_session("tok1", [_person(42), _npc("npc-1", strategy="fan_out")])
     assert result["ok"] is True
     npc_id = next(p for p in result["players"] if p["kind"] == "npc")["xsettlers_player_id"]
 
     end_of_turn()  # the only thing driving the NPC
 
     conn = get_connection()
-    orgs = conn.execute("""SELECT mission, sector_id FROM organizations
-                           WHERE player_id=? AND org_type='ship'""", (npc_id,)).fetchall()
-    memory = conn.execute("SELECT memory FROM npc_profiles WHERE player_id=?",
-                          (npc_id,)).fetchone()["memory"]
+    orgs = conn.execute("""SELECT mission, sector_id, scan_offset_x, scan_offset_y
+                           FROM organizations WHERE player_id=? AND org_type='ship'""",
+                        (npc_id,)).fetchall()
+    memory = json.loads(conn.execute(
+        "SELECT memory FROM npc_profiles WHERE player_id=?", (npc_id,)).fetchone()["memory"])
     conn.close()
 
-    assert json.loads(memory)["dispatched"] is True
-    missions = [o["mission"] for o in orgs]
-    assert missions.count("colonize") == 2, "two ships committed to colonies"
-    assert all(o["sector_id"] == -1 for o in orgs if o["mission"] == "move")
-    assert missions.count("move") == 6, "the other six scattered"
+    # fan_out's first two steps ran; the third is a decide step still waiting
+    # on its scans, which is where the program counter should be parked.
+    assert memory["pc"] == 2
+    assert "waiting" in memory
+    assert all(o["mission"] == "move" and o["sector_id"] == -1 for o in orgs), \
+        "every ship scattered"
+    assert all(o["scan_offset_x"] is not None or o["scan_offset_y"] is not None
+               for o in orgs), "every ship aimed its scanner"

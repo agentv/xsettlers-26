@@ -47,7 +47,7 @@ def _dispatch_aim_scan(cur, org_id: int, player_id: int, params: dict, current_t
 # The queued binding of engine/actions.py's vocabulary -- these run inside
 # engine/turn.py's open transaction, so they dispatch into the engine-layer
 # apply_* helpers rather than the self-connecting tool wrappers.
-# npc/script.py holds the immediate binding of the same names.
+# npc/strategy.py holds the immediate binding of the same names.
 ACTIONS = {"move": _dispatch_move, "set_pod_task": _dispatch_set_pod_task,
            "colonize": _dispatch_colonize, "aim_scan": _dispatch_aim_scan}
 

@@ -1,0 +1,21 @@
+# Colonize the whole fleet in place, on turn one, and never move.
+#
+# The hypothesis this exists to test: with home seeded at 100,000 energy
+# against a frontier that rolls 500-1000, there is no economic reason to
+# leave -- so the strongest play may be to take the colony production
+# multiplier (1.5x for a one-time 30 energy) on every ship at once and simply
+# out-produce anyone who spends turns travelling.
+#
+# If this wins, the map is currently decoration: the game is an economy
+# puzzle with no spatial dimension, and that is a finding about the scenario,
+# not about this strategy.
+#
+# The retired burst_and_colonize scored 2582 -- the highest ever recorded --
+# by colonizing 2 of 8 ships at home and scattering the other 6. This is that
+# strategy with the scattering removed.
+name: homestead
+description: Colonize every ship where it stands, turn one. Never moves, never scans.
+steps:
+  - order:
+      ships: all
+      action: colonize

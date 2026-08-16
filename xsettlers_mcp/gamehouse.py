@@ -24,13 +24,16 @@ it still produces ordinary player_token-based players rows that every
 existing gameplay tool already knows how to check.
 """
 from xsettlers_mcp.tools.registry import mcp_tool
+import asyncio
 import os
 import secrets
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from config.loader import load_starting_configuration
-from db.connection import get_connection
+from db.connection import get_connection, read_one
 from db.bootstrap import bootstrap_game
+from db.events import record_event
+from engine.turn import get_final_scores
 from npc.profiles import assign_npc_profile
 from npc.strategies import strategy_names
 from xsettlers_mcp.game_select import get_active_game
@@ -39,6 +42,26 @@ SCENARIO_FILE = "config/game0.yaml"
 SCENARIO_NAME = "game0"
 GAME_NAME = "xsettlers26"
 VALID_KINDS = {"person", "npc"}
+
+# The results envelope: the two fields every game handing results to GameHouse
+# guarantees, and the only two it reads out of an otherwise opaque score
+# object. `placement` is GameHouse's own reserved key (its
+# gamehouse_mcp/scoreboard.py PLACEMENT_FIELD, 1 = won); `score` is ours,
+# additive, and needs no change on that side because report_results stores the
+# object whole.
+PLACEMENT_FIELD = "placement"
+SCORE_FIELD = "score"
+
+# Written once when the hand-back succeeds, so a second poll doesn't push
+# again. report_results only matches journal rows still 'in_progress', so a
+# repeat call isn't destructive -- it just returns an error per entry, which
+# is noise standing in for a fact we can record properly.
+RESULTS_REPORTED_EVENT = "game.results_reported"
+
+# How often the reporter wakes to check whether the game has finished. Slow on
+# purpose: this is a once-per-game event with no deadline, and the check is
+# three cheap indexed reads.
+REPORT_POLL_SECONDS = 10
 
 async def register_with_gamehouse() -> dict:
     """
@@ -75,6 +98,7 @@ async def register_with_gamehouse() -> dict:
                     "max_players": lobby.max_players,
                     "wait_window_seconds": lobby.wait_window_seconds,
                     "npc_profile_schema": npc_profile_schema(),
+                    "scoreboard_schema": scoreboard_schema(),
                     "scenarios": [],
                 })
     except Exception as exc:
@@ -86,6 +110,37 @@ async def register_with_gamehouse() -> dict:
             text = block.text
             break
     return {"ok": True, "response": text}
+
+def scoreboard_schema() -> dict:
+    """
+    The shape of the score object this game hands back, declared at
+    registration. GameHouse stores it and deliberately does not consult it
+    (../gamehouse/gamehouse_mcp/registry.py) -- it is documentation for
+    whoever reads the catalogue, not a contract GameHouse enforces.
+
+    It describes the ENVELOPE only. `placement` and `score` are the two
+    fields every game guarantees and the only two GameHouse ever reads;
+    everything else in the object is xsettlers' own and stays opaque.
+
+    `direction` is declared even though nothing reads it yet. `placement` is
+    direction-free -- 1 is best whether a game is won high or low -- but
+    `score` is not, so a second game with inverted victory conditions would
+    make "highest score" the wrong aggregate. Saying so now costs nothing and
+    is the piece that would otherwise have to be guessed later.
+    """
+    return {
+        "type": "object",
+        "required": [PLACEMENT_FIELD, SCORE_FIELD],
+        "direction": "higher_is_better",
+        "properties": {
+            PLACEMENT_FIELD: {"type": "integer",
+                              "description": "Final ranking, 1 = winner."},
+            SCORE_FIELD: {"type": "number",
+                          "description": "Weighted final score. Comparable within "
+                                         "this game only."},
+        },
+    }
+
 
 def npc_profile_schema() -> dict:
     """
@@ -222,21 +277,182 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
     conn.close()
 
     result_players = []
+    person_ids = {}   # xsettlers player id -> GameHouse person.id, person-kind only
     for i, p in enumerate(players):
         seat = roster_override[i]
         xsettlers_id = by_email[seat["email"]]
         entry = {"player_id": p["player_id"], "kind": p["kind"], "xsettlers_player_id": xsettlers_id}
         if p["kind"] == "person":
             entry["player_token"] = generated_tokens[p["player_id"]]
+            person_ids[xsettlers_id] = p["player_id"]
         else:
             profile = p.get("profile") or {}
             assign_npc_profile(xsettlers_id, profile["strategy_ref"], config=profile.get("config"))
         result_players.append(entry)
 
     conn = get_connection(); cur = conn.cursor()
+    # Stamp GameHouse's own person.id onto the rows bootstrap just created,
+    # rather than threading the field through Seat/bootstrap_game(): Seat
+    # lives in config/loader.py, and config/ must not carry GameHouse
+    # concepts. Person-kind only -- see players.gamehouse_person_id in
+    # db/schema.py for why NULL is load-bearing.
+    for xsettlers_id, gh_person_id in person_ids.items():
+        cur.execute("UPDATE players SET gamehouse_person_id=? WHERE id=?",
+                    (gh_person_id, xsettlers_id))
     cur.execute("INSERT OR REPLACE INTO game_session (id, session_token) VALUES (1, ?)",
                 (session_token,))
     conn.commit(); conn.close()
 
     return {"ok": True, "already_active": False, "scenario_name": SCENARIO_NAME,
             "players": result_players}
+
+
+# ---------------------------------------------------------------------------
+# Results hand-back: xsettlers acts as an MCP CLIENT again, once, at game over.
+# ---------------------------------------------------------------------------
+
+def build_results() -> list:
+    """
+    The recorded final scoreboard as GameHouse's `results` array, or [] if
+    this game has no person-backed players to report.
+
+    Reads `get_final_scores()` -- the persisted `game.final_scores` event --
+    rather than recomputing standings. What GameHouse is told has to be what
+    actually happened at the whistle, not a fresh calculation against state
+    that may have moved on since.
+
+    Keyed by GameHouse's own person.id, which is what lets each entry
+    reattach to its game_journal row via (session_token, person_id) with no
+    second identity mapping. Players with no `gamehouse_person_id` are
+    silently absent: NPCs have no Person to attach a score to, and
+    static-roster players were never GameHouse's to begin with.
+
+    Each entry's score object carries the envelope (placement, score) plus
+    xsettlers' own breakdown. GameHouse stores the whole thing and reads only
+    the envelope -- see scoreboard_schema().
+    """
+    final = get_final_scores()
+    if not final:
+        return []
+    conn = get_connection()
+    person_ids = {r["id"]: r["gamehouse_person_id"] for r in conn.execute(
+        "SELECT id, gamehouse_person_id FROM players "
+        "WHERE gamehouse_person_id IS NOT NULL").fetchall()}
+    conn.close()
+
+    results = []
+    for standing in final["standings"]:
+        person_id = person_ids.get(standing["player_id"])
+        if person_id is None:
+            continue
+        results.append({
+            "player_id": person_id,
+            "score": {
+                PLACEMENT_FIELD: standing["rank"],
+                SCORE_FIELD: standing["score"],
+                "energy": standing["energy"],
+                "food": standing["food"],
+                "goods": standing["goods"],
+                "total": standing["total"],
+                "display_name": standing["display_name"],
+                "final_turn": final["final_turn"],
+            },
+        })
+    return results
+
+
+def _results_already_reported() -> bool:
+    return read_one("SELECT id FROM events WHERE event_type=? LIMIT 1",
+                    (RESULTS_REPORTED_EVENT,)) is not None
+
+
+def _session_token():
+    row = read_one("SELECT session_token FROM game_session WHERE id=1")
+    return row["session_token"] if row else None
+
+
+async def report_results() -> dict:
+    """
+    Hand the finished game's scoreboard back to GameHouse, once.
+
+    Returns a dict describing what happened; never raises. Like
+    register_with_gamehouse, this is a call across an external boundary at a
+    moment nothing else depends on, so a GameHouse that is down must not take
+    anything here with it -- the attempt is simply not recorded, and the next
+    poll tries again.
+
+    Four conditions, in order, each of which means "nothing to do" rather
+    than "something is wrong":
+      - no session_token: this game did not come from GameHouse (a
+        select_scenario game, or a designer harness DB), so there is nobody
+        to report to. This is the guard that keeps the whole mechanism out of
+        ../xsettlers-designer without designer knowing it exists.
+      - no recorded final scores: the game is still being played.
+      - already reported: a previous poll succeeded.
+      - no person-backed players: an all-NPC game has no Person to credit.
+    """
+    session_token = _session_token()
+    if not session_token:
+        return {"ok": False, "skipped": "no GameHouse session for this game"}
+    if not get_final_scores():
+        return {"ok": False, "skipped": "game is not over"}
+    if _results_already_reported():
+        return {"ok": False, "skipped": "results already reported"}
+
+    results = build_results()
+    if not results:
+        record_event(RESULTS_REPORTED_EVENT,
+                     {"reported": [], "note": "no person-backed players to report"})
+        return {"ok": True, "reported": 0}
+
+    gamehouse_url = os.getenv("GAMEHOUSE_URL")
+    if not gamehouse_url:
+        return {"ok": False, "skipped": "GAMEHOUSE_URL is not set"}
+    try:
+        async with streamablehttp_client(gamehouse_url) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                await session.call_tool("report_results", arguments={
+                    "session_token": session_token,
+                    "results": results,
+                })
+    except Exception as exc:
+        # Deliberately NOT recorded as reported: leaving the event unwritten
+        # is what lets the next poll retry, and what lets a restart pick the
+        # hand-back back up.
+        return {"ok": False, "error": f"report_results call to {gamehouse_url} failed: {exc}"}
+
+    record_event(RESULTS_REPORTED_EVENT, {"reported": [r["player_id"] for r in results],
+                                          "results": results})
+    return {"ok": True, "reported": len(results)}
+
+
+async def run_results_reporter():
+    """
+    Watch for the game ending and hand results back once it has.
+
+    A poll rather than a hook at game-over, because both paths that can end a
+    game -- engine/clock.py's tick and engine/turn.py's
+    check_consensus_acceleration -- live in engine/, which may not import
+    this module (CLAUDE.md's layering rule allows exactly one function-level
+    exception and warns against a second). Polling from the server layer
+    needs no change in engine/ at all.
+
+    Two things this gets that a hook would not: one trigger covering both
+    game-over paths, and recovery across a restart -- a server that dies
+    between game-over and a successful push simply reports on its next boot,
+    because the condition is a fact in the database rather than a moment that
+    passed.
+    """
+    while True:
+        await asyncio.sleep(REPORT_POLL_SECONDS)
+        try:
+            outcome = await report_results()
+        except Exception as exc:      # belt and braces: this loop must not die
+            print(f"Results reporter error: {exc}")
+            continue
+        if outcome.get("ok") and outcome.get("reported") is not None:
+            print(f"Reported final results to GameHouse for "
+                  f"{outcome['reported']} player(s).")
+        elif outcome.get("error"):
+            print(f"Results hand-back failed (will retry): {outcome['error']}")

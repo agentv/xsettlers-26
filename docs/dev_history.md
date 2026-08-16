@@ -83,6 +83,30 @@ queue rows; a general expression language; `known_sectors` as the decide source
 sectors by energy picks home every time and no strategy could ever choose to go
 anywhere — the source is `scan_targets`, what the fleet's own scans found).
 
+**GameHouse never interprets a score, and never calls back to have one
+interpreted.** The results hand-back separates an *envelope* every game
+guarantees — `placement` (1 = best) and `score` — from a payload that stays
+opaque. That is what makes games-played / best / average / average-placement
+pure arithmetic on GameHouse's side: aggregating a number is not interpreting a
+game, so the callback hooks that were considered are unnecessary.
+
+`placement` is direction-free (1 is best whether a game is won high or low);
+`score` is not, and is comparable only within one game title — which is already
+how GameHouse's `player` table is keyed. `scoreboard_schema` declares
+`higher_is_better` for whenever a second game makes that matter.
+
+**The hand-back fires from a poll in the server layer, not a hook at
+game-over.** Both paths that end a game (`engine/clock.py`'s tick and
+`engine/turn.py`'s `check_consensus_acceleration`) live in `engine/`, which may
+not import `xsettlers_mcp/`. Rejected: a second function-level import exception
+to the layering rule. The poll also covers both paths with one trigger and
+recovers across a restart between game-over and a failed push — a hook would do
+neither.
+
+Its guard is a **data condition — "is there a session to report to?" — never a
+mode flag**, which is why `../xsettlers-designer` needs no knowledge of any of
+this: a harness DB simply has no `game_session` row.
+
 **NPC profile assignment is dev/test-only**, deliberately not an MCP tool —
 the same boundary as the clock-pause mechanism. Game setup is not something a
 player invokes.
@@ -163,8 +187,19 @@ was verified byte-identical (same seeded standings, same per-turn holdings,
 same rendered report). They live in `../xsettlers-designer` now. For the pre-move
 versions, recover from commit `b6032c5` rather than reconstructing them.
 
-**Schema migrations.** `db/schema.py` carries no migration step — the
-`CREATE TABLE` statements are the whole schema. One-time migrations for
+**Schema migrations.** `db/schema.py` carries no *general* migration step — the
+`CREATE TABLE` statements are the whole schema. The one exception is
+`_add_missing_columns()`, which adds a nullable column to a table that already
+exists on a deployed volume: no version table, no ordering, no data rewriting,
+idempotent on every boot. It was added rather than skipped because
+`CREATE TABLE IF NOT EXISTS` silently does nothing for an existing table, and
+the deployed volume holds a *finished* GameHouse game — which has both a
+session token and recorded final scores, so the results reporter sails past
+every guard and into a query for a column that isn't there, logging a failure
+every poll forever. Adding a column without adding it to `ADDED_COLUMNS` is how
+that bug comes back.
+
+One-time migrations for
 databases created before 2026-08-02 (`slack_user_id` → `player_token`,
 `dest_sector_id` → `dest_x/y/z`, `storage_current` → per-resource columns,
 `pods.mission` → `pods.task`, absolute `scan_target_*` → relative

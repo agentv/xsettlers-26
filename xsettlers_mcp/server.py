@@ -19,7 +19,7 @@ import xsettlers_mcp.tools.sector_tools   # noqa: F401
 import xsettlers_mcp.tools.navigation_tools    # noqa: F401
 import xsettlers_mcp.tools.organization_tools  # noqa: F401
 import xsettlers_mcp.tools.organization_reports  # noqa: F401
-from xsettlers_mcp.gamehouse import register_with_gamehouse
+from xsettlers_mcp.gamehouse import register_with_gamehouse, run_results_reporter
 from xsettlers_mcp.tools.registry import TOOLS
 from db.schema import init_schema
 from engine.clock import run_clock
@@ -202,7 +202,11 @@ async def main():
     port = int(os.getenv("PORT", 8080))
     config = uvicorn.Config(starlette_app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(config)
-    await asyncio.gather(server.serve(), run_clock())
+    # The results reporter is gathered here, in the server layer, rather than
+    # hooked into game-over: both paths that end a game live in engine/, which
+    # may not import xsettlers_mcp/. It no-ops on every pass until a
+    # GameHouse-started game actually finishes -- see run_results_reporter.
+    await asyncio.gather(server.serve(), run_clock(), run_results_reporter())
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -198,3 +198,121 @@ def test_a_referenced_npc_seated_here_actually_plays():
         "every ship scattered"
     assert all(o["scan_offset_x"] is not None or o["scan_offset_y"] is not None
                for o in orgs), "every ship aimed its scanner"
+
+
+# --- results hand-back ---
+#
+# The other direction of the wire: what xsettlers sends GameHouse when a game
+# finishes. The score object separates an ENVELOPE every game guarantees
+# (placement, score) from a payload GameHouse stores raw and never reads.
+
+def _finish_game():
+    """Play to the turn limit so game.final_scores is recorded."""
+    from engine.turn import end_of_turn, is_game_over
+    guard = 0
+    while not is_game_over() and guard < 200:
+        end_of_turn(); guard += 1
+
+def test_start_session_stamps_the_gamehouse_person_id_on_person_seats_only():
+    """`gamehouse_person_id IS NOT NULL` is what the hand-back filters on, so
+    it has to mean exactly 'GameHouse has a Person for this seat'."""
+    _clear_active_game()
+    start_session("tok1", [_person(42), _npc("npc-1")])
+    conn = get_connection()
+    rows = {r["email"]: r["gamehouse_person_id"] for r in conn.execute(
+        "SELECT email, gamehouse_person_id FROM players").fetchall()}
+    conn.close()
+    assert rows["gamehouse-42@handoff"] == 42
+    assert rows["gamehouse-npc-1@handoff"] is None, "an NPC has no Person to credit"
+
+def test_build_results_carries_the_envelope_keyed_by_gamehouse_person_id():
+    from xsettlers_mcp.gamehouse import build_results, PLACEMENT_FIELD, SCORE_FIELD
+    _clear_active_game()
+    start_session("tok1", [_person(42), _npc("npc-1")])
+    _finish_game()
+
+    results = build_results()
+    assert len(results) == 1, "only the person-backed player is reported"
+    entry = results[0]
+    assert entry["player_id"] == 42, "keyed by GameHouse's own person.id"
+    assert isinstance(entry["score"][PLACEMENT_FIELD], int)
+    assert entry["score"][PLACEMENT_FIELD] >= 1
+    assert isinstance(entry["score"][SCORE_FIELD], (int, float))
+    # Payload rides along; GameHouse stores it and never reads it.
+    assert "energy" in entry["score"] and "display_name" in entry["score"]
+
+def test_build_results_matches_the_recorded_scoreboard_not_a_recomputation():
+    """What GameHouse is told has to be what happened at the whistle."""
+    from engine.turn import get_final_scores
+    from xsettlers_mcp.gamehouse import build_results, PLACEMENT_FIELD, SCORE_FIELD
+    _clear_active_game()
+    start_session("tok1", [_person(42), _npc("npc-1")])
+    _finish_game()
+
+    recorded = {s["player_id"]: s for s in get_final_scores()["standings"]}
+    conn = get_connection()
+    xs_id = conn.execute("SELECT id FROM players WHERE gamehouse_person_id=42").fetchone()["id"]
+    conn.close()
+    entry = build_results()[0]
+    assert entry["score"][SCORE_FIELD] == recorded[xs_id]["score"]
+    assert entry["score"][PLACEMENT_FIELD] == recorded[xs_id]["rank"]
+
+def test_build_results_is_empty_before_the_game_ends():
+    from xsettlers_mcp.gamehouse import build_results
+    _clear_active_game()
+    start_session("tok1", [_person(42), _npc("npc-1")])
+    assert build_results() == []
+
+def test_report_results_skips_when_there_is_no_gamehouse_session():
+    """The guard that keeps this mechanism out of ../xsettlers-designer: a
+    game bootstrapped without start_session has nobody to report to. A data
+    condition, not a mode flag -- designer sets nothing and imports nothing."""
+    import asyncio
+    from xsettlers_mcp.gamehouse import report_results
+    _clear_active_game()
+    outcome = asyncio.run(report_results())
+    assert outcome["ok"] is False
+    assert "no GameHouse session" in outcome["skipped"]
+
+def test_report_results_skips_while_the_game_is_still_running():
+    import asyncio
+    from xsettlers_mcp.gamehouse import report_results
+    _clear_active_game()
+    start_session("tok1", [_person(42), _npc("npc-1")])
+    outcome = asyncio.run(report_results())
+    assert outcome["ok"] is False and "not over" in outcome["skipped"]
+
+def test_an_all_npc_game_records_the_event_without_calling_gamehouse():
+    """Nothing to report is a resolved state, not a permanent retry: without
+    the event, the reporter would poll this game forever."""
+    import asyncio
+    from xsettlers_mcp.gamehouse import report_results, RESULTS_REPORTED_EVENT
+    _clear_active_game()
+    start_session("tok1", [_npc("npc-1"), _npc("npc-2")])
+    _finish_game()
+
+    outcome = asyncio.run(report_results())
+    assert outcome == {"ok": True, "reported": 0}
+    conn = get_connection()
+    n = conn.execute("SELECT COUNT(*) AS n FROM events WHERE event_type=?",
+                     (RESULTS_REPORTED_EVENT,)).fetchone()["n"]
+    conn.close()
+    assert n == 1
+
+def test_results_are_reported_only_once():
+    import asyncio
+    from xsettlers_mcp.gamehouse import report_results
+    _clear_active_game()
+    start_session("tok1", [_npc("npc-1"), _npc("npc-2")])
+    _finish_game()
+    assert asyncio.run(report_results())["ok"] is True
+    again = asyncio.run(report_results())
+    assert again["ok"] is False and "already reported" in again["skipped"]
+
+def test_scoreboard_schema_declares_the_envelope_and_its_direction():
+    from xsettlers_mcp.gamehouse import scoreboard_schema, PLACEMENT_FIELD, SCORE_FIELD
+    schema = scoreboard_schema()
+    assert set(schema["required"]) == {PLACEMENT_FIELD, SCORE_FIELD}
+    # placement is direction-free (1 is best either way); score is not, which
+    # is the whole reason direction is declared.
+    assert schema["direction"] == "higher_is_better"

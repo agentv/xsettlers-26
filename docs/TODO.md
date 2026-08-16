@@ -284,11 +284,11 @@ game.
 contract. Named in GameHouse's own docs as required game-side surface that
 doesn't exist yet:
 
-* [ ] A results-object hand-back at game completion (already-interpreted score,
-  not raw play-state — see GameHouse's "the game interprets, GameHouse only
-  hosts" division).
 * [ ] A run-state query GameHouse can poll, so it can tell a returning Person
-  whether their game is still alive before offering to reconnect.
+  whether their game is still alive before offering to reconnect. Note the
+  results hand-back below already gives GameHouse the *end* of a game
+  (`game_journal.status` flips to `completed`), so what is still missing is
+  liveness *during* play, not completion.
 * [ ] Multi-scenario support on both sides — `scenario_key` is accepted but not
   branched on; today it is always `None` in real traffic.
 
@@ -322,15 +322,17 @@ decided even though none of it is built:
   bootstrap time, and a not-yet-designed lobby/router layer routes a
   `player_token` to the right file. Until this lands, xsettlers runs one active
   game per deployment and every subsequent handoff bounces off the guards above.
-* [ ] A game-ending tool (doesn't exist — see the results hand-back and
-  run-state items) should, on completion, archive that game's database (move it
-  out of the live path, not delete it) and mark the game complete in whatever
-  registry tracks multiple games.
+* [ ] A game-ending tool (doesn't exist — see the run-state item) should, on
+  completion, archive that game's database (move it out of the live path, not
+  delete it) and mark the game complete in whatever registry tracks multiple
+  games. Note the results hand-back is *not* this: it reports the outcome and
+  leaves the database exactly where it is, so a finished game still occupies
+  the single live `DB_PATH`.
 * [ ] Once a game can be marked complete, **GameHouse must never offer a Person
-  the option to join or reconnect to a completed game.** This lives on
-  GameHouse's side — `list_games`/`join_lobby`/`open_games` would need to check
-  completion status via the results hand-back or a run-state poll, not just
-  whether a `game_journal` row exists.
+  the option to join or reconnect to a completed game.** Half of this is now
+  free: the results hand-back flips `game_journal.status` to `completed`, so
+  `open_games` already has the signal for a game that ended normally. What it
+  still cannot see is a game that died without finishing.
 
 ## NPC strategies
 

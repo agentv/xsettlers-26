@@ -17,7 +17,20 @@ def init_schema():
             display_name      TEXT NOT NULL,
             player_token      TEXT UNIQUE,
             end_turn_declared INTEGER DEFAULT 0,
-            is_npc            INTEGER DEFAULT 0
+            is_npc            INTEGER DEFAULT 0,
+            -- GameHouse's own person.id, stamped by start_session() for
+            -- person-kind seats ONLY (see xsettlers_mcp/gamehouse.py). NULL
+            -- for NPCs -- GameHouse mints them ephemeral labels with no
+            -- Person behind them -- and for the static-roster path, which
+            -- has no GameHouse identity at all.
+            --
+            -- So `gamehouse_person_id IS NOT NULL` is exactly "this result
+            -- goes back to GameHouse", which is why the results hand-back
+            -- filters on it rather than on is_npc: the omission rule
+            -- enforces itself instead of being a filter each caller has to
+            -- remember. It also replaces recovering the id by parsing the
+            -- synthesized gamehouse-N@handoff email.
+            gamehouse_person_id INTEGER
         );
         CREATE TABLE IF NOT EXISTS sectors (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,5 +193,34 @@ def init_schema():
                    WHERE f_table_name='sectors' AND f_geometry_column='location'""")
     if cur.fetchone()[0] == 0:
         cur.execute("SELECT AddGeometryColumn('sectors','location',-1,'POINTZ','XYZ')")
+    _add_missing_columns(cur)
     conn.commit()
     conn.close()
+
+
+# Columns added to a table that already exists on a deployed volume. CREATE
+# TABLE IF NOT EXISTS above does nothing for those -- it sees the table and
+# stops -- so a column added later never reaches an existing database.
+#
+# This is NOT the general migration mechanism that was deliberately removed
+# (see docs/dev_history.md): there is no version table, no ordering, and no
+# data rewriting. It adds a nullable column if it is absent, which is
+# idempotent and safe to run on every boot.
+#
+# It exists because the alternative is worse than the machinery: the deployed
+# volume holds a FINISHED GameHouse game, which has both a session token and
+# recorded final scores, so the results reporter reaches straight past its
+# guards and into a query for a column that isn't there -- logging a failure
+# every poll, forever.
+ADDED_COLUMNS = {
+    "players": {"gamehouse_person_id": "INTEGER"},
+}
+
+
+def _add_missing_columns(cur):
+    for table, columns in ADDED_COLUMNS.items():
+        existing = {row[1] for row in cur.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, decl in columns.items():
+            if name not in existing:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                print(f"  Added column {table}.{name}")

@@ -31,14 +31,15 @@ pytest
 pytest tests/test_navigation.py
 pytest tests/test_navigation.py::test_confirm_move_parks_at_sentinel -v
 
-# Dev/admin scripts (never MCP tools -- not reachable with a player_token)
+# Operator scripts (never MCP tools -- not reachable with a player_token).
+# These act on a LIVE server; game-design tooling lives in ../xsettlers-designer.
 scripts/clock.py freeze|unfreeze|status   # hold the background tick without stopping the server
 scripts/status.py game|fleet              # fixed-format status report
-scripts/simulate_npc_matchup.py           # fast-forward a scratch game, no clock, no server
-scripts/run_tournament.py                 # every strategy pair, one subprocess/scratch DB each
 ```
 
 The local `xsettlers.db` is scratch — safe to `rm` and restart clean.
+
+**Game-design tooling is a separate repo (`../xsettlers-designer`), not part of this codebase.** Strategy tournaments, fast-forwarded matchup simulation and analysis reports live there. The dependency points one way: the designer repo installs this one editable (`pip install -e ../xsettlers26` — that is what `pyproject.toml` here exists for) and drives `engine.turn.end_of_turn()` in-process, because there is no wire call for "resolve a turn now" and there should not be one. Nothing here imports it. Two consequences worth knowing before changing anything in `engine/`, `db/` or `npc/`: it is a real consumer of those modules, and `pyproject.toml`'s package list has to keep matching this repo's top-level packages. The Fly build ignores `pyproject.toml` entirely — the Dockerfile runs `pip install -r requirements.txt` and `COPY . .`, never `pip install .`.
 
 **Running against GameHouse locally**: GameHouse is a sibling repo (`../gamehouse`), started from its own root with `DB_PATH=gamehouse.db PORT=8090 .venv/bin/python3 -m gamehouse_mcp.server` — port 8090 deliberately, since it collides with xsettlers on the default 8080. Registration between the two needs `GAMEHOUSE_URL=http://localhost:8090/mcp` and `XSETTLERS_PUBLIC_URL=http://localhost:8080/mcp` set when starting xsettlers; without them it silently no-ops by design (see `register_with_gamehouse`'s docstring).
 
@@ -144,7 +145,7 @@ A strategy is **either a YAML program or a Python function**, and the split is d
 - **Plans** — fixed openings whose whole sequence is decided in advance — are data: `config/npc_programs/*.yaml`, executed by `npc/script.py`. `turtle`, `burst_and_colonize` and `fan_out_consolidate` all live here. Adding one is adding a file, no code change.
 - **Policies** — strategies that read the world each turn and decide from it — stay as functions in `npc/strategies.py`. `fan_out` (waits for every scout's scan, then converges the fleet on the richest find) and `frontier_map_stay_frosty` (no terminal state) need conditions, repetition and cross-org coordination, which the ship's log deliberately isn't. **Write a new strategy as a program first**; only reach for a function when it has to look at the board before choosing.
 
-`npc/strategies.strategy_names()` is the union of both and is what `xsettlers_mcp/gamehouse.py` validates rosters against and `scripts/run_tournament.py` plays — so a strategy crossing the data/code line never changes what callers may ask for. Don't reintroduce a bare `STRATEGIES` lookup in those callers.
+`npc/strategies.strategy_names()` is the union of both and is what `xsettlers_mcp/gamehouse.py` validates rosters against and `../xsettlers-designer`'s tournament runner plays — so a strategy crossing the data/code line never changes what callers may ask for. Don't reintroduce a bare `STRATEGIES` lookup in those callers. One of those callers is now in another repo, so `strategy_names()` is a cross-repo contract, not just an internal one.
 
 Programs are validated at **assign** time (`validate_program()`, called by `assign_npc_profile()`), not when they run — the same reasoning behind `queue_command`'s up-front param validation, one level up: a program is authored by a person and an error must reach them synchronously, not three turns later inside a clock tick. This matters because the whole point of the format is a future NPC builder (tracked in `docs/TODO.md`).
 

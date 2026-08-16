@@ -6,11 +6,6 @@
 *.sqlite
 *.sqlite3
 
-# Tournament scratch output (scripts/run_tournament.py) -- regenerable;
-# tourney/data/*.json, summary.json, and report.html are kept, the rest isn't.
-tourney/dbs/
-tourney/logs/
-
 # Python
 __pycache__/
 *.py[cod]

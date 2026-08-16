@@ -390,11 +390,17 @@ Outstanding before a builder is worth writing:
 
 ### Tournament standing — stale, needs a re-run
 
-`scripts/run_tournament.py` plays every pair of registered strategies once each,
-one subprocess and scratch DB per matchup (repeatedly reloading the SpatiaLite
-extension across connections in one long-running process segfaults on the second
-matchup). `scripts/build_tournament_report.py` renders the results as a
-static-SVG report.
+`../xsettlers-designer`'s `xs-tournament` plays every pair of registered strategies
+once each, one subprocess and scratch DB per matchup (repeatedly reloading the
+SpatiaLite extension across connections in one long-running process segfaults on
+the second matchup). `xs-report` renders the results as a static-SVG report.
+Both used to live in this repo's `scripts/`; the harness is a separate codebase
+now, so a re-run means checking out the designer repo, not this one alone.
+
+Pass `--seed` on any re-run. Sector richness is rolled at bootstrap, so an
+unseeded tournament compares strategies on different boards and part of the
+resulting ranking is noise — which is worth keeping in mind when reading the
+standings below, since they were produced before that flag existed.
 
 Every strategy scored identically regardless of opponent — no combat, no
 resource contention at this map scale — so the standings are a fixed, transitive

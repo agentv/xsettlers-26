@@ -105,7 +105,38 @@ a fixed `slice: [0, 2]`. Identical at the 8-ship fleets every scenario uses,
 different elsewhere. A test asserts the divergence so it cannot become a silent
 surprise. Fleet-relative selectors are tracked in `docs/TODO.md`.
 
+**The game-design harness is a separate codebase** (`../xsettlers-designer`), and the
+split is between gameplay code and designer activity, not between "app" and
+"scripts". Tournament running, matchup simulation and analysis reporting moved
+out; `scripts/clock.py` and `scripts/status.py` stayed, because they operate a
+*live* server rather than designing a game.
+
+The designer repo installs this one editable and calls `engine.turn.end_of_turn()`
+in-process. Alternatives rejected: driving it over MCP (there is no "resolve a
+turn now" tool, and adding one means an admin surface on an endpoint with no
+perimeter auth — and it would be slow besides); vendoring a copy of the engine
+(guaranteed drift); a built wheel rather than an editable install
+(`npc/programs.py` resolves `config/npc_programs/` relative to `__file__` and
+scenarios are read as ordinary files, so a wheel would need every YAML declared
+as package data and would still hand the designer repo a frozen copy of the scenarios it
+exists to edit).
+
+This is what `pyproject.toml` in this repo is for, and its only consumer. The
+Fly build does not use it.
+
+**Seeded tournaments.** `SECTOR_ROLL_SEED` always existed in `db/sectors.py`
+but no harness set it, so every tournament before the extraction played each
+matchup on a different board. The designer repo exposes it as `--seed`. Standings
+recorded before that are comparable within a matchup but not across them.
+
 ## Recovery pointers
+
+**The tournament harness.** `scripts/simulate_npc_matchup.py`,
+`scripts/run_tournament.py`, `scripts/build_tournament_report.py` and the
+`tourney/` results directory were removed from this repo after the extraction
+was verified byte-identical (same seeded standings, same per-turn holdings,
+same rendered report). They live in `../xsettlers-designer` now. For the pre-move
+versions, recover from commit `b6032c5` rather than reconstructing them.
 
 **Schema migrations.** `db/schema.py` carries no migration step — the
 `CREATE TABLE` statements are the whole schema. One-time migrations for

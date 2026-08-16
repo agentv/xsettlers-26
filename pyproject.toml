@@ -1,0 +1,57 @@
+# Packaging exists so a sibling checkout can install this engine and drive it
+# in-process -- specifically ../xsettlers-lab, the game-design harness that
+# fast-forwards whole games by calling engine.turn.end_of_turn() in a loop.
+# No wire protocol makes that fast, so the lab needs the real modules.
+#
+# The Fly build does not use this file: the Dockerfile runs
+# `pip install -r requirements.txt` and `COPY . .`, never `pip install .`.
+# requirements.txt remains the deployment's dependency source of truth; the
+# `dependencies` list below is the same set minus the test-only packages.
+#
+# Install editable, never as a built wheel:
+#     pip install -e /path/to/xsettlers26
+# npc/programs.py resolves config/npc_programs/ relative to __file__, and
+# config/game*.yaml is read as ordinary files rather than package data, so an
+# editable install (which points at this checkout) is what makes those
+# lookups land on real files. A wheel would need every YAML declared as
+# package data and would still hand the lab a frozen copy of the scenarios it
+# is supposed to be editing.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xsettlers"
+version = "0.1.0"
+description = "XSettlers -- multiplayer space strategy game served over MCP"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.0.0,<2.0.0",
+    "starlette",
+    "uvicorn",
+    "spatialite",
+    "python-dotenv",
+    "pyyaml",
+    "anyio",
+    "jsonschema",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+# Listed explicitly rather than auto-discovered: several of these are
+# generic top-level names (config, db, engine, views) that setuptools'
+# find_packages would also pick up from tests/ or scripts/, and that an
+# unrelated package in the same environment could collide with. Keep the
+# lab's virtualenv to xsettlers + lab and there is nothing to collide with.
+[tool.setuptools]
+packages = [
+    "xsettlers_mcp",
+    "xsettlers_mcp.tools",
+    "engine",
+    "db",
+    "npc",
+    "views",
+    "config",
+]

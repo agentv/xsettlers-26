@@ -1,0 +1,41 @@
+# One ship per sector, each colonizing where it lands.
+#
+# The hypothesis: sector energy is a shared, depleting pool, so eight orgs
+# standing on one sector draw eight times as fast from it as one org does.
+# Spreading the fleet across eight sectors buys eight separate pools without
+# giving up the colony multiplier -- which should beat homestead exactly when
+# a single sector cannot carry the whole fleet, and lose to it when home is
+# deep enough that sharing costs nothing.
+#
+# It is homestead's opposite on one axis only: both colonize everything
+# immediately, and neither ever scans or re-decides. What differs is whether
+# the fleet stacks or spreads, so a homestead/sprawl gap is attributable to
+# that alone.
+name: sprawl
+description: Disperse one ship to each surrounding sector, colonizing on arrival.
+config:
+  jump_range_per_turn: 2
+steps:
+  # The eight sectors adjoining home in the z=0 plane. jump_range 2 covers the
+  # diagonals (distance 1.41) as well as the cardinals in a single turn, so
+  # every ship lands together and none of them is settling a turn behind the
+  # rest for a reason that has nothing to do with the strategy.
+  - order:
+      ships: all
+      action: move
+      params:
+        - {d_x: 1,  d_y: 0,  d_z: 0, jump_range_per_turn: 2}
+        - {d_x: -1, d_y: 0,  d_z: 0, jump_range_per_turn: 2}
+        - {d_x: 0,  d_y: 1,  d_z: 0, jump_range_per_turn: 2}
+        - {d_x: 0,  d_y: -1, d_z: 0, jump_range_per_turn: 2}
+        - {d_x: 1,  d_y: 1,  d_z: 0, jump_range_per_turn: 2}
+        - {d_x: 1,  d_y: -1, d_z: 0, jump_range_per_turn: 2}
+        - {d_x: -1, d_y: 1,  d_z: 0, jump_range_per_turn: 2}
+        - {d_x: -1, d_y: -1, d_z: 0, jump_range_per_turn: 2}
+  # Queued rather than ordered now: a ship in transit is locked, so a second
+  # immediate step would be refused ship by ship. after_arrival is the ship's
+  # log doing the waiting that the interpreter has no verb for.
+  - order:
+      ships: all
+      action: colonize
+      when: after_arrival

@@ -159,3 +159,70 @@ def test_shipped_scenarios_declare_their_own_player_counts():
 def test_scenario_without_participants_is_rejected():
     with pytest.raises(ValueError, match="Missing required config field: participants"):
         load_starting_configuration("config/game_config.yaml")
+
+
+# --- map: hotspots and the scatter rule ---
+
+def _write(tmp_path, map_block: str):
+    path = tmp_path / "game_map.yaml"
+    path.write_text(
+        'name: "Mapped"\ndescription: "d"\n'
+        'participants:\n  - {player: "vincent@example.com", home_sector: [0, 0, 0]}\n'
+        'ships_per_player: 1\n'
+        'pods_per_ship:\n  - {task: produce_energy, count: 1}\n'
+        + map_block)
+    return str(path)
+
+
+def test_scenario_without_a_map_block_is_open_space():
+    """The map is optional -- every shipped scenario predates it and must keep
+    loading unchanged."""
+    sc = load_starting_configuration("config/game0.yaml")
+    assert sc.map.hotspots == []
+    assert sc.map.scatter is None
+
+
+def test_map_parses_placed_hotspots(tmp_path):
+    sc = load_starting_configuration(_write(tmp_path,
+        'map:\n'
+        '  hotspots:\n'
+        '    - {center: [30, 31, 0], radius: 2, multiplier: 3.0}\n'
+        '    - {center: [18, 40, 0]}\n'))
+    assert [h.center for h in sc.map.hotspots] == [[30, 31, 0], [18, 40, 0]]
+    assert (sc.map.hotspots[0].radius, sc.map.hotspots[0].multiplier) == (2.0, 3.0)
+    # An entry that says only where it is: one sector, and no richer than
+    # open space until the author says so.
+    assert (sc.map.hotspots[1].radius, sc.map.hotspots[1].multiplier) == (0.0, 1.0)
+
+
+def test_map_scatter_accepts_ranges_and_bare_scalars(tmp_path):
+    """A scenario wanting every scattered hotspot identical should not have to
+    write the number twice."""
+    sc = load_starting_configuration(_write(tmp_path,
+        'map:\n'
+        '  scatter:\n'
+        '    count: 12\n'
+        '    within: {min: [0, 0, 0], max: [50, 50, 0]}\n'
+        '    radius: [1, 3]\n'
+        '    multiplier: 2.5\n'))
+    assert sc.map.scatter.count == 12
+    assert sc.map.scatter.radius == [1.0, 3.0]
+    assert sc.map.scatter.multiplier == [2.5, 2.5]
+
+
+def test_map_rejects_a_malformed_layout_at_load_time(tmp_path):
+    """An author is holding the file right now; a live server bootstrapping it
+    is not."""
+    for block, complaint in [
+        ('map:\n  hotspots:\n    - {center: [1, 2], multiplier: 2}\n', "center"),
+        ('map:\n  hotspots:\n    - {center: [1, 2, 0], multiplier: 0}\n', "multiplier"),
+        ('map:\n  hotspots:\n    - {center: [1, 2, 0], radius: -1}\n', "radius"),
+        ('map:\n  hotspt: []\n', "unknown map keys"),
+        ('map:\n  scatter:\n    count: 2\n'
+         '    within: {min: [9, 0, 0], max: [1, 9, 0]}\n', "below min"),
+        ('map:\n  scatter:\n    count: 2\n'
+         '    within: {min: [0, 0, 0], max: [9, 9, 0]}\n'
+         '    multiplier: [3.0, 1.0]\n', "below low"),
+    ]:
+        with pytest.raises(ValueError, match=complaint):
+            load_starting_configuration(_write(tmp_path, block))

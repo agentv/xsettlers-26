@@ -44,6 +44,29 @@ def init_schema():
             energy_capacity REAL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sector_coords ON sectors(coord_x, coord_y, coord_z);
+        -- Where the map is richer than the ordinary discovery roll, and by how
+        -- much. Seeded once by db/bootstrap.py from the scenario's `map:` block
+        -- and read at every reveal (db/sectors.py's richness_multiplier).
+        --
+        -- Lives in the DB rather than being re-read from the scenario file at
+        -- reveal time for two reasons: a scenario's `scatter:` rule is expanded
+        -- with the map seed at bootstrap, so the concrete placement exists only
+        -- once and must survive a server restart; and db/ has no scenario handle
+        -- at reveal time, only a cursor.
+        --
+        -- Nothing player-facing reads this table. A player learns a hotspot
+        -- exists by scanning into it and seeing what the sector rolled -- the
+        -- layout itself is not discoverable through any tool, which is what
+        -- lets a scenario keep its map secret.
+        CREATE TABLE IF NOT EXISTS map_hotspots (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            center_x   INTEGER NOT NULL,
+            center_y   INTEGER NOT NULL,
+            center_z   INTEGER NOT NULL DEFAULT 0,
+            -- Euclidean, inclusive, in sectors. 0 covers the centre alone.
+            radius     REAL NOT NULL DEFAULT 0,
+            multiplier REAL NOT NULL DEFAULT 1.0
+        );
         CREATE TABLE IF NOT EXISTS game_state (
             id            INTEGER PRIMARY KEY DEFAULT 1,
             current_turn  INTEGER DEFAULT 0,

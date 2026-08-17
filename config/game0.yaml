@@ -34,13 +34,17 @@ ships_per_player: 8
 starting_fill: 0.3
 
 # Energy in each player's home sector, overriding the ordinary discovery roll
-# (db/sectors.py rolls 400 + d6 x 100 -- 500 to 1000 -- for everywhere else).
-# Deliberately bottomless rather than merely generous: a player's own footing
-# should never be the thing that runs out from under them, which is what lets
-# the frontier be lean. Per-scenario by design -- a survival variant is free to
-# make home as poor as anywhere else. NOTE: this is the home sector, not the
-# "sentinel sector" (id = -1), which parks ships in transit and stays at 0.
-home_sector_energy: 100000
+# (db/sectors.py rolls 400 + d6 x 100 -- 500 to 1000 -- for everywhere else,
+# scaled by the `map:` block below where one applies).
+#
+# Rich but finite, and calibrated: a fleet that colonizes in place on turn one
+# and never leaves empties this on turn 16 of a 20-turn game. Deep enough to
+# build from, shallow enough that never expanding is visibly a choice. See
+# config/loader.py's HOME_SECTOR_ENERGY for the arithmetic. Per-scenario by
+# design -- a survival variant is free to make home as poor as anywhere else.
+# NOTE: this is the home sector, not the "sentinel sector" (id = -1), which
+# parks ships in transit and stays at 0.
+home_sector_energy: 2200
 
 # Each ship receives one pod per entry below, repeated `count` times.
 # Mission values are the canonical pod missions (see Product Requirements /
@@ -55,6 +59,31 @@ pods_per_ship:
 
 # Set to true to spawn a starting colony at each player's home sector.
 home_colony: false
+
+# Optional. Where this scenario's map is richer (or leaner) than open space.
+# Absent, as here, means every sector takes the ordinary 500-1000 roll.
+#
+# A multiplier scales the WHOLE roll, so x3 rolls 1500-3000 -- a hotspot is a
+# better place, not a longer-odds bet. Overlapping regions take the largest
+# multiplier, never the product. Values below 1.0 are legal and mark a lean
+# region; there is no separate vocabulary for a desert.
+#
+# The layout is never exposed to players -- no tool reads it. A scenario's map
+# is discovered by revealing into it and reading what a sector rolled, so a
+# scenario is free to keep its geography secret from the people playing it.
+#
+# `hotspots` places regions by hand; `scatter` draws them from the map seed at
+# bootstrap (so a seeded game lays the same board down every time). Use both
+# together when some regions must be guaranteed and the rest can be dealt.
+#
+# map:
+#   hotspots:
+#     - {center: [25, 18, 0], radius: 2, multiplier: 3.0}
+#   scatter:
+#     count: 10
+#     within: {min: [15, 15, 0], max: [35, 35, 0]}
+#     radius: [1, 2]
+#     multiplier: [2.0, 2.5]
 
 # GameHouse lobby template (added 2026-08-06) -- the shape this scenario
 # reports via describe_lobby(), so GameHouse's catalog can register it as its

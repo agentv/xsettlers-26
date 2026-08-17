@@ -112,14 +112,45 @@ scans, arrivals and bootstrap alike, so whoever reveals a sector first
 establishes its value and every later look, rival included, reads the
 established (possibly already depleted) figure.
 
+**Where a sector sits now changes what it rolls.** A scenario's `map:` block
+declares hotspots — placed by hand, scattered from the map seed, or both — and
+`reveal_sector()` scales the discovery roll by the largest multiplier covering
+the coordinate (`db/sectors.py`'s `richness_multiplier`, layout in
+`map_hotspots`). The multiplier scales the whole roll, so a ×3 region rolls
+1500–3000 and its floor clears open space's ceiling. Nothing player-facing
+reads the layout: a scenario's map is discoverable only by revealing into it.
+
+This gives richness a lever it did not have, but does not by itself make
+richness *bind* — see the reserve-not-a-rate question below, which is still
+open and is still the substantive one.
+
 #### Open questions — **not decided**
 
-* **Is `HOME_SECTOR_ENERGY = 100,000` higher than it needs to be?** Suspected
-  yes. It was sized as ~600 turns of maximum plausible draw, far more headroom
-  than "does not deplete" requires. Nothing depends on the magnitude — the only
-  property that matters is that home outlasts any real game — so it can come
-  down a long way without changing behaviour. Purely a question of what reads
-  honestly to someone opening the scenario file.
+* ~~**Is `HOME_SECTOR_ENERGY = 100,000` higher than it needs to be?**~~
+  **Decided 2026-08-16: 2,200.** Not merely trimmed for honesty — calibrated
+  so that depletion actually lands inside a game. Eight ships stacked at home
+  draw 96 energy/turn, the same eight as colonies draw 144, so a fleet that
+  colonizes in place on turn one empties home on turn 16 of 20. Scenario
+  scores are unchanged (homestead 3464 → 3524), because the sector dies too
+  late to matter — which is the point of the next entry.
+
+* **Running dry currently pays.** The blocker for every "make leaving home
+  worth it" lever, including the map above. Energy scores 0 while
+  `produce_energy` costs 1 food per pod per turn, so 16 energy pods burn 16
+  food/turn — 16 points/turn — manufacturing a resource worth nothing. When
+  the sector dies those pods stop being charged and the score rate *rises*,
+  112 → 128/turn. Measured over a home-energy sweep, a poorer home scores
+  strictly better right up to the cliff: 3464 at 100,000, 3524 at 2,200, 3568
+  at 1,800. Depletion is a rebate, not a penalty.
+
+  Two events are being conflated by the phrase "runs out", and they are 4–6
+  turns apart: the **sector** hitting zero (a rebate), and the **stockpile**
+  emptying some turns later (a hard flatline — score delta goes to exactly 0
+  and stays, since upkeep is drawn before production). Anything that wants
+  scarcity to create pressure has to make the first event cost something.
+  Options, none designed: give energy a nonzero `score_weight`; let idle pods
+  stop paying their recipe; or taper production as the sector thins instead of
+  cutting it off.
 
 * **Should a sector ever deplete to *zero*?** Currently it can, and does:
   measured over 60 turns, five frontier sectors reached exactly 0 and became
@@ -130,15 +161,27 @@ established (possibly already depleted) figure.
   failure mode — upkeep is drawn before production, so a fleet on dead ground
   stops completely rather than tapering.
 
-* **Richness is a reserve, not a rate — and that may be why it doesn't
-  matter.** The most substantive of the three. `energy_capacity` is purely a
-  depletion budget: a 1000-energy sector and a 500-energy one are *identical to
-  work* until the poorer one runs out. Nothing about a rich sector makes a pod
-  more productive while it lasts. That is very likely why two separate
-  experiments failed to show variation affecting outcomes — richness can only
-  express itself through the horizon, and no game has run long enough for the
-  horizon to bind. The idea raised: let richness drive **production rate** as
-  well as duration, so a good find pays immediately rather than eventually.
+* **Richness is a reserve, not a rate — and that is why it doesn't matter.**
+  The most substantive of the three, and now measured precisely rather than
+  suspected. `energy_capacity` is purely a depletion budget: a 1000-energy
+  sector and a 500-energy one are *identical to work* until the poorer one
+  runs out. The binding number is what one org actually draws — **318 energy
+  over a 20-turn game** for a colony with two energy pods (measured directly
+  from a dispersed fleet's end-state sectors). Every sector in the discovery
+  band clears that by 180+, so richness is invisible to any player who does
+  not concentrate.
+
+  Which sharpens the mechanism rather than only indicting it: richness binds
+  exactly when *stacking* exceeds supply. Eight orgs on one sector draw 144/turn
+  and can strip anything; one org per sector never exhausts even a bad roll. So
+  "how much do I pile onto this find" is the decision richness currently prices,
+  and hotspots are meaningful only to a player who concentrates. Confirmed with
+  the map layer in place: a ×3 region moved `fan_out` (which converges its whole
+  fleet on one sector) 2108 → 2228, and moved `sprawl` (one colony per sector)
+  not at all.
+
+  The idea raised: let richness drive **production rate** as well as duration,
+  so a good find pays immediately rather than eventually.
   Undesigned — whether that is a multiplier on pod output, a cap on draw rate,
   or something else, and how it interacts with `COLONY_PRODUCTION_MULTIPLIER`,
   which is already a rate multiplier and would compound with it.

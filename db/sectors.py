@@ -33,14 +33,65 @@ _seed = os.getenv("SECTOR_ROLL_SEED")
 _rng = random.Random(int(_seed)) if _seed is not None else random.Random()
 
 
-def roll_sector_energy() -> float:
-    """Energy for a newly discovered sector: 400 + d6 x 100, so 500..1000.
+def roll_sector_energy(multiplier: float = 1.0) -> float:
+    """Energy for a newly discovered sector: 400 + d6 x 100, so 500..1000 in
+    open space, scaled by the richness of wherever it sits.
 
-    Home sectors do not use this -- they are seeded flat and rich by
-    db/bootstrap.py so that a player's footing never runs out from under
-    them (see HOME_SECTOR_ENERGY).
+    The multiplier scales the whole roll rather than the die alone, so a x3
+    region rolls 1500..3000 -- its floor above open space's ceiling. That
+    makes a region worth finding on its own account: a scenario's map is a
+    set of places that are better, not a set of places where the gamble pays
+    more often. See config/loader.HotspotDef.
+
+    The die is rolled before scaling, and always, so the sequence of rolls
+    across a game does not depend on where the sectors happened to be. Two
+    games on the same seed reveal the same faces in the same order whatever
+    map they are played on.
+
+    Home sectors do not use this -- they are seeded flat by db/bootstrap.py
+    from the scenario's own figure (see HOME_SECTOR_ENERGY).
     """
-    return SECTOR_ENERGY_BASE + _rng.randint(1, SECTOR_ENERGY_DIE_SIDES) * SECTOR_ENERGY_DIE_UNIT
+    roll = SECTOR_ENERGY_BASE + _rng.randint(1, SECTOR_ENERGY_DIE_SIDES) * SECTOR_ENERGY_DIE_UNIT
+    return roll * multiplier
+
+
+# Layout is drawn from its own generator, seeded off the same SECTOR_ROLL_SEED
+# but never sharing a sequence with it. Sharing one would mean that adding a
+# hotspot to a scenario silently changed every discovery roll after it, so two
+# maps could not be compared on the same seed -- which is the entire reason
+# the seed exists.
+_MAP_LAYOUT_SALT = 0x5A17
+
+
+def map_layout_rng() -> random.Random:
+    """The generator db/bootstrap.py expands a scenario's `scatter:` rule
+    with. Deterministic under SECTOR_ROLL_SEED, so a seeded run lays the same
+    map down every time."""
+    return random.Random(int(_seed) ^ _MAP_LAYOUT_SALT if _seed is not None else None)
+
+
+def richness_multiplier(cur, coord_x: int, coord_y: int, coord_z: int) -> float:
+    """
+    How much richer than open space this coordinate rolls: the largest
+    multiplier among the hotspots covering it, or 1.0 where none do.
+
+    Overlapping regions take the maximum rather than the product. Product
+    would make two ordinary x2 regions that happen to touch produce a x4
+    sector nobody placed, and the overlap of three a x8 one -- the map's
+    richest sector would be an accident of geometry. Max keeps a scenario's
+    stated multipliers the actual ceiling of what it can produce.
+
+    Read at every reveal from the DB rather than the scenario file, because a
+    `scatter:` layout is drawn once at bootstrap and has to survive a restart
+    (see db/schema.py's map_hotspots).
+    """
+    row = cur.execute("""
+        SELECT MAX(multiplier) AS m FROM map_hotspots
+        WHERE (center_x - :x) * (center_x - :x)
+            + (center_y - :y) * (center_y - :y)
+            + (center_z - :z) * (center_z - :z) <= radius * radius
+    """, {"x": coord_x, "y": coord_y, "z": coord_z}).fetchone()
+    return row["m"] if row and row["m"] is not None else 1.0
 
 # --- Fog of war ---------------------------------------------------------------
 # Confidence decays by a fixed number of points per turn, NOT by a fraction of
@@ -69,6 +120,12 @@ def reveal_sector(cur, player_id: int, coord_x: int, coord_y: int, coord_z: int)
     function does not commit; callers (bootstrap_game(), end_of_turn())
     commit as part of their own transaction.
 
+    How rich the roll is depends on where the sector sits: the scenario's map
+    may declare regions that roll richer or leaner than open space (see
+    richness_multiplier). A player learns a region exists by revealing into it
+    and reading what it rolled -- the layout itself is never exposed, so a
+    scenario can keep its map secret.
+
     An already-revealed sector's energy capacity is left untouched -- the
     richness roll happens once, on first reveal, whoever that reveal belongs
     to, and every later look (by any player, by any means) reads the
@@ -90,7 +147,8 @@ def reveal_sector(cur, player_id: int, coord_x: int, coord_y: int, coord_z: int)
     else:
         cur.execute("""INSERT INTO sectors
             (coord_x,coord_y,coord_z,energy_capacity) VALUES (?,?,?,?)""",
-            (coord_x, coord_y, coord_z, roll_sector_energy()))
+            (coord_x, coord_y, coord_z, roll_sector_energy(
+                richness_multiplier(cur, coord_x, coord_y, coord_z))))
         sector_id = cur.lastrowid
         cur.execute("UPDATE sectors SET location=MakePointZ(?,?,?,-1) WHERE id=?",
                     (coord_x, coord_y, coord_z, sector_id))

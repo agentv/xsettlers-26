@@ -25,13 +25,17 @@ ships_per_player: 8
 starting_fill: 0.3
 
 # Energy in each player's home sector, overriding the ordinary discovery roll
-# (db/sectors.py rolls 400 + d6 x 100 -- 500 to 1000 -- for everywhere else).
-# Deliberately bottomless rather than merely generous: a player's own footing
-# should never be the thing that runs out from under them, which is what lets
-# the frontier be lean. Per-scenario by design -- a survival variant is free to
-# make home as poor as anywhere else. NOTE: this is the home sector, not the
-# "sentinel sector" (id = -1), which parks ships in transit and stays at 0.
-home_sector_energy: 100000
+# (db/sectors.py rolls 400 + d6 x 100 -- 500 to 1000 -- for everywhere else,
+# scaled by the `map:` block below where one applies).
+#
+# Rich but finite, and calibrated: a fleet that colonizes in place on turn one
+# and never leaves empties this on turn 16 of a 20-turn game. Deep enough to
+# build from, shallow enough that never expanding is visibly a choice. See
+# config/loader.py's HOME_SECTOR_ENERGY for the arithmetic. Per-scenario by
+# design -- a survival variant is free to make home as poor as anywhere else.
+# NOTE: this is the home sector, not the "sentinel sector" (id = -1), which
+# parks ships in transit and stays at 0.
+home_sector_energy: 2200
 
 # Same 6-pod loadout as game0's Diaspora, applied to every ship AND
 # to the home colony (see home_colony below and db/bootstrap.py).

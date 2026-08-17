@@ -13,9 +13,53 @@
 # selected_by below. The games table records that choice.
 
 from db.connection import get_connection
-from config.loader import load_config, Seat
-from db.sectors import reveal_sector
+from config.loader import load_config, HotspotDef, MapDef, Seat
+from db.sectors import map_layout_rng, reveal_sector
 from engine.production import RESOURCE_STORAGE_COLUMN, RESOURCE_PRODUCING_TASK
+
+
+def _scatter_hotspots(scatter) -> list:
+    """
+    Expand a scenario's `scatter:` rule into concrete hotspots, drawn from the
+    map-layout generator so a seeded game lays the same map down every time.
+
+    Placement is expanded here, once, rather than evaluated per reveal: a
+    scattered map has to be a fact about this game that survives a restart,
+    and collapsing the rule to placed regions at bootstrap is what leaves
+    reveal_sector with a single form to read (see config/loader.ScatterDef).
+    """
+    rng = map_layout_rng()
+    return [HotspotDef(
+        center=[rng.randint(lo, hi)
+                for lo, hi in zip(scatter.within_min, scatter.within_max)],
+        radius=rng.uniform(*scatter.radius),
+        multiplier=rng.uniform(*scatter.multiplier),
+    ) for _ in range(scatter.count)]
+
+
+def _seed_map(cur, map_def: MapDef):
+    """
+    Write the scenario's map layout into map_hotspots.
+
+    Must run before the first reveal_sector call of the game, or the sectors
+    revealed by bootstrap placement would roll as open space while every
+    later discovery honoured the map.
+
+    Skipped entirely if the table already has rows: bootstrap is reachable
+    against an existing database, and re-running it must not lay a second
+    map over the one this game has already been revealing sectors against.
+    """
+    if cur.execute("SELECT COUNT(*) FROM map_hotspots").fetchone()[0]:
+        return
+    hotspots = list(map_def.hotspots)
+    if map_def.scatter:
+        hotspots += _scatter_hotspots(map_def.scatter)
+    for hotspot in hotspots:
+        cur.execute("""INSERT INTO map_hotspots
+            (center_x,center_y,center_z,radius,multiplier) VALUES (?,?,?,?,?)""",
+            (*hotspot.center, hotspot.radius, hotspot.multiplier))
+    if hotspots:
+        print(f"  Placed {len(hotspots)} map hotspot(s).")
 
 def _starting_cargo_for_task(task: str, capacity: float, fill: float) -> dict:
     """
@@ -130,6 +174,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
 
     # 2. Create starting ships for each player
     sc = cfg.starting_configuration
+    _seed_map(cur, sc.map)
     for player_id, seat in zip(player_id_list, seats):
         home_sector_id = reveal_sector(cur, player_id, *tuple(seat.home_sector))
         # Home does not take the ordinary discovery roll -- it is seeded flat

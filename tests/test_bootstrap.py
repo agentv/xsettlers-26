@@ -179,3 +179,104 @@ def test_home_sector_is_rich_but_the_transit_sentinel_stays_at_zero():
     conn.close()
     assert sentinel["e"] == 0.0
     assert all(h["e"] == HOME_SECTOR_ENERGY for h in homes)
+
+
+# --- the scenario's map ---
+
+def _mapped_scenario(tmp_path, map_block: str):
+    path = tmp_path / "game_mapped.yaml"
+    path.write_text(
+        'name: "Mapped"\ndescription: "d"\nhome_sector_energy: 2200\n'
+        'participants:\n  - {player: "vincent@example.com", home_sector: [5, 5, 0]}\n'
+        'ships_per_player: 1\n'
+        'pods_per_ship:\n  - {task: produce_energy, count: 1, storage_capacity: 100.0}\n'
+        + map_block)
+    return str(path)
+
+
+def test_bootstrap_places_the_scenarios_hotspots(tmp_path):
+    bootstrap_game(scenario_file=_mapped_scenario(tmp_path,
+        'map:\n  hotspots:\n    - {center: [30, 31, 0], radius: 2, multiplier: 3.0}\n'),
+        scenario_name="mapped", selected_by="test")
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM map_hotspots").fetchall()
+    conn.close()
+    assert len(rows) == 1
+    assert (rows[0]["center_x"], rows[0]["center_y"], rows[0]["center_z"]) == (30, 31, 0)
+    assert (rows[0]["radius"], rows[0]["multiplier"]) == (2.0, 3.0)
+
+
+def test_scatter_expands_deterministically_under_a_seed(monkeypatch):
+    """One seed lays the same board down every time. Without that a scenario's
+    map is not reproducible and a seeded tournament compares strategies across
+    different maps -- which is the whole reason the seed exists."""
+    import importlib, db.sectors, db.bootstrap
+    from config.loader import ScatterDef
+    scatter = ScatterDef(count=6, within_min=[0, 0, 0], within_max=[40, 40, 0],
+                         radius=[1.0, 3.0], multiplier=[2.0, 3.0])
+
+    def layout(seed):
+        monkeypatch.setenv("SECTOR_ROLL_SEED", seed)
+        importlib.reload(db.sectors); importlib.reload(db.bootstrap)
+        return [(h.center, h.radius, h.multiplier)
+                for h in db.bootstrap._scatter_hotspots(scatter)]
+
+    first = layout("42")
+    assert len(first) == 6
+    assert layout("42") == first        # same seed, same board
+    assert layout("99") != first        # different seed, different board
+    for center, radius, multiplier in first:
+        assert all(0 <= c <= 40 for c in center[:2]) and center[2] == 0
+        assert 1.0 <= radius <= 3.0
+        assert 2.0 <= multiplier <= 3.0
+    monkeypatch.delenv("SECTOR_ROLL_SEED", raising=False)
+    importlib.reload(db.sectors); importlib.reload(db.bootstrap)
+
+
+def test_map_layout_does_not_consume_the_discovery_roll_sequence(monkeypatch):
+    """Adding a hotspot to a scenario must not shift what every later sector
+    rolls, or two maps cannot be compared on one seed."""
+    import importlib, db.sectors, db.bootstrap
+    from config.loader import ScatterDef
+    monkeypatch.setenv("SECTOR_ROLL_SEED", "42")
+    importlib.reload(db.sectors); importlib.reload(db.bootstrap)
+    plain = [db.sectors.roll_sector_energy() for _ in range(10)]
+
+    importlib.reload(db.sectors); importlib.reload(db.bootstrap)
+    db.bootstrap._scatter_hotspots(ScatterDef(count=6, within_min=[0, 0, 0],
+                                              within_max=[40, 40, 0],
+                                              radius=[1.0, 3.0], multiplier=[2.0, 3.0]))
+    assert [db.sectors.roll_sector_energy() for _ in range(10)] == plain
+    monkeypatch.delenv("SECTOR_ROLL_SEED", raising=False)
+    importlib.reload(db.sectors); importlib.reload(db.bootstrap)
+
+
+def test_seed_map_does_not_lay_a_second_map_over_an_existing_one():
+    """bootstrap_game is reachable against an existing database. A second pass
+    must not add a map this game has already revealed sectors against."""
+    from db.bootstrap import _seed_map
+    from config.loader import HotspotDef, MapDef
+    map_def = MapDef(hotspots=[HotspotDef(center=[1, 1, 0], radius=1, multiplier=2.0)])
+    conn = get_connection(); cur = conn.cursor()
+    _seed_map(cur, map_def)
+    _seed_map(cur, MapDef(hotspots=[HotspotDef(center=[9, 9, 0], radius=5,
+                                               multiplier=3.0)]))
+    conn.commit()
+    rows = cur.execute("SELECT center_x, multiplier FROM map_hotspots").fetchall()
+    conn.close()
+    assert [(r["center_x"], r["multiplier"]) for r in rows] == [(1, 2.0)]
+
+
+def test_home_energy_is_the_scenarios_figure_not_a_hotspot_roll(tmp_path):
+    """A starting position is a promise about a specific number, so
+    home_sector_energy is written over whatever home rolled -- even when a
+    hotspot covers it."""
+    bootstrap_game(scenario_file=_mapped_scenario(tmp_path,
+        'map:\n  hotspots:\n    - {center: [5, 5, 0], radius: 4, multiplier: 3.0}\n'),
+        scenario_name="mapped", selected_by="test")
+    conn = get_connection()
+    energy = conn.execute(
+        "SELECT energy_capacity AS e FROM sectors WHERE coord_x=5 AND coord_y=5"
+    ).fetchone()["e"]
+    conn.close()
+    assert energy == 2200

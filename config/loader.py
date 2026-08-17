@@ -1,6 +1,6 @@
 import os
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 CONFIG_PATH = os.getenv("GAME_CONFIG_PATH", "config/game_config.yaml")
@@ -14,25 +14,33 @@ CONFIG_PATH = os.getenv("GAME_CONFIG_PATH", "config/game_config.yaml")
 # this is only the fallback.
 DEFAULT_STARTING_FILL = 0.3
 
-# Energy seeded into a player's home sector. Deliberately enormous rather than
-# merely generous: home is meant not to deplete at all, so that the ground a
-# player starts on is never the thing that kills them. The upper bound on
-# plausible demand is roughly 160 energy/turn (nine organizations, all
-# colonies drawing at 1.5x, two energy pods each), so this is on the order of
-# 600 turns of maximum draw -- non-depleting for any game that will ever be
-# played, without needing a special "infinite" case in the production step to
-# get there.
+# Energy seeded into a player's home sector: rich, and finite. A starting
+# position is a promise about a specific number rather than a bet on a range,
+# so this is written straight over whatever home rolled (db/bootstrap.py) --
+# home is not expressed as a hotspot even though the map layer could carry it.
 #
-# This is what lets the frontier be lean (see db/sectors.py's discovery roll):
-# a bad roll out in the field costs a player their expansion, not their
-# footing. It is a per-scenario value -- a survival variant is free to make
-# home as poor as anywhere else.
+# 2200 is calibrated, not picked: eight ships stacked at home draw 96
+# energy/turn, and the same eight as colonies draw 144 (two energy pods each,
+# 6/turn, x1.5 for a colony). A fleet that colonizes in place on turn one and
+# never leaves therefore empties its home sector on turn 16 of a 20-turn game.
+# That is the intended shape -- a starting position deep enough to build from
+# and shallow enough that a player who never expands can watch it run out.
+#
+# Two things to know before moving it. Stored energy outlives the sector, so
+# production does not stall when the reading hits zero -- it stalls several
+# turns later when the stockpile empties, and that gap widens as the figure
+# rises. And energy scores 0 while produce_energy costs food, so a fleet
+# briefly scores FASTER once its sector dies; the pressure this constant
+# creates is a warning, not yet a penalty (see docs/TODO.md).
+#
+# Per-scenario by design -- a survival variant is free to make home as poor as
+# anywhere else, and a longer game will want more.
 #
 # NOTE: this is the HOME sector, meaning the scenario's starting coordinates
 # where the first colony sits. It is NOT the "sentinel sector" (id = -1),
 # which is the parking slot for ships in transit and must stay at 0 energy --
 # that zero is the entire mechanism suppressing energy harvesting mid-flight.
-HOME_SECTOR_ENERGY = 100_000.0
+HOME_SECTOR_ENERGY = 2_200.0
 
 @dataclass
 class GameSettings:
@@ -53,6 +61,58 @@ class GameSettings:
     max_players: int
     turn_limit: int
     score_weights: dict
+
+@dataclass
+class HotspotDef:
+    """
+    A region of the map that rolls richer (or poorer) than open space.
+
+    `multiplier` scales the WHOLE discovery roll, not just its die -- a x3
+    hotspot rolls 3 x (400 + d6x100) = 1500..3000, so its floor clears open
+    space's ceiling and finding the region is itself the decision. Scaling
+    only the die would make a hotspot a gamble instead; that is a different
+    game and not the one this models.
+
+    Nothing constrains the multiplier to be above 1. A value below it marks a
+    lean region, which is the same mechanism read the other way, and is how a
+    scenario draws a desert without a second vocabulary for it.
+
+    `radius` is Euclidean and inclusive, measured in sectors from `center`,
+    so 0 covers exactly the centre sector.
+    """
+    center: List[int]
+    radius: float = 0.0
+    multiplier: float = 1.0
+
+
+@dataclass
+class ScatterDef:
+    """
+    A rule for placing hotspots the author does not want to name individually
+    -- count, the box they fall in, and the ranges their radius and multiplier
+    are drawn from.
+
+    Expanded into concrete HotspotDefs once, at bootstrap, from the map seed
+    (db/bootstrap.py). So this is sugar over `hotspots:` rather than a second
+    mechanism: by the time anything reads the map there is only one form, and
+    a later distance-to-source gradient becomes a third way of producing
+    entries rather than a third thing reveal_sector has to know about.
+    """
+    count: int
+    within_min: List[int]
+    within_max: List[int]
+    radius: List[float]
+    multiplier: List[float]
+
+
+@dataclass
+class MapDef:
+    """A scenario's map layout: hotspots it places by hand, plus a rule for
+    scattering the rest. Both are optional and they compose -- placed entries
+    are exactly the ones an authored scenario wants guaranteed."""
+    hotspots: List["HotspotDef"] = field(default_factory=list)
+    scatter: "ScatterDef | None" = None
+
 
 @dataclass
 class PodTemplateDef:
@@ -126,6 +186,13 @@ class StartingConfiguration:
     # Energy seeded into each player's home sector, overriding the ordinary
     # discovery roll. See HOME_SECTOR_ENERGY.
     home_sector_energy: float = HOME_SECTOR_ENERGY
+    # Where the map is richer than open space. Home is deliberately NOT
+    # expressed here: home_sector_energy above is an absolute figure written
+    # over whatever home rolled, because a starting position is a promise
+    # about a specific number rather than a bet on a range, and the home
+    # coordinates live in participants[] where a duplicate copy here could
+    # only drift out of sync.
+    map: MapDef = field(default_factory=MapDef)
 
 @dataclass
 class PlayerDef:
@@ -201,7 +268,91 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
         starting_fill=scenario_fill,
         home_sector_energy=float(sc_raw.get("home_sector_energy",
                                             HOME_SECTOR_ENERGY)),
+        map=_load_map(sc_raw.get("map") or {}),
     )
+
+
+def _load_map(map_raw: dict) -> MapDef:
+    """
+    Parse a scenario's `map:` block. Absent or empty means open space
+    everywhere -- every sector takes the ordinary discovery roll.
+
+    Rejected here rather than at bootstrap because a malformed map is an
+    authoring error and the author is holding the file right now; discovering
+    it at bootstrap means discovering it on a live server instead.
+    """
+    if not isinstance(map_raw, dict):
+        raise ValueError("map must be a mapping with 'hotspots' and/or 'scatter'")
+    unknown = set(map_raw) - {"hotspots", "scatter"}
+    if unknown:
+        raise ValueError(f"unknown map keys {sorted(unknown)}. "
+                         f"Valid: ['hotspots', 'scatter']")
+    hotspots = [_load_hotspot(h, i) for i, h in enumerate(map_raw.get("hotspots") or [])]
+    scatter_raw = map_raw.get("scatter")
+    return MapDef(hotspots=hotspots,
+                  scatter=_load_scatter(scatter_raw) if scatter_raw else None)
+
+
+def _load_hotspot(raw: dict, index: int) -> HotspotDef:
+    where = f"map.hotspots[{index}]"
+    center = list(_require(raw, "center", f"{where}.center"))
+    if len(center) != 3:
+        raise ValueError(f"{where}.center must be [x, y, z], got {center}")
+    return HotspotDef(center=[int(c) for c in center],
+                      radius=_non_negative(raw.get("radius", 0), f"{where}.radius"),
+                      multiplier=_positive(raw.get("multiplier", 1.0),
+                                           f"{where}.multiplier"))
+
+
+def _load_scatter(raw: dict) -> ScatterDef:
+    where = "map.scatter"
+    if not isinstance(raw, dict):
+        raise ValueError(f"{where} must be a mapping")
+    within = _require(raw, "within", f"{where}.within")
+    lo = list(_require(within, "min", f"{where}.within.min"))
+    hi = list(_require(within, "max", f"{where}.within.max"))
+    if len(lo) != 3 or len(hi) != 3:
+        raise ValueError(f"{where}.within min/max must each be [x, y, z]")
+    if any(b < a for a, b in zip(lo, hi)):
+        raise ValueError(f"{where}.within max {hi} is below min {lo} on some axis")
+    count = int(_require(raw, "count", f"{where}.count"))
+    if count < 0:
+        raise ValueError(f"{where}.count must not be negative, got {count}")
+    return ScatterDef(
+        count=count,
+        within_min=[int(v) for v in lo],
+        within_max=[int(v) for v in hi],
+        radius=_range(raw.get("radius", [0, 0]), f"{where}.radius", _non_negative),
+        multiplier=_range(raw.get("multiplier", [1.0, 1.0]),
+                          f"{where}.multiplier", _positive),
+    )
+
+
+def _range(value, path: str, check) -> list:
+    """A [low, high] pair. A bare scalar is accepted as a degenerate range so
+    a scenario wanting every scattered hotspot identical does not have to
+    write the number twice."""
+    pair = value if isinstance(value, list) else [value, value]
+    if len(pair) != 2:
+        raise ValueError(f"{path} must be [low, high] or a single value, got {value}")
+    low, high = (check(v, path) for v in pair)
+    if high < low:
+        raise ValueError(f"{path} high {high} is below low {low}")
+    return [low, high]
+
+
+def _non_negative(value, path: str) -> float:
+    f = float(value)
+    if f < 0:
+        raise ValueError(f"{path} must not be negative, got {f}")
+    return f
+
+
+def _positive(value, path: str) -> float:
+    f = float(value)
+    if f <= 0:
+        raise ValueError(f"{path} must be greater than 0, got {f}")
+    return f
 
 
 def _fraction(value, path: str) -> float:

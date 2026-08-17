@@ -14,21 +14,23 @@ def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
     (same formula as show_game_status/_calculate_final_scores), and derived
     per-resource waste (produced - consumed - actual delta).
 
-    Hand-verified saturated org. Two energy pods and a food pod, all full at
-    10/10. Org upkeep runs first and takes 5 food + 3 energy; the two energy
-    pods then make 12 between them, of which only 7 finds anywhere to go and
-    2 is lost. The food pod produces nothing at all -- its recipe needs goods,
-    and the org holds none -- which is why energy is the only resource that
-    wastes anything.
+    Hand-verified saturated org. Three energy pods and a food pod, all full at
+    10/10. Org upkeep runs first and takes 5 food + 3 energy; each energy pod
+    then pays 1 food and makes 4, so 12 are produced and only 11 find anywhere
+    to go -- 1 is lost. The food pod produces nothing at all -- its recipe
+    needs goods, and the org holds none -- which is why energy is the only
+    resource that wastes anything.
 
-    Note the org ends at 30/30 either way: it is capacity-bound, so raising
+    Note the org ends at 40/40 either way: it is capacity-bound, so raising
     production raises waste rather than holdings. That is the behaviour this
     test is really pinning.
 
-    Deliberately three pods rather than two: at the current production rates
-    a 2-pod version leaves enough headroom that nothing overflows, and a
-    waste test that never wastes anything is worse than no test."""
+    Deliberately four pods rather than three: at the current production rates
+    a 3-pod version leaves enough headroom that nothing overflows, and a
+    waste test that never wastes anything is worse than no test. Expect to add
+    another pod here whenever the rates come down again."""
     pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_capacity=10.0, storage_current=10.0)
     seed_pod(oid, task="produce_energy", storage_capacity=10.0, storage_current=10.0)
     seed_pod(oid, task="produce_energy", storage_capacity=10.0, storage_current=10.0)
     seed_pod(oid, task="produce_food", storage_capacity=10.0, storage_current=10.0)
@@ -39,13 +41,13 @@ def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
         (pid,)).fetchone()
     conn.close()
     payload = json.loads(row["payload"])
-    assert payload["energy"] == 27.0
-    assert payload["food"] == 3.0
+    assert payload["energy"] == 38.0
+    assert payload["food"] == 2.0
     assert payload["goods"] == 0.0
-    assert payload["energy_wasted"] == 2.0   # 12 produced - 3 upkeep - 7 actually stored
+    assert payload["energy_wasted"] == 1.0   # 12 produced - 11 actually stored
     assert payload["food_wasted"] == 0.0
     assert payload["goods_wasted"] == 0.0
-    assert payload["score"] == 3.0  # 27*0 (energy) + 3*1 (food) + 0*2 (goods)
+    assert payload["score"] == 2.0  # 38*0 (energy) + 2*1 (food) + 0*2 (goods)
 
 def test_get_next_tick_at_none_until_clock_has_run():
     """None means "clock has never ticked yet" -- distinct from a stale

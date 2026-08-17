@@ -127,30 +127,41 @@ open and is still the substantive one.
 #### Open questions — **not decided**
 
 * ~~**Is `HOME_SECTOR_ENERGY = 100,000` higher than it needs to be?**~~
-  **Decided 2026-08-16: 2,200.** Not merely trimmed for honesty — calibrated
-  so that depletion actually lands inside a game. Eight ships stacked at home
-  draw 96 energy/turn, the same eight as colonies draw 144, so a fleet that
-  colonizes in place on turn one empties home on turn 16 of 20. Scenario
-  scores are unchanged (homestead 3464 → 3524), because the sector dies too
-  late to matter — which is the point of the next entry.
+  **Decided 2026-08-16: 2,200.** Eight ships stacked at home draw 64
+  energy/turn and the same eight as colonies draw 96, so 2,200 lasts a
+  homesteading fleet about 24 turns — past the 20-turn horizon, ending with
+  ~376 left. See the throughput entry below for why it is deliberately *not*
+  tuned to empty inside a game.
 
-* **Running dry currently pays.** The blocker for every "make leaving home
-  worth it" lever, including the map above. Energy scores 0 while
-  `produce_energy` costs 1 food per pod per turn, so 16 energy pods burn 16
-  food/turn — 16 points/turn — manufacturing a resource worth nothing. When
-  the sector dies those pods stop being charged and the score rate *rises*,
-  112 → 128/turn. Measured over a home-energy sweep, a poorer home scores
-  strictly better right up to the cliff: 3464 at 100,000, 3524 at 2,200, 3568
-  at 1,800. Depletion is a rebate, not a penalty.
+* ~~**Running dry currently pays.**~~ **Fixed 2026-08-16 by the pod rate
+  change**, not by touching the score weights. Under the old rates energy
+  scored 0 while `produce_energy` cost food, so a dead sector *raised* the
+  score rate (112 → 128/turn) and a poorer home scored strictly better —
+  3464 at 100,000, 3524 at 2,200, 3568 at 1,800. Now that `produce_goods`
+  costs 4 energy and yields 1, energy is genuinely scarce as an input to the
+  double-weighted resource, and the ordering inverts: 2605 at 2,200, 2396 at
+  1,600, 2102 at 1,200, 1853 at 800. Losing energy supply costs more than the
+  food it stops burning. A local rebate still exists at the moment goods
+  production stalls; it is no longer big enough to reverse the sign.
 
-  Two events are being conflated by the phrase "runs out", and they are 4–6
-  turns apart: the **sector** hitting zero (a rebate), and the **stockpile**
-  emptying some turns later (a hard flatline — score delta goes to exactly 0
-  and stays, since upkeep is drawn before production). Anything that wants
-  scarcity to create pressure has to make the first event cost something.
-  Options, none designed: give energy a nonzero `score_weight`; let idle pods
-  stop paying their recipe; or taper production as the sector thins instead of
-  cutting it off.
+* **The binding constraint is throughput, not the reserve.** The pod rate
+  change moved it. Per org, two energy pods produce 8/turn (12 as a colony)
+  while the org spends 13 — 8 on goods production, 2 on food production, 3 on
+  upkeep. So a ship runs −5 energy/turn and a colony −1 **regardless of how
+  rich its sector is**, and every strategy converges on the same
+  energy-starved equilibrium: a fleet's stored energy floors around turn 15 at
+  `home_sector_energy` anywhere from 1,200 to 2,200. Nobody depletes anything
+  any more — `sprawl`'s eight colonies draw ~204 each from sectors holding
+  500–2,100, and `turtle` runs dry at turn 11 with 1,432 still in the ground
+  under it.
+
+  This is the reason `home_sector_energy` is no longer tuned to empty inside a
+  game: it cannot bite before throughput does. Colonizing has correspondingly
+  stopped being an advantage and become a solvency requirement (−1/turn versus
+  −5), which is most of why `turtle` fell from 2240 to 1536. Whether the fix
+  is more energy pods in the loadout, a cheaper goods recipe, or letting
+  richness drive *rate* (see below) is undecided — but note that the last of
+  those is now the same question as this one.
 
 * **Should a sector ever deplete to *zero*?** Currently it can, and does:
   measured over 60 turns, five frontier sectors reached exactly 0 and became
@@ -165,20 +176,21 @@ open and is still the substantive one.
   The most substantive of the three, and now measured precisely rather than
   suspected. `energy_capacity` is purely a depletion budget: a 1000-energy
   sector and a 500-energy one are *identical to work* until the poorer one
-  runs out. The binding number is what one org actually draws — **318 energy
+  runs out. The binding number is what one org actually draws — **~204 energy
   over a 20-turn game** for a colony with two energy pods (measured directly
-  from a dispersed fleet's end-state sectors). Every sector in the discovery
-  band clears that by 180+, so richness is invisible to any player who does
-  not concentrate.
+  from a dispersed fleet's end-state sectors; it was 318 before the pod rates
+  came down, so the rate change made this *worse*). Every sector in the
+  discovery band clears that by 300+, so richness is invisible to any player
+  who does not concentrate.
 
   Which sharpens the mechanism rather than only indicting it: richness binds
-  exactly when *stacking* exceeds supply. Eight orgs on one sector draw 144/turn
+  exactly when *stacking* exceeds supply. Eight orgs on one sector draw 96/turn
   and can strip anything; one org per sector never exhausts even a bad roll. So
   "how much do I pile onto this find" is the decision richness currently prices,
   and hotspots are meaningful only to a player who concentrates. Confirmed with
-  the map layer in place: a ×3 region moved `fan_out` (which converges its whole
-  fleet on one sector) 2108 → 2228, and moved `sprawl` (one colony per sector)
-  not at all.
+  the map layer in place at the old rates: a ×3 region moved `fan_out` (which
+  converges its whole fleet on one sector) 2108 → 2228, and moved `sprawl` (one
+  colony per sector) not at all. Not re-measured since.
 
   The idea raised: let richness drive **production rate** as well as duration,
   so a good find pays immediately rather than eventually.
@@ -447,13 +459,24 @@ standings below, since they were produced before that flag existed.
 Every strategy scores identically regardless of opponent — no combat, no
 resource contention at this map scale — so the standings are a fixed, transitive
 ranking of solo performance, not real head-to-head play. Seeded (`--seed 42`)
-on Diaspora: `turtle` (2240) beats `fan_out` (2108.3) beats
-`frontier_map_stay_frosty` (1864, energy collapses to ~0 by turn 5 from
-constant movement).
+on Diaspora, at the current pod rates:
 
-* [ ] **Doing nothing still wins.** The field is 3 strategies and the control
-  beats both of them, which says the cost of movement outweighs anything
-  scouting currently buys. That is a finding about the *economy*, not about the
-  strategies: until moving somewhere richer pays for the fuel, no reconnaissance
-  strategy can justify itself. Worth resolving before adding more strategies to
-  a field none of them can win.
+    sprawl                     2648    one colony per surrounding sector
+    homestead                  2605    colonize everything at home, turn one
+    turtle                     1536    do nothing
+    fan_out                    1464    scout, then converge on the best find
+    frontier_map_stay_frosty   1458    never settle
+
+* [x] ~~**Doing nothing still wins.**~~ Resolved 2026-08-16. `turtle` fell from
+  2240 to 1536 when the pod rates changed: a ship now runs an energy deficit,
+  so standing still is a slow bleed rather than a safe hold, and colonizing is
+  what stops it. Two active strategies now beat the control, and `sprawl` —
+  which disperses one colony per sector — leads the field for the first time.
+
+* [ ] **`fan_out` and `frontier_map_stay_frosty` are still below the control.**
+  Both collapse by turn 4–5: they spend the early turns in transit, where
+  energy production is suppressed but consumption is not, and never recover
+  enough to colonize. Movement is priced entirely in foregone production, which
+  a fleet running an energy deficit cannot afford. Worth deciding whether
+  transit should be survivable before adding more reconnaissance strategies to
+  a field that punishes reconnaissance.

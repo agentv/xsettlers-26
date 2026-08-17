@@ -19,19 +19,18 @@ DEFAULT_STARTING_FILL = 0.3
 # so this is written straight over whatever home rolled (db/bootstrap.py) --
 # home is not expressed as a hotspot even though the map layer could carry it.
 #
-# 2200 is calibrated, not picked: eight ships stacked at home draw 96
-# energy/turn, and the same eight as colonies draw 144 (two energy pods each,
-# 6/turn, x1.5 for a colony). A fleet that colonizes in place on turn one and
-# never leaves therefore empties its home sector on turn 16 of a 20-turn game.
-# That is the intended shape -- a starting position deep enough to build from
-# and shallow enough that a player who never expands can watch it run out.
+# Eight ships stacked at home draw 64 energy/turn, and the same eight as
+# colonies draw 96 (two energy pods each, 4/turn, x1.5 for a colony). At 2200
+# a fleet that colonizes in place on turn one therefore does NOT empty its
+# home sector inside a 20-turn game -- it ends with roughly 376 left, and
+# would run dry around turn 24. Emptying it on turn 16 would take about 1500.
 #
-# Two things to know before moving it. Stored energy outlives the sector, so
-# production does not stall when the reading hits zero -- it stalls several
-# turns later when the stockpile empties, and that gap widens as the figure
-# rises. And energy scores 0 while produce_energy costs food, so a fleet
-# briefly scores FASTER once its sector dies; the pressure this constant
-# creates is a warning, not yet a penalty (see docs/TODO.md).
+# That gap is deliberate for now rather than an oversight, because the sector
+# stopped being the binding constraint when the pod rates changed: a fleet's
+# own stored energy floors at turn 15 whatever this is set to, since two
+# energy pods produce 8/turn (12 as a colony) while the org spends 13 on goods
+# production, food production and upkeep. Lowering this figure makes a player
+# poorer without making them leave any sooner. See docs/TODO.md.
 #
 # Per-scenario by design -- a survival variant is free to make home as poor as
 # anywhere else, and a longer game will want more.

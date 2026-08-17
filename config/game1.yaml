@@ -28,10 +28,11 @@ starting_fill: 0.3
 # (db/sectors.py rolls 400 + d6 x 100 -- 500 to 1000 -- for everywhere else,
 # scaled by the `map:` block below where one applies).
 #
-# Rich but finite, and calibrated: a fleet that colonizes in place on turn one
-# and never leaves empties this on turn 16 of a 20-turn game. Deep enough to
-# build from, shallow enough that never expanding is visibly a choice. See
-# config/loader.py's HOME_SECTOR_ENERGY for the arithmetic. Per-scenario by
+# Rich but finite. A fleet that colonizes in place on turn one draws 96
+# energy/turn, so this lasts it roughly 24 turns -- past the 20-turn horizon,
+# deliberately, because a fleet's own stored energy runs out well before its
+# ground does. See config/loader.py's HOME_SECTOR_ENERGY for the arithmetic
+# and why the sector is not currently the binding constraint. Per-scenario by
 # design -- a survival variant is free to make home as poor as anywhere else.
 # NOTE: this is the home sector, not the "sentinel sector" (id = -1), which
 # parks ships in transit and stays at 0.

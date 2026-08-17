@@ -130,8 +130,8 @@ def test_production_depletes_sector_capacity():
     sector = conn.execute("SELECT energy_capacity FROM sectors WHERE id=?", (sid,)).fetchone()
     pod_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()
     conn.close()
-    assert sector["energy_capacity"] == 44.0  # 50 - flat rate 6
-    assert pod_row["energy_stored"] == 6.0
+    assert sector["energy_capacity"] == 46.0  # 50 - flat rate 4
+    assert pod_row["energy_stored"] == 4.0
 
 def test_production_floors_at_zero_and_stops_once_depleted():
     pid = seed_player(); sid = seed_sector(energy=2.0)  # less than the flat rate (6)
@@ -188,8 +188,14 @@ def test_retasked_pods_energy_still_counts_toward_org_pool():
     energy_pod = seed_pod(oid, task="produce_energy", storage_current=100.0)
     set_pod_task("U_P1", energy_pod, "idle")  # retask away from produce_energy
     goods_pod = seed_pod(oid, storage_capacity=100.0, storage_current=0.0)
-    set_pod_task("U_P1", goods_pod, "produce_goods")  # needs 2 energy + 1 food
-    seed_pod(oid, task="produce_food", storage_current=100.0)
+    set_pod_task("U_P1", goods_pod, "produce_goods")  # needs 4 energy + 1 food
+    # Idled too, and for the same reason it is here at all: it banks the food
+    # the goods recipe needs. Left producing it would consume a goods per turn
+    # -- exactly what produce_goods makes -- and the org's goods would net to
+    # zero whether or not the recipe was ever paid, which is the thing under
+    # test.
+    food_pod = seed_pod(oid, task="produce_food", storage_current=100.0)
+    set_pod_task("U_P1", food_pod, "idle")
     end_of_turn()
     conn = get_connection()
     goods = conn.execute("SELECT goods_stored FROM pods WHERE id=?", (goods_pod,)).fetchone()["goods_stored"]
@@ -210,10 +216,10 @@ def test_production_overflow_spills_into_sibling_pod():
     conn.close()
     # Org upkeep (3 energy/turn) runs first and drains 3 from full_pod (the
     # only energy source), opening 3 units of free space there; production
-    # then makes 6 more, refills full_pod's freed units first (back to its
-    # 10 capacity), and the remaining 3 spills into empty_pod.
+    # then makes 4 more, refills full_pod's freed units first (back to its
+    # 10 capacity), and the remaining 1 spills into empty_pod.
     assert full_row["energy_stored"] == 10.0  # topped back up to its own capacity
-    assert empty_row["energy_stored"] == 3.0  # the rest spilled over here
+    assert empty_row["energy_stored"] == 1.0  # the rest spilled over here
 
 def test_production_overflow_lost_when_org_fully_saturated():
     """If every pod in the org is completely full, excess production is

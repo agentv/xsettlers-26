@@ -571,3 +571,51 @@ def test_a_lowered_threshold_lets_some_organizations_go_unnoticed(monkeypatch):
     n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
     conn.close()
     assert n == 0
+
+
+def test_a_look_that_finds_nothing_clears_what_you_believed_was_there():
+    """Intel is per sector and refreshed by looking. A rival that has moved on
+    must stop being reported the next time anyone checks -- otherwise a player's
+    map accumulates ghosts that only fog-of-war decay can ever remove."""
+    watcher, rival = _two_players()
+    home = seed_sector(0, 0, 0)
+    target = seed_sector(2, 0, 0)
+    watcher_ship = _fuelled_ship(watcher, home, "Watcher")
+    rival_ship = seed_ship(rival, target, name="Quarry")
+    _scan_east_from("U_WATCH", watcher_ship)
+
+    conn = get_connection()
+    assert conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"] == 1
+    # The rival departs; the aim persists, so next turn looks at the same sector.
+    conn.execute("UPDATE organizations SET sector_id=-1 WHERE id=?", (rival_ship,))
+    conn.commit(); conn.close()
+    end_of_turn()
+
+    conn = get_connection()
+    n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
+    conn.close()
+    assert n == 0
+
+
+def test_a_sighting_leaves_the_map_when_its_sector_blinks_out():
+    """Sightings age on the sector's own fog-of-war schedule rather than a
+    second timer -- at confidence 0 the sector is gone and takes what you knew
+    about its occupants with it."""
+    from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
+    watcher, rival = _two_players()
+    home = seed_sector(0, 0, 0)
+    target = seed_sector(2, 0, 0)
+    watcher_ship = _fuelled_ship(watcher, home, "Watcher")
+    seed_ship(rival, target, name="Quarry")
+    _scan_east_from("U_WATCH", watcher_ship)
+
+    def cells():
+        view = show_sector_neighborhood("U_WATCH", center_x=0, center_y=0, center_z=0)
+        return {(s["coord_x"], s["coord_y"]): s["cell"] for s in view["sectors"]}
+
+    assert cells().get((2, 0)) == "r"
+    conn = get_connection()
+    conn.execute("""UPDATE player_sectors SET confidence=0
+                    WHERE player_id=? AND sector_id=?""", (watcher, target))
+    conn.commit(); conn.close()
+    assert (2, 0) not in cells()      # blinked out, intel included

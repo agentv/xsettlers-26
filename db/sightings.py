@@ -1,11 +1,17 @@
 """
 What a player's scans have seen of other players' organizations.
 
-The counterpart to db/sectors.py's fog of war, and deliberately a separate
-one: `player_sectors` records knowledge of the ground, which stays true once
-learned, while an organization moves. So a sighting is a dated observation,
-never current intel, and every reader is expected to present it with the turn
-it was made.
+Intel is tracked per sector and ages with that sector: a sighting is only ever
+read through `player_sectors`, whose confidence decays on the ordinary fog-of-war
+schedule, so when a sector blinks out at confidence 0 what you knew about its
+occupants goes with it. There is no second expiry rule to keep in step with the
+first.
+
+Looking refreshes. Each scan replaces what the observer knew about that
+sector's occupants with what it just detected, so a rival that has moved on
+stops being reported the next time anyone looks. The turn of the last look is
+kept alongside, since a sector at confidence 40 says the intel is old without
+saying how old.
 """
 import os
 import random
@@ -47,17 +53,30 @@ def record_sightings(cur, observer_id: int, sector_id: int, current_turn: int) -
     Called from engine/turn.py's scan resolution, on the same cursor, so a
     sighting lands in the same transaction as the reveal that produced it.
 
+    A look is authoritative for the sector it looks at: whatever the observer
+    previously believed about this sector's occupants is cleared first, then
+    replaced by what was detected now. That is what makes an empty sector read
+    as empty rather than as whatever was standing there last time.
+
+    Note what that means once DETECTION_THRESHOLD drops below certainty: an
+    organization that survives its roll is one the observer genuinely did not
+    see, and their map showing nothing is the honest record of that. Missing
+    something is supposed to cost you, which is the whole point of rolling.
+
     Own organizations are skipped -- a player already knows where their own
     fleet is, and a self-sighting would show up as a rival marker on their own
     sector. Organizations in transit are skipped by construction: they sit at
     the sentinel sector (id -1), which is nobody's scan target.
 
-    Upserts on (observer, org), so re-sighting a ship moves its last-known
-    position rather than appending to a track.
+    Sightings key on (observer, org), so a ship detected somewhere new also
+    stops being reported where it used to be -- one last-known position each,
+    never two.
     """
     rows = cur.execute("""SELECT id, player_id, org_type FROM organizations
                           WHERE sector_id = ? AND player_id != ? ORDER BY id""",
                        (sector_id, observer_id)).fetchall()
+    cur.execute("DELETE FROM org_sightings WHERE observer_id=? AND sector_id=?",
+                (observer_id, sector_id))
     seen = []
     for row in rows:
         if not roll_detection():
@@ -80,9 +99,9 @@ def sightings_by_sector(cur, observer_id: int) -> dict:
     This observer's remembered sightings, grouped by the sector they were made
     in: {sector_id: {"count": n, "seen_at_turn": most recent}}.
 
-    Keyed on where the org was *seen*, not where it is now -- that is the whole
-    point of the table. A ship that has since moved on still shows at the
-    sector it was spotted in, dated, until a later scan finds it somewhere else.
+    Keyed on where the org was seen, which is the only thing the observer
+    actually knows. Callers read this through sectors they can still see, so a
+    sighting inherits that sector's confidence and leaves the map with it.
     """
     return {row["sector_id"]: {"count": row["n"], "seen_at_turn": row["seen"]}
             for row in cur.execute("""

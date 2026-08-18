@@ -164,3 +164,37 @@ def test_show_sector_neighborhood_rejects_unknown_player():
     assert show_sector_neighborhood("U_NOBODY", center_x=0, center_y=0, center_z=0) == \
         {"error": "Player not found"}
 
+
+
+def test_neighborhood_marks_a_remembered_sighting_apart_from_a_live_one():
+    """"R" claims a rival is there now and is only shown where you stand; "r"
+    claims a scan saw one there on some turn. Conflating them would let a
+    sector you looked at fifty turns ago report today's traffic."""
+    from db.sightings import record_sightings
+    from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
+    watcher = seed_player(email="w@t.com", player_token="U_W")
+    rival = seed_player(email="r@t.com", player_token="U_R")
+    here = seed_sector(0, 0, 0)
+    scanned = seed_sector(2, 0, 0)
+    seed_ship(watcher, here, name="Mine")
+    rival_here = seed_ship(rival, here, name="Contested")
+    rival_there = seed_ship(rival, scanned, name="Spotted")
+    seed_player_sector(watcher, here, confidence=100)
+    seed_player_sector(watcher, scanned, confidence=40)   # scanned a while back
+
+    conn = get_connection(); cur = conn.cursor()
+    record_sightings(cur, watcher, scanned, current_turn=3)
+    conn.commit(); conn.close()
+
+    result = show_sector_neighborhood("U_W", center_x=0, center_y=0, center_z=0)
+    cells = {(s["coord_x"], s["coord_y"]): s for s in result["sectors"]}
+
+    live = cells[(0, 0)]
+    assert live["rival_orgs"] == 1 and live["sighted_rivals"] == 0
+    assert live["cell"].endswith("!")           # rival alongside your own org
+
+    remembered = cells[(2, 0)]
+    assert remembered["rival_orgs"] == 0        # not reported live -- you aren't there
+    assert remembered["sighted_rivals"] == 1
+    assert remembered["sighted_at_turn"] == 3   # dated, so it reads as history
+    assert remembered["cell"] == "r"

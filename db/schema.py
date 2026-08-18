@@ -142,6 +142,32 @@ def init_schema():
             food_stored      REAL DEFAULT 0,
             goods_stored     REAL DEFAULT 0
         );
+        -- What a player's scans have seen of other players' organizations.
+        -- Distinct from player_sectors, which records knowledge of the GROUND:
+        -- a sector's richness is a fact that stays true once learned, while an
+        -- organization moves, so a sighting is a dated observation rather than
+        -- current intel and every reader must present it with its turn.
+        --
+        -- One row per (observer, org): re-sighting the same org updates where
+        -- and when it was last seen rather than accumulating history. The
+        -- engine has no use for the full track, and a player asking "where is
+        -- it now" is better served by "last seen at X on turn N" than by a
+        -- list they have to read the end of.
+        --
+        -- owner_id and org_type are denormalized deliberately. They are part
+        -- of what was observed, and joining organizations to recover them
+        -- would report today's truth about a ship the observer last saw ten
+        -- turns ago -- including, once combat exists, one that no longer
+        -- exists at all.
+        CREATE TABLE IF NOT EXISTS org_sightings (
+            observer_id  INTEGER NOT NULL REFERENCES players(id),
+            org_id       INTEGER NOT NULL REFERENCES organizations(id),
+            owner_id     INTEGER NOT NULL REFERENCES players(id),
+            sector_id    INTEGER NOT NULL REFERENCES sectors(id),
+            org_type     TEXT    NOT NULL,
+            seen_at_turn INTEGER NOT NULL,
+            PRIMARY KEY (observer_id, org_id)
+        );
         CREATE TABLE IF NOT EXISTS player_sectors (
             player_id  INTEGER REFERENCES players(id),
             sector_id  INTEGER REFERENCES sectors(id),

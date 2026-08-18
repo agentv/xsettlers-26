@@ -2,6 +2,7 @@ import collections, os, json, math
 from config.loader import load_config
 from db.connection import get_connection, read_one, read_value
 from db.sectors import reveal_sector, CONFIDENCE_DECAY_PER_TURN
+from db.sightings import record_sightings
 from db.events import record_event_direct
 from db.orgs import org_position
 from engine.ship_log import dispatch_due_commands
@@ -149,8 +150,20 @@ def _resolve_scan(cur, current_turn: int, org_id: int, player_id: int, origin,
     distance = math.sqrt(dx*dx + dy*dy + dz*dz)
     scan_range = get_scan_range(org_id)
     if distance <= scan_range:
-        reveal_sector(cur, player_id, tx, ty, tz)
-        # TODO: emit pod.scanned/org.scanned event; detect rivals
+        target_sector_id = reveal_sector(cur, player_id, tx, ty, tz)
+        # A scan reveals what is standing in the sector as well as what the
+        # sector holds, each org rolling its own detection check (see
+        # db/sightings.py). Recorded as a dated sighting rather than read live
+        # at display time: the observer looked once, on this turn, and a rival
+        # that moves away afterwards does not un-happen.
+        seen = record_sightings(cur, player_id, target_sector_id, current_turn)
+        if seen:
+            record_event_direct(cur, current_turn, "scan.contact",
+                actor_id=player_id, subject_id=subject_id, subject_type=subject_type,
+                payload={**payload_extra, "org_id": org_id,
+                         "target_x": tx, "target_y": ty, "target_z": tz,
+                         "detected": seen})
+        # TODO: emit pod.scanned/org.scanned event
         return
     record_event_direct(cur, current_turn, "alert.scan_out_of_range",
         actor_id=player_id, subject_id=subject_id, subject_type=subject_type,

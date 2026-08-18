@@ -424,3 +424,150 @@ def test_out_of_range_scan_still_pays_its_cost():
     # upkeep (5 food, 3 energy) + scan (1 food, 2 energy)
     assert before["food_stored"] - after["food_stored"] == 6.0
     assert before["energy_stored"] - after["energy_stored"] == 5.0
+
+
+# --- Detection: a scan reveals who is standing there, not just what is there ---
+
+def _two_players():
+    watcher = seed_player(email="watcher@t.com", player_token="U_WATCH")
+    rival = seed_player(email="rival@t.com", player_token="U_RIVAL")
+    return watcher, rival
+
+
+def _fuelled_ship(player_id, sector_id, name):
+    """A ship that can actually afford to look. Scanning costs 1 food + 2
+    energy a turn (POD_CONSUMPTION_RECIPE), and a starved org pays the cost
+    without revealing anything -- so a detection test on an empty ship would
+    pass or fail for the wrong reason."""
+    ship = seed_ship(player_id, sector_id, name=name)
+    seed_pod(ship, task="produce_energy", storage_current=100.0)
+    seed_pod(ship, task="produce_food", storage_current=100.0)
+    return ship
+
+
+def _scan_east_from(token, ship_id):
+    """Aim a ship's innate sensors two sectors east and resolve the turn."""
+    set_org_scan_bearing(token, ship_id, bearing="E2")
+    end_of_turn()
+
+
+def test_scan_records_a_sighting_of_a_rival_in_the_scanned_sector():
+    """The point of the whole mechanism: looking at a sector tells you who is
+    in it, not only what it holds."""
+    watcher, rival = _two_players()
+    home = seed_sector(0, 0, 0)
+    target = seed_sector(2, 0, 0)
+    watcher_ship = _fuelled_ship(watcher, home, "Watcher")
+    rival_ship = seed_ship(rival, target, name="Quarry")
+    _scan_east_from("U_WATCH", watcher_ship)
+
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM org_sightings WHERE observer_id=?",
+                        (watcher,)).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0]["org_id"] == rival_ship
+    assert rows[0]["owner_id"] == rival
+    assert rows[0]["sector_id"] == target
+    assert rows[0]["org_type"] == "ship"
+
+
+def test_a_scan_does_not_sight_your_own_organizations():
+    """A self-sighting would draw a rival marker on your own sector."""
+    watcher, _ = _two_players()
+    home = seed_sector(0, 0, 0)
+    target = seed_sector(2, 0, 0)
+    watcher_ship = _fuelled_ship(watcher, home, "Watcher")
+    seed_ship(watcher, target, name="Mine")
+    _scan_east_from("U_WATCH", watcher_ship)
+
+    conn = get_connection()
+    n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
+    conn.close()
+    assert n == 0
+
+
+def test_a_sighting_is_dated_and_survives_the_rival_moving_on():
+    """A sighting is an observation, not a tracker. The rival leaving does not
+    un-happen the look -- the record keeps saying where it was and when."""
+    watcher, rival = _two_players()
+    home = seed_sector(0, 0, 0)
+    target = seed_sector(2, 0, 0)
+    elsewhere = seed_sector(9, 9, 0)
+    watcher_ship = _fuelled_ship(watcher, home, "Watcher")
+    rival_ship = seed_ship(rival, target, name="Quarry")
+    _scan_east_from("U_WATCH", watcher_ship)
+
+    conn = get_connection()
+    seen_turn = conn.execute("SELECT seen_at_turn FROM org_sightings WHERE org_id=?",
+                             (rival_ship,)).fetchone()["seen_at_turn"]
+    conn.execute("UPDATE organizations SET sector_id=? WHERE id=?", (elsewhere, rival_ship))
+    conn.commit()
+    row = conn.execute("SELECT sector_id, seen_at_turn FROM org_sightings WHERE org_id=?",
+                       (rival_ship,)).fetchone()
+    conn.close()
+    assert row["sector_id"] == target        # where it was seen, not where it is
+    assert row["seen_at_turn"] == seen_turn
+
+
+def test_re_sighting_moves_the_record_rather_than_appending_to_it():
+    """One row per (observer, org): the engine has no use for a full track."""
+    watcher, rival = _two_players()
+    home = seed_sector(0, 0, 0)
+    target = seed_sector(2, 0, 0)
+    watcher_ship = _fuelled_ship(watcher, home, "Watcher")
+    rival_ship = seed_ship(rival, target, name="Quarry")
+    _scan_east_from("U_WATCH", watcher_ship)
+    end_of_turn()   # the aim persists, so it scans the same sector again
+
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM org_sightings WHERE org_id=?", (rival_ship,)).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0]["seen_at_turn"] >= 1     # updated to the later look
+
+
+def test_scan_contact_event_names_what_was_detected():
+    """Contact is worth an event -- it is the first thing in this game that one
+    player learns about another."""
+    watcher, rival = _two_players()
+    home = seed_sector(0, 0, 0)
+    target = seed_sector(2, 0, 0)
+    watcher_ship = _fuelled_ship(watcher, home, "Watcher")
+    rival_ship = seed_ship(rival, target, name="Quarry")
+    _scan_east_from("U_WATCH", watcher_ship)
+
+    conn = get_connection()
+    row = conn.execute("""SELECT payload FROM events WHERE event_type='scan.contact'
+                          AND actor_id=?""", (watcher,)).fetchone()
+    conn.close()
+    assert row is not None
+    payload = json.loads(row["payload"])
+    assert payload["target_x"] == 2 and payload["target_y"] == 0
+    assert [d["org_id"] for d in payload["detected"]] == [rival_ship]
+
+
+def test_detection_threshold_of_six_of_six_always_detects():
+    """The die is rolled even at certainty, so lowering the threshold later
+    changes the odds without changing when anything is rolled."""
+    from db.sightings import DETECTION_DIE_SIDES, DETECTION_THRESHOLD, roll_detection
+    assert (DETECTION_THRESHOLD, DETECTION_DIE_SIDES) == (6, 6)
+    assert all(roll_detection() for _ in range(500))
+
+
+def test_a_lowered_threshold_lets_some_organizations_go_unnoticed(monkeypatch):
+    """The knob the threshold exists to be. At 0 of 6 nothing is ever seen,
+    which proves the roll actually gates the record rather than decorating it."""
+    import db.sightings as sightings
+    monkeypatch.setattr(sightings, "DETECTION_THRESHOLD", 0)
+    watcher, rival = _two_players()
+    home = seed_sector(0, 0, 0)
+    target = seed_sector(2, 0, 0)
+    watcher_ship = _fuelled_ship(watcher, home, "Watcher")
+    seed_ship(rival, target, name="Quarry")
+    _scan_east_from("U_WATCH", watcher_ship)
+
+    conn = get_connection()
+    n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
+    conn.close()
+    assert n == 0

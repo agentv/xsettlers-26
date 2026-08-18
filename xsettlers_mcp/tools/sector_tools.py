@@ -1,6 +1,7 @@
 from xsettlers_mcp.tools.registry import mcp_tool
 from db.connection import get_connection
 from db.sectors import TURNS_TO_BLINK_OUT
+from db.sightings import sightings_by_sector
 from xsettlers_mcp.tools.session import player_tool
 
 # --- Neighborhood viewport ---------------------------------------------------
@@ -17,7 +18,8 @@ EMPTY_CELL = ""           # outside the scan radius; renders as a blank cell
 
 CELL_LEGEND = [
     "S3 = 3 of your ships    C = your colony    S3C = both",
-    "R = rival, no org of yours    S3! = rival alongside your orgs",
+    "R = rival there now    S3! = rival alongside your orgs",
+    "r = rival seen there by an earlier scan; turn last seen is in the table",
     f"{SEEN_CELL} = seen, nothing there    {UNKNOWN_CELL} = in range, never seen",
     "(blank) = outside range",
     f"Sectors blink out {TURNS_TO_BLINK_OUT} turns after they were last seen.",
@@ -25,10 +27,17 @@ CELL_LEGEND = [
 ]
 
 
-def _cell_marker(known: bool, ships: int, colonies: int, rivals: int) -> str:
+def _cell_marker(known: bool, ships: int, colonies: int, rivals: int,
+                 remembered: int = 0) -> str:
     """
     Render one grid cell in at most 3 characters: your own presence, else a
     rival's, else a bare SEEN_CELL.
+
+    Live rivals ("R") and remembered ones ("r") are different characters
+    because they are different claims. "R" means a rival is there now, and is
+    only ever shown for a sector you occupy. "r" means a scan saw one there on
+    some turn, which may be long past -- the turn itself is in the table, since
+    a grid cell has no room to date itself.
 
     Confidence deliberately does NOT appear on the grid. It's a reporting
     number, not a thing to steer by: with a flat decay a sector is either still
@@ -51,6 +60,8 @@ def _cell_marker(known: bool, ships: int, colonies: int, rivals: int) -> str:
         marker = "C" if colonies == 1 else (f"C{colonies}" if colonies < 100 else "C9+")
     elif rivals:
         return "R"
+    elif remembered:
+        return "r"
     else:
         return SEEN_CELL
     return marker[:2] + "!" if rivals else marker
@@ -134,12 +145,15 @@ def show_sector_neighborhood(
     `off_plane_count` rather than silently dropped, so the day z matters the
     view says so instead of quietly lying.
 
-    Rival presence is reported only for sectors at confidence 100 -- i.e. ones
-    you currently occupy. Rival positions are read live from `organizations`
-    (there is no sighting history in the schema; engine/turn.py's rival
-    detection is still a TODO), so surfacing them on a stale cell would hand
-    the player current intel about a sector they last looked at 50 turns ago.
-    Occupation already grants full current detail, so this is leak-free.
+    Rival presence comes from two sources that are never mixed. Sectors at
+    confidence 100 -- ones you currently occupy -- report rivals live from
+    `organizations`, because standing there means seeing what is there now.
+    Everywhere else reports remembered sightings from `org_sightings`, dated
+    with the turn the scan was made (see db/sightings.py).
+
+    Keeping them apart is what stops a stale cell from handing out current
+    intel: a sector you scanned fifty turns ago shows what was there then, and
+    says so, rather than quietly reporting who is there today.
     """
     if radius < 1 or radius > MAX_NEIGHBORHOOD_RADIUS:
         return {"error": f"radius must be between 1 and {MAX_NEIGHBORHOOD_RADIUS}"}
@@ -190,6 +204,9 @@ def show_sector_neighborhood(
         """SELECT sector_id, COUNT(*) AS n FROM organizations
            WHERE player_id != ? AND sector_id != -1 GROUP BY sector_id""", (player_id,)).fetchall()}
 
+    # Remembered sightings, for the sectors live occupancy does not cover.
+    remembered = sightings_by_sector(cur, player_id)
+
     cur.execute("SELECT current_turn FROM game_state WHERE id=1")
     turn_row = cur.fetchone()
     current_turn = turn_row["current_turn"] if turn_row else None
@@ -201,12 +218,18 @@ def show_sector_neighborhood(
         s["own_colonies"] = orgs.get("colony", 0)
         # See docstring: live rival positions are only honest where you're standing.
         s["rival_orgs"] = rivals.get(s["id"], 0) if s["confidence"] >= 100 else 0
+        # ...and a remembered sighting is only news where you are not, since
+        # occupying the sector already reports the live truth about it.
+        sighting = remembered.get(s["id"]) if s["confidence"] < 100 else None
+        s["sighted_rivals"] = sighting["count"] if sighting else 0
+        s["sighted_at_turn"] = sighting["seen_at_turn"] if sighting else None
         s["coords_display"] = f"({s['coord_x']},{s['coord_y']},{s['coord_z']})"
         # Energy only: it is the sole resource a sector yields (see
         # db/sectors.py). Food and goods are manufactured from stock already
         # held, never harvested from the map.
         s["resources_display"] = f"E{s['energy_capacity']:.0f}"
-        s["cell"] = _cell_marker(True, s["own_ships"], s["own_colonies"], s["rival_orgs"])
+        s["cell"] = _cell_marker(True, s["own_ships"], s["own_colonies"],
+                                 s["rival_orgs"], s["sighted_rivals"])
         s["in_plane"] = s["coord_z"] == cz
         if s["in_plane"]:
             by_coord[(s["coord_x"], s["coord_y"])] = s
@@ -228,7 +251,8 @@ def show_sector_neighborhood(
         rows.append({"label": str(y), "cells": cells})
 
     highlights = [s for s in sectors
-                  if s["own_ships"] or s["own_colonies"] or s["rival_orgs"]]
+                  if s["own_ships"] or s["own_colonies"] or s["rival_orgs"]
+                  or s["sighted_rivals"]]
     origin = label or f"({cx},{cy},{cz})"
     return {
         "center": {"x": cx, "y": cy, "z": cz},

@@ -1,0 +1,56 @@
+# Scout outward in all eight directions, scanning ahead the whole way.
+#
+# The first strategy written to find people rather than places. Every other
+# document in the library either never scans (turtle, homestead, sprawl) or
+# scans along fixed cardinals it was already travelling (fan_out,
+# frontier_map_stay_frosty) -- so nothing in the field has ever detected a
+# rival, and The Crowd returned zero contacts even after scan detection was
+# built. This is the control for that: same engine, same economy, a fleet that
+# looks.
+#
+# Eight directions rather than four, because two homes placed off-axis from
+# each other (as in The Crowd, where Red sits at x+5,y-5 from Blue) are on a
+# diagonal, and a fleet that only ever travels N/S/E/W walks past everyone.
+#
+# Deliberately not a winner. It never colonizes, so it runs the -5 energy/turn
+# ship deficit until it starves, and it will finish below turtle. What it
+# produces is contact, which is the thing being measured.
+name: survey
+description: Scout outward in all eight directions, scanning ahead every turn.
+loop: true
+steps:
+  # One direction per ship, keyed on fleet index so a ship keeps its heading
+  # for the whole game (see npc/strategy.py's params_for). Legs are 2 sectors;
+  # jump_range 3 covers the diagonal (2.83) in a single turn too, so every
+  # scout advances in step and none is a turn behind for a reason unrelated to
+  # the strategy.
+  - order:
+      ships: idle
+      action: move
+      params:
+        - {d_x: 0,  d_y: -2, d_z: 0, jump_range_per_turn: 3}   # N
+        - {d_x: 2,  d_y: -2, d_z: 0, jump_range_per_turn: 3}   # NE
+        - {d_x: 2,  d_y: 0,  d_z: 0, jump_range_per_turn: 3}   # E
+        - {d_x: 2,  d_y: 2,  d_z: 0, jump_range_per_turn: 3}   # SE
+        - {d_x: 0,  d_y: 2,  d_z: 0, jump_range_per_turn: 3}   # S
+        - {d_x: -2, d_y: 2,  d_z: 0, jump_range_per_turn: 3}   # SW
+        - {d_x: -2, d_y: 0,  d_z: 0, jump_range_per_turn: 3}   # W
+        - {d_x: -2, d_y: -2, d_z: 0, jump_range_per_turn: 3}   # NW
+  # Same ships, same headings, aimed the way they are going. Cardinals get the
+  # range-2 aim and diagonals only range 1 -- engine/bearings.py names no
+  # diagonal at range 2, because (2,-2) is 2.83 away and SCAN_RANGE is 2. So a
+  # diagonal scout sees one sector ahead and a cardinal scout two. That is the
+  # geometry, not an oversight: reach is Euclidean and diagonals cost more of
+  # it (see docs/TODO.md on the distance metric).
+  - order:
+      ships: idle
+      action: aim_scan
+      params:
+        - {bearing: N2}
+        - {bearing: NE}
+        - {bearing: E2}
+        - {bearing: SE}
+        - {bearing: S2}
+        - {bearing: SW}
+        - {bearing: W2}
+        - {bearing: NW}

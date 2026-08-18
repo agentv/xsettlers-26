@@ -151,11 +151,11 @@ def _resolve_scan(cur, current_turn: int, org_id: int, player_id: int, origin,
     scan_range = get_scan_range(org_id)
     if distance <= scan_range:
         target_sector_id = reveal_sector(cur, player_id, tx, ty, tz)
-        # A scan reveals what is standing in the sector as well as what the
-        # sector holds, each org rolling its own detection check (see
-        # db/sightings.py). Recorded as a dated sighting rather than read live
-        # at display time: the observer looked once, on this turn, and a rival
-        # that moves away afterwards does not un-happen.
+        # Order matters and is load-bearing: the sector is revealed first and
+        # unconditionally, so a scan NEVER misses what the ground holds. Only
+        # the organizations standing on it roll to be noticed (see
+        # db/sightings.py). Resources are terrain and terrain does not hide;
+        # a fleet does.
         seen = record_sightings(cur, player_id, target_sector_id, current_turn)
         if seen:
             record_event_direct(cur, current_turn, "scan.contact",

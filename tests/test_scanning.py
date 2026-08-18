@@ -619,3 +619,29 @@ def test_a_sighting_leaves_the_map_when_its_sector_blinks_out():
                     WHERE player_id=? AND sector_id=?""", (watcher, target))
     conn.commit(); conn.close()
     assert (2, 0) not in cells()      # blinked out, intel included
+
+
+def test_a_scan_never_misses_the_sector_itself_only_its_occupants(monkeypatch):
+    """The detection roll gates organizations and nothing else. Resources are
+    terrain: a scan that notices no one still comes back with what the ground
+    holds and still stamps the sector visible at full confidence."""
+    import db.sightings as sightings
+    monkeypatch.setattr(sightings, "DETECTION_THRESHOLD", 0)   # never notice anyone
+    watcher, rival = _two_players()
+    home = seed_sector(0, 0, 0)
+    watcher_ship = _fuelled_ship(watcher, home, "Watcher")
+    seed_ship(rival, seed_sector(2, 0, 0), name="Unseen")
+    _scan_east_from("U_WATCH", watcher_ship)
+
+    conn = get_connection()
+    row = conn.execute("""SELECT s.energy_capacity, ps.confidence
+        FROM sectors s JOIN player_sectors ps ON ps.sector_id = s.id
+        WHERE s.coord_x=2 AND s.coord_y=0 AND ps.player_id=?""", (watcher,)).fetchone()
+    sighted = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
+    conn.close()
+    assert row is not None                 # the sector came back
+    assert row["energy_capacity"] > 0      # with its resources
+    # Stamped 100 by the reveal, then decayed once by this same turn's
+    # fog-of-war pass, which runs after production (engine/turn.py step 6).
+    assert row["confidence"] == 100 - CONFIDENCE_DECAY_PER_TURN
+    assert sighted == 0                    # and nobody was noticed on it

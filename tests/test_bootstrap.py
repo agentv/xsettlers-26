@@ -280,3 +280,26 @@ def test_home_energy_is_the_scenarios_figure_not_a_hotspot_roll(tmp_path):
     ).fetchone()["e"]
     conn.close()
     assert energy == 2200
+
+
+def test_bootstrap_the_crowd_seats_blue_and_red_close_together():
+    """The Crowd's whole premise is the starting distance, so the coordinates
+    are the thing worth pinning -- a scenario that quietly drifted its homes
+    apart would still bootstrap fine and silently stop being the experiment it
+    exists to be."""
+    import math
+    _bootstrap(scenario_file="config/game_crowd.yaml", scenario_name="game_crowd")
+    conn = get_connection()
+    rows = conn.execute("""SELECT p.display_name, s.coord_x, s.coord_y, s.coord_z
+        FROM players p JOIN organizations o ON o.player_id = p.id
+        JOIN sectors s ON s.id = o.sector_id
+        GROUP BY p.id ORDER BY p.id""").fetchall()
+    ships = conn.execute("""SELECT COUNT(*) AS n FROM organizations
+                            WHERE org_type='ship'""").fetchone()["n"]
+    colonies = conn.execute("""SELECT COUNT(*) AS n FROM organizations
+                               WHERE org_type='colony'""").fetchone()["n"]
+    conn.close()
+    homes = {r["display_name"]: (r["coord_x"], r["coord_y"], r["coord_z"]) for r in rows}
+    assert homes == {"Blue": (15, 20, 0), "Red": (20, 15, 0)}
+    assert ships == 16 and colonies == 0      # both fleets mobile, nothing pinned
+    assert math.isclose(math.dist(homes["Blue"], homes["Red"]), math.sqrt(50))

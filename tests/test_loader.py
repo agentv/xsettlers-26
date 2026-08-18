@@ -61,7 +61,10 @@ def test_load_config_without_a_scenario_has_directory_but_no_seats():
     cfg = load_config()
     assert cfg.starting_configuration is None
     assert cfg.seats == []
-    assert {p.email for p in cfg.players} == {"vincent@example.com", "player2@example.com"}
+    # Superset, not equality: the directory is service-wide and gains an entry
+    # whenever a scenario needs a player it does not already have, so pinning
+    # its exact membership here would make adding a scenario fail this test.
+    assert {p.email for p in cfg.players} >= {"vincent@example.com", "player2@example.com"}
 
 def test_load_config_with_a_scenario_resolves_its_seats():
     cfg = load_config(scenario_override="config/game0.yaml")

@@ -61,3 +61,9 @@ game:
 players:
   - {email: "vincent@example.com", display_name: "Vincent", player_token: "REPLACE_WITH_GENERATED_TOKEN_1"}
   - {email: "player2@example.com", display_name: "Player Two", player_token: "REPLACE_WITH_GENERATED_TOKEN_2"}
+  # Added for config/game_crowd.yaml ("The Crowd"), which needs two players the
+  # directory did not have. Names are the scenario's colours rather than
+  # people's names -- the directory is identity, so a display_name here is what
+  # every other player sees, and "Blue"/"Red" is what that scenario is about.
+  - {email: "blue@example.com", display_name: "Blue", player_token: "REPLACE_WITH_GENERATED_TOKEN_3"}
+  - {email: "red@example.com", display_name: "Red", player_token: "REPLACE_WITH_GENERATED_TOKEN_4"}

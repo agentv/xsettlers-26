@@ -1,0 +1,56 @@
+# The Crowd -- two players starting close enough to plausibly meet.
+#
+# Every other scenario sets its home sectors far enough apart that contact is
+# not a question anyone has to answer. This one exists to ask it: Blue and Red
+# start about 7 sectors apart, roughly one scout hop plus a scan, near the
+# origin rather than out in their own quarters of the grid.
+#
+# What "discovery" currently requires is narrower than proximity. A scan
+# reveals a *sector*, not who is standing in it (engine/turn.py's _resolve_scan
+# carries the rival-detection TODO), and show_sector_neighborhood reports
+# rivals only for sectors at confidence 100 -- ones you currently occupy. So
+# two fleets discover each other only by ending a turn in the SAME sector,
+# never by looking at one. Starting close is what makes that reachable at all;
+# it does not make it happen.
+
+name: "The Crowd"
+description: >
+  Two fleets starting within a scout hop of each other, near the origin. No
+  starting colony -- both begin mobile, and whether they ever meet is up to
+  where they choose to go.
+
+# Blue and Red are directory entries added for this scenario (see
+# config/game_config.yaml). Homes are mirrored across the x=y diagonal so
+# neither player has a positional advantage: each is the same 7.07 sectors
+# from the other and the same distance from the origin.
+participants:
+  - {player: "blue@example.com", home_sector: [15, 20, 0]}
+  - {player: "red@example.com",  home_sector: [20, 15, 0]}
+
+ships_per_player: 8
+
+# Economy identical to Diaspora and Outbreak -- see config/game0.yaml for why
+# each of these values is what it is. This scenario varies starting position
+# and nothing else, which is what makes any difference in outcome attributable
+# to the crowding.
+starting_fill: 0.3
+home_sector_energy: 2200
+
+pods_per_ship:
+  - {task: produce_energy, count: 2, storage_capacity: 100.0}
+  - {task: produce_goods,  count: 2, storage_capacity: 100.0}
+  - {task: produce_food,   count: 2, storage_capacity: 100.0}
+
+# No starting colony: all 16 organizations begin mobile, which is the state
+# most likely to produce contact. A scenario asking whether fleets meet should
+# not begin by pinning half of each fleet down.
+home_colony: false
+
+# No `map:` block -- open space everywhere, every sector rolling the ordinary
+# 500-1000. Deliberate for a first run: with richness flat, wherever the fleets
+# go is a property of their strategies, not of a hotspot pulling them both
+# toward the same coordinates. A hotspot placed between the two homes is the
+# obvious follow-up experiment once the baseline is known.
+
+lobby:
+  wait_window_seconds: 120

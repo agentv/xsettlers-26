@@ -473,10 +473,18 @@ on Diaspora, at the current pod rates:
   what stops it. Two active strategies now beat the control, and `sprawl` —
   which disperses one colony per sector — leads the field for the first time.
 
-* [ ] **`fan_out` and `frontier_map_stay_frosty` are still below the control.**
-  Both collapse by turn 4–5: they spend the early turns in transit, where
+* [ ] **Scoring and seeing are mutually exclusive, and seeing loses.**
+  `fan_out`, `frontier_map_stay_frosty` and `survey` all sit below the control.
+  Each collapses by turn 4–5: they spend the early turns in transit, where
   energy production is suppressed but consumption is not, and never recover
   enough to colonize. Movement is priced entirely in foregone production, which
-  a fleet running an energy deficit cannot afford. Worth deciding whether
-  transit should be survivable before adding more reconnaissance strategies to
-  a field that punishes reconnaissance.
+  a fleet running an energy deficit cannot afford.
+
+  `survey` makes the shape of it plain. It reveals **80 sectors** and detects
+  every ship of a homesteading rival by turn 3, and finishes at 1475 — below
+  `turtle` (1536), which reveals **one** sector and never learns anyone else
+  exists. Meanwhile `sprawl` wins the field at 2648 having scanned nothing at
+  all. Nothing currently lets a player both look and score, so contact is a
+  hobby rather than a strategy, and detection has no consumer that benefits
+  from it. Decide whether transit should be survivable before adding more
+  reconnaissance strategies to a field that punishes reconnaissance.

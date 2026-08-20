@@ -394,11 +394,14 @@ CELL_WIDTH = 5
 # question a resource map is opened to answer.
 RICHEST_ROWS = 10
 
+# One line per thing a reader has to decode, and nothing a reader can see for
+# themselves. The unit line carries its own example because the example is what
+# makes it land -- a cell reading "2.20" states the unit and the magnitude in
+# the space a sentence about energy would have taken.
 RESOURCE_LEGEND = [
-    "Each cell is that sector's energy capacity -- the only resource the map itself yields.",
-    "Figures are thousands of energy: 2.20 = 2,200, 0.90 = 900.",
+    "Energy x 1k: 2.20 = 2,200, 0.90 = 900.",
     f"2.20{CENTER_MARK} = the sector this view is centered on",
-    f"{UNKNOWN_CELL} = in range, never seen    (blank) = outside range",
+    f"{UNKNOWN_CELL} = in range, never seen",
     f"Sectors blink out {TURNS_TO_BLINK_OUT} turns after they were last seen, "
     "taking their reading with them.",
     f"The table below lists the {RICHEST_ROWS} richest sectors you can currently see.",

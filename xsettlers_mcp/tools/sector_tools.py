@@ -2,6 +2,8 @@ from xsettlers_mcp.tools.registry import mcp_tool
 from db.connection import get_connection
 from db.sectors import TURNS_TO_BLINK_OUT
 from db.sightings import sightings_by_sector
+from engine.turn import get_next_tick_at, TURN_LIMIT
+from views.format import turn_header
 from xsettlers_mcp.tools.session import player_tool
 
 # --- Neighborhood viewport ---------------------------------------------------
@@ -210,6 +212,7 @@ def show_sector_neighborhood(
     cur.execute("SELECT current_turn FROM game_state WHERE id=1")
     turn_row = cur.fetchone()
     current_turn = turn_row["current_turn"] if turn_row else None
+    next_tick_at = get_next_tick_at()
 
     by_coord = {}
     for s in sectors:
@@ -239,7 +242,7 @@ def show_sector_neighborhood(
         # because your own orgs are.
         rival_count = s["rival_orgs"] + s["sighted_rivals"]
         s["rivals_display"] = (f"{rival_count}/{s['confidence']}"
-                               if rival_count else "0/na")
+                               if rival_count else "0/NA")
         # Energy only: it is the sole resource a sector yields (see
         # db/sectors.py). Food and goods are manufactured from stock already
         # held, never harvested from the map.
@@ -281,8 +284,12 @@ def show_sector_neighborhood(
         "off_plane_count": sum(1 for s in sectors if not s["in_plane"]),
         "display": {
             "kind": "map",
+            # Same turn-and-countdown line the status reports open with, from
+            # the one helper, so a player reading two reports side by side
+            # cannot be told two different things about the clock.
             "header": f"Neighborhood of {origin}"
-                      + (f", turn {current_turn}" if current_turn is not None else ""),
+                      + (f" — {turn_header(current_turn, TURN_LIMIT, next_tick_at)}"
+                         if current_turn is not None else ""),
             "grid": {"corner": "y/x", "x_labels": [str(x) for x in x_range], "rows": rows},
             "legend": CELL_LEGEND,
             "rows_key": "highlights",

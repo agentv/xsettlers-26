@@ -188,6 +188,14 @@ def test_render_map_draws_a_grid_with_absolute_axis_labels():
     assert "| **25** |" in text                            # y down the side
     assert "S1" in text
 
+def test_render_map_header_carries_turn_and_countdown():
+    """The map opens with the same turn line the status reports do, so two
+    reports read side by side cannot disagree about the clock."""
+    text = render_map(_neighborhood())
+    assert text.splitlines()[0].startswith("**Neighborhood of ")
+    assert " — Turn 0 of " in text.splitlines()[0]
+    assert "(--:--)**" in text.splitlines()[0]   # no clock running under test
+
 def test_render_map_highlights_table_headers_are_title_case():
     """The highlights table follows the same header convention as the three
     status reports -- every column labelled, no raw field names."""

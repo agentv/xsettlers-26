@@ -222,7 +222,7 @@ def test_a_remembered_rival_is_counted_in_the_highlights_table():
     highlights = {h["coords_display"]: h for h in result["highlights"]}
     assert highlights["(2,0,0)"]["rivals_display"] == "1/40"
     # No rival to age, so the confidence has nothing to qualify.
-    assert highlights["(0,0,0)"]["rivals_display"] == "0/na"
+    assert highlights["(0,0,0)"]["rivals_display"] == "0/NA"
 
 def test_a_live_rival_is_counted_in_the_highlights_table():
     """The same column carries a live rival, distinguishable only by the

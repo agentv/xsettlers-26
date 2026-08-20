@@ -188,6 +188,15 @@ def test_render_map_draws_a_grid_with_absolute_axis_labels():
     assert "| **25** |" in text                            # y down the side
     assert "S1" in text
 
+def test_render_map_highlights_table_headers_are_title_case():
+    """The highlights table follows the same header convention as the three
+    status reports -- every column labelled, no raw field names."""
+    text = render_map(_neighborhood())
+    header_line = next(l for l in text.splitlines() if l.startswith("| Coords |"))
+    assert header_line == "| Coords | Ships | Colonies | Rivals/Confidence |"
+    assert "coords_display" not in text
+    assert "own_ships" not in text
+
 def test_render_map_includes_the_legend_so_cells_are_decodable():
     text = render_map(_neighborhood())
     assert "S3 = 3 of your ships" in text

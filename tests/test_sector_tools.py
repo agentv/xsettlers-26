@@ -198,3 +198,42 @@ def test_neighborhood_marks_a_remembered_sighting_apart_from_a_live_one():
     assert remembered["sighted_rivals"] == 1
     assert remembered["sighted_at_turn"] == 3   # dated, so it reads as history
     assert remembered["cell"] == "r"
+
+def test_a_remembered_rival_is_counted_in_the_highlights_table():
+    """An "r" on the grid has to have a row under it: the count merges live
+    and remembered rivals, and the confidence beside it is what says which
+    kind it is. The row stands until the sector blinks out at confidence 0."""
+    from db.sightings import record_sightings
+    from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
+    watcher = seed_player(email="w@t.com", player_token="U_W")
+    rival = seed_player(email="r@t.com", player_token="U_R")
+    here = seed_sector(0, 0, 0)
+    scanned = seed_sector(2, 0, 0)
+    seed_ship(watcher, here, name="Mine")
+    seed_ship(rival, scanned, name="Spotted")
+    seed_player_sector(watcher, here, confidence=100)
+    seed_player_sector(watcher, scanned, confidence=40)
+
+    conn = get_connection(); cur = conn.cursor()
+    record_sightings(cur, watcher, scanned, current_turn=3)
+    conn.commit(); conn.close()
+
+    result = show_sector_neighborhood("U_W", center_x=0, center_y=0, center_z=0)
+    highlights = {h["coords_display"]: h for h in result["highlights"]}
+    assert highlights["(2,0,0)"]["rivals_display"] == "1/40"
+    # No rival to age, so the confidence has nothing to qualify.
+    assert highlights["(0,0,0)"]["rivals_display"] == "0/na"
+
+def test_a_live_rival_is_counted_in_the_highlights_table():
+    """The same column carries a live rival, distinguishable only by the
+    confidence of 100 beside it."""
+    from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
+    watcher = seed_player(email="w@t.com", player_token="U_W")
+    rival = seed_player(email="r@t.com", player_token="U_R")
+    here = seed_sector(0, 0, 0)
+    seed_ship(watcher, here, name="Mine")
+    seed_ship(rival, here, name="Contested")
+    seed_player_sector(watcher, here, confidence=100)
+
+    result = show_sector_neighborhood("U_W", center_x=0, center_y=0, center_z=0)
+    assert result["highlights"][0]["rivals_display"] == "1/100"

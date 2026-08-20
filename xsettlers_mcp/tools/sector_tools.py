@@ -19,11 +19,11 @@ EMPTY_CELL = ""           # outside the scan radius; renders as a blank cell
 CELL_LEGEND = [
     "S3 = 3 of your ships    C = your colony    S3C = both",
     "R = rival there now    S3! = rival alongside your orgs",
-    "r = rival seen there by an earlier scan; turn last seen is in the table",
+    "r = rival seen there by an earlier scan, not necessarily still there",
     f"{SEEN_CELL} = seen, nothing there    {UNKNOWN_CELL} = in range, never seen",
     "(blank) = outside range",
     f"Sectors blink out {TURNS_TO_BLINK_OUT} turns after they were last seen.",
-    "Confidence and resources per marked sector are in the table below.",
+    "Rivals and confidence per marked sector are in the table below.",
 ]
 
 
@@ -224,6 +224,22 @@ def show_sector_neighborhood(
         s["sighted_rivals"] = sighting["count"] if sighting else 0
         s["sighted_at_turn"] = sighting["seen_at_turn"] if sighting else None
         s["coords_display"] = f"({s['coord_x']},{s['coord_y']},{s['coord_z']})"
+        # Rivals and confidence share a cell because neither means much alone.
+        # The two sources are mutually exclusive by construction -- live
+        # counts only at confidence 100, remembered ones only below it -- so
+        # summing them is safe, and the confidence beside the number is what
+        # says which kind it is: 100 means a rival is there now, anything less
+        # means a scan saw one and the sector has been ageing since. A
+        # remembered rival keeps its row until the sector blinks out, which
+        # the confidence > 0 filter on the query above already guarantees.
+        #
+        # With no rival to age, the confidence has nothing to qualify and
+        # reads "na" rather than a number -- a bare 100 next to a zero invites
+        # being read as certainty about something, when the row is only there
+        # because your own orgs are.
+        rival_count = s["rival_orgs"] + s["sighted_rivals"]
+        s["rivals_display"] = (f"{rival_count}/{s['confidence']}"
+                               if rival_count else "0/na")
         # Energy only: it is the sole resource a sector yields (see
         # db/sectors.py). Food and goods are manufactured from stock already
         # held, never harvested from the map.
@@ -270,7 +286,13 @@ def show_sector_neighborhood(
             "grid": {"corner": "y/x", "x_labels": [str(x) for x in x_range], "rows": rows},
             "legend": CELL_LEGEND,
             "rows_key": "highlights",
-            "columns": ["coords_display", "own_ships", "own_colonies", "rival_orgs",
-                        "confidence", "resources_display"],
+            # No resources column: this report is about who is where. What a
+            # sector holds stays on every `sectors` row for a client that
+            # wants it.
+            "columns": ["coords_display", "own_ships", "own_colonies",
+                        "rivals_display"],
+            "column_labels": {"coords_display": "Coords", "own_ships": "Ships",
+                              "own_colonies": "Colonies",
+                              "rivals_display": "Rivals/Confidence"},
         },
     }

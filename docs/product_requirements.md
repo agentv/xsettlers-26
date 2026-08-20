@@ -269,6 +269,18 @@ Cell markers are at most 3 characters (see [UI & Rendering Design](ui_and_render
 
 **Rival presence is reported only for sectors at confidence 100** — ones the player currently occupies. Rival positions are read live from `organizations` (there is no sighting history in the schema), so surfacing them on a decayed cell would hand the player current intelligence about a sector they last looked at many turns ago. Occupation already grants full current detail, so this restriction is leak-free.
 
+### Show Neighborhood Resources (`show_neighborhood_resources`)
+
+The companion to `show_sector_neighborhood` over exactly the same viewport — same center rules (an `org_id` or an explicit coordinate triple, never a ship in transit), same default radius 4 and max 10, same fog of war, same single drawn z-plane with off-plane sectors counted rather than dropped. Both draw their lattice through shared helpers in `sector_tools.py`, so the two reports cannot come to disagree about which sectors count as "nearby".
+
+What differs is the question a cell answers. There: who is standing in the sector. Here: what the sector is worth. A known cell reads as its energy capacity, `·` means in range and never seen, blank means out of range, and the sector the view is centered on is bracketed (`[2200]`) — a grid of bare numbers has no other anchor for finding yourself.
+
+**Energy is the whole map** because energy is the only resource a sector yields; food and goods are manufactured from stock already held, never harvested. When a sector grows a second yield, the cell gains a slot rather than the suite gaining a report.
+
+A figure is only as current as the sector it came from: energy capacity never changes on its own, but the player's knowledge of it ages, and a sector that blinks out at confidence 0 takes its reading off the map with it — hence `confidence` beside the figure in the detail rows. Those rows are a shortlist, not a repeat of the grid: the 10 richest sectors in view, ranked, ties broken on coordinates so the same board always ranks the same way.
+
+Also a **pure view** — reveals nothing, costs nothing, changes no confidence.
+
 ### Show Game Status (`show_game_status`)
 
 Returns a player-scoped summary of the current game state. Includes:

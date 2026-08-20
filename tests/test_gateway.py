@@ -92,6 +92,7 @@ def test_every_player_facing_tool_rejects_an_unknown_token():
         lambda: sector_tools.get_sector(S, 1),
         lambda: sector_tools.get_sector_map(S),
         lambda: sector_tools.show_sector_neighborhood(S, org_id=1),
+        lambda: sector_tools.show_neighborhood_resources(S, org_id=1),
         lambda: navigation_tools.preview_move(S, 1, 1, 1, 0),
         lambda: navigation_tools.confirm_move(S, 1, 1, 1, 0),
         lambda: navigation_tools.cancel_move(S, 1),

@@ -69,6 +69,105 @@ def _cell_marker(known: bool, ships: int, colonies: int, rivals: int,
     return marker[:2] + "!" if rivals else marker
 
 
+# --- Shared viewport mechanics -----------------------------------------------
+# Both neighborhood reports -- who is where, and what the ground holds -- draw
+# the same lattice around the same center at the same radius. Resolving a
+# center, deciding which sectors are in range, and laying cells out as rows
+# happen here once, so the two maps cannot come to disagree about what "the
+# neighborhood" is. What differs between them is only what a cell says, which
+# each report builds itself.
+
+def _resolve_center(sess, org_id, center_x, center_y, center_z) -> dict:
+    """
+    Where a viewport is centered: {"x", "y", "z", "label"}, or {"error": ...}.
+
+    Either an org's current sector -- the normal way to call a neighborhood
+    report, "show me what's around this ship" -- or explicit coordinates. A
+    ship in transit (sector_id = -1) has no location and is not a valid
+    center. `label` is what the report header names the place: the org's name
+    when there is one, else the coordinates.
+    """
+    if org_id is not None:
+        origin = sess.own_org(org_id, columns="name, sector_id")
+        origin_sector = sess.cur.execute("""SELECT coord_x, coord_y, coord_z FROM sectors
+            WHERE id=?""", (origin["sector_id"],)).fetchone() if origin else None
+        if not origin or origin["sector_id"] == -1 or not origin_sector:
+            return {"error": "Organization not found, not owned by player, or currently in transit"}
+        return {"x": origin_sector["coord_x"], "y": origin_sector["coord_y"],
+                "z": origin_sector["coord_z"], "label": origin["name"]}
+    if None not in (center_x, center_y, center_z):
+        return {"x": center_x, "y": center_y, "z": center_z,
+                "label": f"({center_x},{center_y},{center_z})"}
+    return {"error": "Must supply either org_id or (center_x, center_y, center_z)"}
+
+
+def _sectors_in_range(cur, player_id: int, cx: int, cy: int, cz: int,
+                      radius: int) -> list:
+    """
+    Every sector the player can currently see (confidence > 0) within `radius`
+    of the center, ordered by confidence.
+
+    Distance is 3D, so a known sector off the drawn z-plane is in range and is
+    returned -- a report draws one plane but must not pretend the rest of the
+    lattice isn't there. Reads only: no reveal_sector(), no confidence change.
+    """
+    cur.execute("""
+        SELECT s.id, s.coord_x, s.coord_y, s.coord_z,
+               s.energy_capacity, ps.confidence
+        FROM sectors s
+        JOIN player_sectors ps ON ps.sector_id = s.id
+        WHERE ps.player_id = ? AND ps.confidence > 0
+          AND s.id != -1
+          AND (
+            (s.coord_x - ?) * (s.coord_x - ?) +
+            (s.coord_y - ?) * (s.coord_y - ?) +
+            (s.coord_z - ?) * (s.coord_z - ?)
+          ) <= ?
+        ORDER BY ps.confidence DESC""",
+        (player_id, cx, cx, cy, cy, cz, cz, radius ** 2))
+    return [dict(r) for r in cur.fetchall()]
+
+
+def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict) -> tuple:
+    """
+    Lay the viewport out as grid rows, and count the cells in range nobody has
+    ever seen.
+
+    `by_coord` maps (x, y) to an in-plane sector carrying the "cell" string its
+    report built for it. A cell in range with no sector reads UNKNOWN_CELL --
+    that count is the scan-me list, and it is returned alongside because it is
+    the most actionable number on either map. Out of range renders blank
+    rather than unknown: the two are different claims.
+
+    Axis labels are absolute coordinates so anything read off the map can go
+    straight into preview_move or set_pod_scan_bearing without arithmetic.
+    """
+    x_labels = list(range(cx - radius, cx + radius + 1))
+    r2 = radius ** 2
+    rows, unknown_in_range = [], 0
+    for y in range(cy - radius, cy + radius + 1):
+        cells = []
+        for x in x_labels:
+            if (x - cx) ** 2 + (y - cy) ** 2 > r2:
+                cells.append(EMPTY_CELL)
+                continue
+            known = by_coord.get((x, y))
+            if known:
+                cells.append(known["cell"])
+            else:
+                cells.append(UNKNOWN_CELL)
+                unknown_in_range += 1
+        rows.append({"label": str(y), "cells": cells})
+    grid = {"corner": "y/x", "x_labels": [str(x) for x in x_labels], "rows": rows}
+    return grid, unknown_in_range
+
+
+def _turn_context(cur) -> tuple:
+    """(current_turn, next_tick_at) for a report header. current_turn is None
+    before a game exists, which is the one case a report must not crash on."""
+    turn_row = cur.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()
+    return (turn_row["current_turn"] if turn_row else None), get_next_tick_at()
+
 # Scanning is not a player-callable action: the engine resolves it at end of
 # turn for every org sensor and every pod on the `scan` task with a valid
 # target. Range and the compass live in engine/bearings.py; see engine/turn.py
@@ -105,7 +204,8 @@ def get_sector_map(sess) -> list:
     "view/visualize the neighborhood). Center is either an org_id -- the "
     "normal way to call it -- or explicit (center_x, center_y, center_z) "
     "coordinates; a ship in transit has no location and can't be a center. "
-    "Default radius 5 (an 11x11 grid), max 10. Returns the complete "
+    f"Default radius {NEIGHBORHOOD_RADIUS} (a 9x9 grid), max "
+    f"{MAX_NEIGHBORHOOD_RADIUS}. Returns the complete "
     "lattice, not just known sectors: display.grid holds a ready-to-draw "
     "grid with absolute coordinates on both axes and one <=3-character "
     "marker per cell (your orgs, rival presence, '*' for seen-and-empty, "
@@ -162,36 +262,11 @@ def show_sector_neighborhood(
     cur = sess.cur
     player_id = sess.player_id
 
-    label = None
-    if org_id is not None:
-        origin = sess.own_org(org_id, columns="name, sector_id")
-        origin_sector = cur.execute("""SELECT coord_x, coord_y, coord_z FROM sectors
-            WHERE id=?""", (origin["sector_id"],)).fetchone() if origin else None
-        if not origin or origin["sector_id"] == -1 or not origin_sector:
-            return {"error": "Organization not found, not owned by player, or currently in transit"}
-        cx, cy, cz = origin_sector["coord_x"], origin_sector["coord_y"], origin_sector["coord_z"]
-        label = origin["name"]
-    elif None not in (center_x, center_y, center_z):
-        cx, cy, cz = center_x, center_y, center_z
-    else:
-        return {"error": "Must supply either org_id or (center_x, center_y, center_z)"}
-
-    r2 = radius ** 2
-    cur.execute("""
-        SELECT s.id, s.coord_x, s.coord_y, s.coord_z,
-               s.energy_capacity, ps.confidence
-        FROM sectors s
-        JOIN player_sectors ps ON ps.sector_id = s.id
-        WHERE ps.player_id = ? AND ps.confidence > 0
-          AND s.id != -1
-          AND (
-            (s.coord_x - ?) * (s.coord_x - ?) +
-            (s.coord_y - ?) * (s.coord_y - ?) +
-            (s.coord_z - ?) * (s.coord_z - ?)
-          ) <= ?
-        ORDER BY ps.confidence DESC""",
-        (player_id, cx, cx, cy, cy, cz, cz, r2))
-    sectors = [dict(r) for r in cur.fetchall()]
+    center = _resolve_center(sess, org_id, center_x, center_y, center_z)
+    if "error" in center:
+        return center
+    cx, cy, cz = center["x"], center["y"], center["z"]
+    sectors = _sectors_in_range(cur, player_id, cx, cy, cz, radius)
 
     # Org overlays, keyed by sector. Both queries cover the whole board rather
     # than just the viewport -- a player's org count is small, and filtering by
@@ -209,10 +284,7 @@ def show_sector_neighborhood(
     # Remembered sightings, for the sectors live occupancy does not cover.
     remembered = sightings_by_sector(cur, player_id)
 
-    cur.execute("SELECT current_turn FROM game_state WHERE id=1")
-    turn_row = cur.fetchone()
-    current_turn = turn_row["current_turn"] if turn_row else None
-    next_tick_at = get_next_tick_at()
+    current_turn, next_tick_at = _turn_context(cur)
 
     by_coord = {}
     for s in sectors:
@@ -253,26 +325,12 @@ def show_sector_neighborhood(
         if s["in_plane"]:
             by_coord[(s["coord_x"], s["coord_y"])] = s
 
-    x_range = list(range(cx - radius, cx + radius + 1))
-    rows, unknown_in_range = [], 0
-    for y in range(cy - radius, cy + radius + 1):
-        cells = []
-        for x in x_range:
-            if (x - cx) ** 2 + (y - cy) ** 2 > r2:
-                cells.append(EMPTY_CELL)
-                continue
-            known = by_coord.get((x, y))
-            if known:
-                cells.append(known["cell"])
-            else:
-                cells.append(UNKNOWN_CELL)
-                unknown_in_range += 1
-        rows.append({"label": str(y), "cells": cells})
+    grid, unknown_in_range = _draw_grid(cx, cy, radius, by_coord)
 
     highlights = [s for s in sectors
                   if s["own_ships"] or s["own_colonies"] or s["rival_orgs"]
                   or s["sighted_rivals"]]
-    origin = label or f"({cx},{cy},{cz})"
+    origin = center["label"]
     return {
         "center": {"x": cx, "y": cy, "z": cz},
         "radius": radius,
@@ -290,7 +348,7 @@ def show_sector_neighborhood(
             "header": f"Neighborhood of {origin}"
                       + (f" — {turn_header(current_turn, TURN_LIMIT, next_tick_at)}"
                          if current_turn is not None else ""),
-            "grid": {"corner": "y/x", "x_labels": [str(x) for x in x_range], "rows": rows},
+            "grid": grid,
             "legend": CELL_LEGEND,
             "rows_key": "highlights",
             # No resources column: this report is about who is where. What a
@@ -301,5 +359,151 @@ def show_sector_neighborhood(
             "column_labels": {"coords_display": "Coords", "own_ships": "Ships",
                               "own_colonies": "Colonies",
                               "rivals_display": "Rivals/Confidence"},
+        },
+    }
+
+
+# --- Resource map ------------------------------------------------------------
+# The same viewport, asked a different question: not who is standing where,
+# but what the ground under them is worth.
+#
+# Energy is the whole map because energy is the only thing a sector yields
+# (see db/sectors.py) -- food and goods are manufactured from stock already
+# held, never harvested. When a sector grows a second yield this report gains
+# a slot per cell rather than a second report.
+CENTER_MARK = ("[", "]")     # brackets the cell you are centered on
+
+# The grid already carries every figure, so the table below it is a shortlist,
+# not a repeat: the richest sectors you can currently see, which is the
+# question a resource map is opened to answer.
+RICHEST_ROWS = 10
+
+RESOURCE_LEGEND = [
+    "Each cell is that sector's energy capacity -- the only resource the map itself yields.",
+    f"{CENTER_MARK[0]}700{CENTER_MARK[1]} = the sector this view is centered on",
+    f"{UNKNOWN_CELL} = in range, never seen    (blank) = outside range",
+    f"Sectors blink out {TURNS_TO_BLINK_OUT} turns after they were last seen, "
+    "taking their reading with them.",
+    f"The table below lists the {RICHEST_ROWS} richest sectors you can currently see.",
+]
+
+
+def _energy_cell(energy: float, is_center: bool) -> str:
+    """One grid cell: a sector's energy capacity as a whole number, bracketed
+    when it is the sector the view is centered on.
+
+    Nothing in the game yields a fraction of a resource, so a decimal point is
+    noise in a cell this narrow. The center is marked because this map has no
+    other anchor -- the who-is-where map shows your own ships, and a reader of
+    a grid of bare numbers would otherwise have to count axis labels to find
+    where they are standing."""
+    figure = f"{energy:.0f}"
+    return f"{CENTER_MARK[0]}{figure}{CENTER_MARK[1]}" if is_center else figure
+
+
+@mcp_tool(
+    "Map the resources in the local neighborhood (aka local neighborhood "
+    "resources / resource map / what's nearby worth taking). Same center and "
+    "range as show_sector_neighborhood -- an org_id, the normal way to call "
+    "it, or explicit (center_x, center_y, center_z); a ship in transit has "
+    f"no location and can't be a center; default radius {NEIGHBORHOOD_RADIUS} "
+    f"(a 9x9 grid), max {MAX_NEIGHBORHOOD_RADIUS} -- but every cell holds "
+    "what a sector is worth rather than who is standing in it. Energy is the "
+    "only resource the map yields, so a known sector reads as its energy "
+    "capacity, '·' means in range and never seen, and blank means out of "
+    "range; display.grid is ready to draw and display.rows_key names the "
+    "richest sectors in view. Pure view -- reveals nothing, costs nothing, "
+    "changes no confidence.")
+@player_tool
+def show_neighborhood_resources(
+        sess,
+        org_id: int = None,
+        center_x: int = None, center_y: int = None, center_z: int = None,
+        radius: int = NEIGHBORHOOD_RADIUS) -> dict:
+    """
+    Render what the neighborhood around a center point is worth, as a
+    ready-to-draw grid plus the underlying sector data.
+
+    The companion to show_sector_neighborhood, over exactly the same viewport:
+    same center rules (an org's sector or explicit coordinates, never a ship
+    in transit), same radius, same fog of war, same single z-plane with
+    off-plane sectors counted rather than dropped. Both draw their lattice
+    through the shared helpers above, so the two reports cannot come to
+    disagree about which sectors are "nearby". What differs is the question a
+    cell answers: there, who is standing in the sector; here, what the sector
+    holds.
+
+    Only energy today, because a sector yields nothing else -- food and goods
+    are manufactured from stock a player already holds, never harvested from
+    the map (see db/sectors.py). A cell is therefore a single figure rather
+    than a slashed run; the day a sector has a second yield, the cell gains a
+    slot and this report keeps its name.
+
+    A figure is only as current as the sector it came from. Energy capacity
+    doesn't change on its own, but your knowledge of it ages: a reading is
+    from whenever you last saw the place, and when that sector blinks out at
+    confidence 0 the reading leaves the map with it. `confidence` rides on
+    every row for exactly that reason.
+
+    `richest` is the shortlist the grid can't be: the RICHEST_ROWS best
+    sectors in view, ranked. Ties break on coordinates so the same board
+    always ranks the same way.
+
+    Pure view -- it never calls reveal_sector(), and reading a resource map
+    costs nothing and reveals nothing to anyone else.
+    """
+    if radius < 1 or radius > MAX_NEIGHBORHOOD_RADIUS:
+        return {"error": f"radius must be between 1 and {MAX_NEIGHBORHOOD_RADIUS}"}
+    cur = sess.cur
+
+    center = _resolve_center(sess, org_id, center_x, center_y, center_z)
+    if "error" in center:
+        return center
+    cx, cy, cz = center["x"], center["y"], center["z"]
+    sectors = _sectors_in_range(cur, sess.player_id, cx, cy, cz, radius)
+    current_turn, next_tick_at = _turn_context(cur)
+
+    by_coord = {}
+    for s in sectors:
+        s["coords_display"] = f"({s['coord_x']},{s['coord_y']},{s['coord_z']})"
+        s["energy_display"] = f"{s['energy_capacity']:.0f}"
+        s["is_center"] = (s["coord_x"], s["coord_y"], s["coord_z"]) == (cx, cy, cz)
+        s["cell"] = _energy_cell(s["energy_capacity"], s["is_center"])
+        s["in_plane"] = s["coord_z"] == cz
+        if s["in_plane"]:
+            by_coord[(s["coord_x"], s["coord_y"])] = s
+
+    grid, unknown_in_range = _draw_grid(cx, cy, radius, by_coord)
+    richest = sorted(sectors,
+                     key=lambda s: (-s["energy_capacity"], s["coord_x"],
+                                    s["coord_y"], s["coord_z"]))[:RICHEST_ROWS]
+
+    return {
+        "center": {"x": cx, "y": cy, "z": cz},
+        "radius": radius,
+        "org_id": org_id,
+        "turn": current_turn,
+        "sectors": sectors,
+        "richest": richest,
+        "unknown_in_range": unknown_in_range,
+        "off_plane_count": sum(1 for s in sectors if not s["in_plane"]),
+        "display": {
+            "kind": "map",
+            # Same turn-and-countdown line every other report opens with, from
+            # the one helper, so two reports read side by side cannot be told
+            # different things about the clock.
+            "header": f"Resources near {center['label']}"
+                      + (f" — {turn_header(current_turn, TURN_LIMIT, next_tick_at)}"
+                         if current_turn is not None else ""),
+            "grid": grid,
+            "legend": RESOURCE_LEGEND,
+            "rows_key": "richest",
+            # Confidence rides beside the figure because it says how old the
+            # reading is -- the number itself never changes, but what you know
+            # about it does.
+            "columns": ["coords_display", "energy_display", "confidence"],
+            "column_labels": {"coords_display": "Coords",
+                              "energy_display": "Energy",
+                              "confidence": "Confidence"},
         },
     }

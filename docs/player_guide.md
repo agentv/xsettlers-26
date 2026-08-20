@@ -237,6 +237,7 @@ the music stops.
 | Check on one ship or colony | `show_organization` |
 | Review your whole fleet | `show_civilization_status` |
 | Look at the space around something | `show_sector_neighborhood` |
+| See what the sectors nearby are worth | `show_neighborhood_resources` |
 | See the standings | `show_game_status` |
 | Signal you're done for this turn | `declare_end_turn` |
 | Take that back | `rescind_end_turn` |

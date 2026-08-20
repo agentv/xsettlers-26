@@ -1,7 +1,7 @@
 from db.connection import get_connection
 from xsettlers_mcp.tools.sector_tools import (
-    show_sector_neighborhood,
-    UNKNOWN_CELL, SEEN_CELL, EMPTY_CELL, MAX_NEIGHBORHOOD_RADIUS,
+    show_sector_neighborhood, show_neighborhood_resources,
+    UNKNOWN_CELL, SEEN_CELL, EMPTY_CELL, MAX_NEIGHBORHOOD_RADIUS, RICHEST_ROWS,
 )
 from tests.conftest import (
     seed_player, seed_sector, seed_ship, seed_player_sector,
@@ -237,3 +237,123 @@ def test_a_live_rival_is_counted_in_the_highlights_table():
 
     result = show_sector_neighborhood("U_W", center_x=0, center_y=0, center_z=0)
     assert result["highlights"][0]["rivals_display"] == "1/100"
+
+
+# --- resource map (see show_neighborhood_resources) ---
+
+def test_resource_map_reads_energy_per_known_sector_and_brackets_the_center():
+    """Every cell is what that sector is worth, and the center is marked --
+    a grid of bare numbers has no other anchor to find yourself on."""
+    pid, sid, oid = _home()
+    rich = seed_sector(27, 25, 0, energy=900.0)
+    seed_player_sector(pid, rich, 60)
+    result = show_neighborhood_resources("U_P1", org_id=oid)
+    assert _cell_at(result, 25, 25) == "[50]"      # _home()'s default energy
+    assert _cell_at(result, 27, 25) == "900"
+
+def test_resource_map_dots_the_unseen_and_blanks_out_of_range():
+    """Same three-state cell vocabulary as the neighborhood map: known,
+    in range but never seen, and outside the radius entirely."""
+    pid, sid, oid = _home()
+    result = show_neighborhood_resources("U_P1", org_id=oid)
+    assert _cell_at(result, 25, 21) == UNKNOWN_CELL
+    assert _cell_at(result, 21, 21) == EMPTY_CELL
+    assert result["unknown_in_range"] == IN_RANGE_CELLS_AT_R4 - 1
+
+def test_resource_map_ranks_the_richest_sectors_it_can_see():
+    """The shortlist the grid can't be: the question a resource map is opened
+    to answer is where to go, and ties break on coordinates so the same board
+    always ranks the same way."""
+    pid, sid, oid = _home()
+    for x, energy in ((26, 700.0), (27, 900.0), (24, 900.0)):
+        seen = seed_sector(x, 25, 0, energy=energy)
+        seed_player_sector(pid, seen, 80)
+    result = show_neighborhood_resources("U_P1", org_id=oid)
+    assert [(s["coords_display"], s["energy_display"]) for s in result["richest"]] == [
+        ("(24,25,0)", "900"), ("(27,25,0)", "900"), ("(26,25,0)", "700"), ("(25,25,0)", "50")]
+    assert result["display"]["rows_key"] == "richest"
+    assert result["richest"][0]["confidence"] == 80
+
+def test_resource_map_shortlist_is_capped():
+    pid, sid, oid = _home()
+    for x in range(21, 30):
+        for y in (24, 26):
+            seen = seed_sector(x, y, 0, energy=100.0 + x)
+            seed_player_sector(pid, seen, 80)
+    result = show_neighborhood_resources("U_P1", org_id=oid)
+    assert len(result["sectors"]) > RICHEST_ROWS
+    assert len(result["richest"]) == RICHEST_ROWS
+
+def test_resource_map_shows_nothing_the_player_has_not_seen():
+    """Fog of war is the same query both maps use: a sector that has blinked
+    out (confidence 0) takes its reading off the map with it."""
+    pid, sid, oid = _home()
+    faded = seed_sector(26, 25, 0, energy=1000.0)
+    seed_player_sector(pid, faded, 0)
+    result = show_neighborhood_resources("U_P1", org_id=oid)
+    assert _cell_at(result, 26, 25) == UNKNOWN_CELL
+    assert not any(s["id"] == faded for s in result["sectors"])
+
+def test_resource_map_draws_the_same_viewport_as_the_neighborhood_map():
+    """The two reports answer different questions about the same
+    neighborhood, so they must never disagree about which sectors that is."""
+    pid, sid, oid = _home()
+    resources = show_neighborhood_resources("U_P1", org_id=oid)
+    who = show_sector_neighborhood("U_P1", org_id=oid)
+    assert resources["center"] == who["center"]
+    assert resources["radius"] == who["radius"]
+    assert resources["display"]["grid"]["x_labels"] == who["display"]["grid"]["x_labels"]
+    assert ([r["label"] for r in resources["display"]["grid"]["rows"]]
+            == [r["label"] for r in who["display"]["grid"]["rows"]])
+    assert resources["unknown_in_range"] == who["unknown_in_range"]
+
+def test_resource_map_counts_off_plane_sectors_without_drawing_them():
+    pid, sid, oid = _home()
+    upstairs = seed_sector(25, 25, 1, energy=3000.0)
+    seed_player_sector(pid, upstairs, 100)
+    result = show_neighborhood_resources("U_P1", org_id=oid)
+    assert result["off_plane_count"] == 1
+    assert _cell_at(result, 25, 25) == "[50]"          # the plane's own sector, not the one above
+    assert result["richest"][0]["coords_display"] == "(25,25,1)"   # still on the shortlist
+
+def test_resource_map_accepts_explicit_coordinates():
+    pid, sid, oid = _home()
+    result = show_neighborhood_resources("U_P1", center_x=25, center_y=25, center_z=0, radius=1)
+    assert result["center"] == {"x": 25, "y": 25, "z": 0}
+    assert result["org_id"] is None
+    assert len(result["display"]["grid"]["rows"]) == 3
+
+def test_resource_map_is_a_pure_view():
+    """Looking at what's nearby must not be what reveals it."""
+    pid, sid, oid = _home()
+    conn = get_connection()
+    before = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
+              conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
+              conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
+    conn.close()
+    show_neighborhood_resources("U_P1", org_id=oid)
+    conn = get_connection()
+    after = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
+             conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
+             conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
+    conn.close()
+    assert before == after
+
+def test_resource_map_rejects_in_transit_org():
+    pid, sid, oid = _home()
+    conn = get_connection()
+    conn.execute("UPDATE organizations SET sector_id=-1 WHERE id=?", (oid,))
+    conn.commit(); conn.close()
+    assert "error" in show_neighborhood_resources("U_P1", org_id=oid)
+
+def test_resource_map_rejects_missing_center_and_bad_radius():
+    _home()
+    assert "error" in show_neighborhood_resources("U_P1")
+    assert "error" in show_neighborhood_resources("U_P1", center_x=1, center_y=1, center_z=0,
+                                                  radius=0)
+    assert "error" in show_neighborhood_resources(
+        "U_P1", center_x=1, center_y=1, center_z=0, radius=MAX_NEIGHBORHOOD_RADIUS + 1)
+
+def test_resource_map_rejects_unknown_player():
+    assert show_neighborhood_resources("U_NOBODY", center_x=0, center_y=0, center_z=0) == \
+        {"error": "Player not found"}

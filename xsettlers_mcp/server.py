@@ -35,7 +35,7 @@ from views.render import render_status
 SERVER_INSTRUCTIONS = (
     "Every tool response defaults to response_format='markdown_view': you get back "
     "a raw JSON block AND a pre-rendered markdown block (a table, or a map grid for "
-    "show_sector_neighborhood) built server-side by views/render.py, not assembled "
+    "the neighborhood maps) built server-side by views/render.py, not assembled "
     "by you. Render that markdown block to the user VERBATIM. Do not reconstruct, "
     "reformat, re-summarize, or build your own table from the JSON instead -- the "
     "JSON is there for your own reasoning and state-tracking (e.g. remembering an "

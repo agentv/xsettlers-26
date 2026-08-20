@@ -4,7 +4,8 @@ from xsettlers_mcp.tools.organization_reports import (
 )
 from xsettlers_mcp.tools.organization_tools import set_org_scan_bearing
 from xsettlers_mcp.tools.navigation_tools import confirm_move
-from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
+from xsettlers_mcp.tools.sector_tools import (show_sector_neighborhood,
+                                             show_neighborhood_resources)
 from tests.conftest import (
     seed_player, seed_sector, seed_ship, seed_pod, seed_player_sector
 )
@@ -238,3 +239,31 @@ def test_render_map_notes_off_plane_sectors():
 
 def test_render_map_propagates_error():
     assert render_map({"error": "Player not found"}) == "Error: Player not found"
+
+# --- the resource map renders through the same map path ---
+
+def _resources():
+    pid = seed_player(); sid = seed_sector(25, 25, 0, energy=800.0)
+    oid = seed_ship(pid, sid)
+    seed_player_sector(pid, sid, 100)
+    return show_neighborhood_resources("U_P1", org_id=oid)
+
+def test_render_map_draws_the_resource_grid_with_no_new_code():
+    """A second map tool renders through render_map() unchanged -- the whole
+    point of putting the hints in the data rather than the client."""
+    text = render_map(_resources())
+    assert text.splitlines()[0].startswith("**Resources near ")
+    assert " — Turn 0 of " in text.splitlines()[0]
+    assert "| y/x | 21 | 22 |" in text
+    assert "[800]" in text                      # the sector you're centered on
+    assert "Each cell is that sector's energy capacity" in text
+
+def test_render_map_draws_the_richest_table_under_the_resource_grid():
+    text = render_map(_resources())
+    header_line = next(l for l in text.splitlines() if l.startswith("| Coords |"))
+    assert header_line == "| Coords | Energy | Confidence |"
+    assert "| (25,25,0) | 800 | 100 |" in text
+
+def test_render_status_dispatches_the_resource_map_to_render_map():
+    data = _resources()
+    assert render_status(data) == render_map(data)

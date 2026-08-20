@@ -3,7 +3,7 @@ from db.connection import get_connection
 from db.sectors import TURNS_TO_BLINK_OUT
 from db.sightings import sightings_by_sector
 from engine.turn import get_next_tick_at, TURN_LIMIT
-from views.format import turn_header
+from views.format import in_thousands, turn_header
 from xsettlers_mcp.tools.session import player_tool
 
 # --- Neighborhood viewport ---------------------------------------------------
@@ -128,7 +128,8 @@ def _sectors_in_range(cur, player_id: int, cx: int, cy: int, cz: int,
     return [dict(r) for r in cur.fetchall()]
 
 
-def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict) -> tuple:
+def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict,
+               cell_width: int = 0) -> tuple:
     """
     Lay the viewport out as grid rows, and count the cells in range nobody has
     ever seen.
@@ -141,6 +142,12 @@ def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict) -> tuple:
 
     Axis labels are absolute coordinates so anything read off the map can go
     straight into preview_move or set_pod_scan_bearing without arithmetic.
+
+    `cell_width` right-pads every cell, blanks and unknowns included, to a
+    fixed width -- for a grid of figures, where a column only reads as a
+    column if its digits sit in the same place each row. It pads and never
+    truncates, so a cell wider than the width widens its column instead of
+    losing characters. 0 leaves cells exactly as their report built them.
     """
     x_labels = list(range(cx - radius, cx + radius + 1))
     r2 = radius ** 2
@@ -157,7 +164,8 @@ def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict) -> tuple:
             else:
                 cells.append(UNKNOWN_CELL)
                 unknown_in_range += 1
-        rows.append({"label": str(y), "cells": cells})
+        rows.append({"label": str(y),
+                     "cells": [c.rjust(cell_width) for c in cells]})
     grid = {"corner": "y/x", "x_labels": [str(x) for x in x_labels], "rows": rows}
     return grid, unknown_in_range
 
@@ -371,7 +379,15 @@ def show_sector_neighborhood(
 # (see db/sectors.py) -- food and goods are manufactured from stock already
 # held, never harvested. When a sector grows a second yield this report gains
 # a slot per cell rather than a second report.
-CENTER_MARK = ("[", "]")     # brackets the cell you are centered on
+CENTER_MARK = "@"            # suffixes the cell you are centered on
+
+# Five characters: a figure in thousands is four ("2.20"), and the center mark
+# is the fifth. Every cell is padded to it -- blanks and unknowns included --
+# because a column of figures only reads as a column when the decimal points
+# line up, and the markdown source is ragged otherwise however well a client
+# renders it. Wider than the who-is-where map's three, which carries tokens
+# ("S3C") rather than numbers.
+CELL_WIDTH = 5
 
 # The grid already carries every figure, so the table below it is a shortlist,
 # not a repeat: the richest sectors you can currently see, which is the
@@ -380,7 +396,8 @@ RICHEST_ROWS = 10
 
 RESOURCE_LEGEND = [
     "Each cell is that sector's energy capacity -- the only resource the map itself yields.",
-    f"{CENTER_MARK[0]}700{CENTER_MARK[1]} = the sector this view is centered on",
+    "Figures are thousands of energy: 2.20 = 2,200, 0.90 = 900.",
+    f"2.20{CENTER_MARK} = the sector this view is centered on",
     f"{UNKNOWN_CELL} = in range, never seen    (blank) = outside range",
     f"Sectors blink out {TURNS_TO_BLINK_OUT} turns after they were last seen, "
     "taking their reading with them.",
@@ -389,16 +406,18 @@ RESOURCE_LEGEND = [
 
 
 def _energy_cell(energy: float, is_center: bool) -> str:
-    """One grid cell: a sector's energy capacity as a whole number, bracketed
-    when it is the sector the view is centered on.
+    """One grid cell: a sector's energy capacity in thousands (see
+    views.format.in_thousands), marked when it is the sector the view is
+    centered on, and right-padded to CELL_WIDTH.
 
-    Nothing in the game yields a fraction of a resource, so a decimal point is
-    noise in a cell this narrow. The center is marked because this map has no
-    other anchor -- the who-is-where map shows your own ships, and a reader of
-    a grid of bare numbers would otherwise have to count axis labels to find
-    where they are standing."""
-    figure = f"{energy:.0f}"
-    return f"{CENTER_MARK[0]}{figure}{CENTER_MARK[1]}" if is_center else figure
+    The center is marked because this map has no other anchor -- the
+    who-is-where map shows your own ships, and a reader of a grid of bare
+    numbers would otherwise count axis labels to find where they are standing.
+    A one-character suffix rather than brackets so the marked cell is the same
+    width as every other, and CENTER_MARK deliberately isn't SEEN_CELL's "*":
+    the two maps must not use one character for two claims."""
+    figure = in_thousands(energy)
+    return (figure + CENTER_MARK if is_center else figure).rjust(CELL_WIDTH)
 
 
 @mcp_tool(
@@ -410,8 +429,9 @@ def _energy_cell(energy: float, is_center: bool) -> str:
     f"(a 9x9 grid), max {MAX_NEIGHBORHOOD_RADIUS} -- but every cell holds "
     "what a sector is worth rather than who is standing in it. Energy is the "
     "only resource the map yields, so a known sector reads as its energy "
-    "capacity, '·' means in range and never seen, and blank means out of "
-    "range; display.grid is ready to draw and display.rows_key names the "
+    "capacity in thousands to two decimals ('2.20' is 2,200 energy, and the "
+    "legend says so), '·' means in range and never seen, and blank means out "
+    "of range; display.grid is ready to draw and display.rows_key names the "
     "richest sectors in view. Pure view -- reveals nothing, costs nothing, "
     "changes no confidence.")
 @player_tool
@@ -432,6 +452,12 @@ def show_neighborhood_resources(
     disagree about which sectors are "nearby". What differs is the question a
     cell answers: there, who is standing in the sector; here, what the sector
     holds.
+
+    Figures are in thousands to two decimals -- "2.20" is 2,200 energy -- so
+    every cell is the same width whatever a sector is worth, and a column of
+    them lines up to be read down the page. `energy_capacity` stays raw on
+    every row, and the legend carries the unit, since "2.20" alone is
+    meaningless.
 
     Only energy today, because a sector yields nothing else -- food and goods
     are manufactured from stock a player already holds, never harvested from
@@ -466,14 +492,14 @@ def show_neighborhood_resources(
     by_coord = {}
     for s in sectors:
         s["coords_display"] = f"({s['coord_x']},{s['coord_y']},{s['coord_z']})"
-        s["energy_display"] = f"{s['energy_capacity']:.0f}"
+        s["energy_display"] = in_thousands(s["energy_capacity"])
         s["is_center"] = (s["coord_x"], s["coord_y"], s["coord_z"]) == (cx, cy, cz)
         s["cell"] = _energy_cell(s["energy_capacity"], s["is_center"])
         s["in_plane"] = s["coord_z"] == cz
         if s["in_plane"]:
             by_coord[(s["coord_x"], s["coord_y"])] = s
 
-    grid, unknown_in_range = _draw_grid(cx, cy, radius, by_coord)
+    grid, unknown_in_range = _draw_grid(cx, cy, radius, by_coord, CELL_WIDTH)
     richest = sorted(sectors,
                      key=lambda s: (-s["energy_capacity"], s["coord_x"],
                                     s["coord_y"], s["coord_z"]))[:RICHEST_ROWS]
@@ -502,8 +528,10 @@ def show_neighborhood_resources(
             # reading is -- the number itself never changes, but what you know
             # about it does.
             "columns": ["coords_display", "energy_display", "confidence"],
+            # Same unit as the grid, stated in the header: two figures for
+            # one quantity in one report is how a player misreads it.
             "column_labels": {"coords_display": "Coords",
-                              "energy_display": "Energy",
+                              "energy_display": "Energy (000s)",
                               "confidence": "Confidence"},
         },
     }

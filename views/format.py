@@ -18,6 +18,14 @@ from datetime import datetime, timezone
 # ignore all of it.
 RESOURCE_ABBREV = {"energy": "E", "food": "F", "goods": "G"}
 
+# A sector holds energy in the thousands, and four raw digits per cell is
+# wider than a map grid can carry legibly. Reported in thousands to two
+# decimals instead: every figure is the same four characters whatever it is
+# worth, which is what lets a column of them line up and be compared down the
+# page. Any report using it has to say so in a legend -- see
+# sector_tools.RESOURCE_LEGEND -- since "2.20" is meaningless without its unit.
+ENERGY_UNIT = 1000.0
+
 # Legacy bootstrap name prefixes ("Ship-P1-01", "Colony-P1"), stripped for
 # display. Current defaults are already short (S1..Sn, C1).
 _NAME_PREFIXES_TO_STRIP = ("Ship-", "Colony-")
@@ -63,6 +71,15 @@ def tick_countdown(next_tick_at: str | None) -> str:
     remaining = max(0, round((next_dt - datetime.now(timezone.utc)).total_seconds()))
     minutes, seconds = divmod(remaining, 60)
     return f"{minutes:02d}:{seconds:02d}"
+
+
+def in_thousands(value: float) -> str:
+    """2200.0 -> "2.20" -- a figure in thousands, always two decimals.
+
+    Fixed width is the point, same as `slashed`: a reader comparing a column
+    of these is comparing digits in the same place each row. The caller's
+    legend carries the unit."""
+    return f"{value / ENERGY_UNIT:.2f}"
 
 
 def short_name(name: str) -> str:

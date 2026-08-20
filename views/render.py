@@ -1,10 +1,32 @@
 def _markdown_table(columns: list, rows: list) -> list:
-    """Header + separator + one line per row. Returns lines, not a string."""
-    lines = ["| " + " | ".join(columns) + " |",
-             "|" + "|".join(["---"] * len(columns)) + "|"]
-    for row in rows:
-        lines.append("| " + " | ".join(row) + " |")
-    return lines
+    """
+    Header + separator + one line per row, every column padded to its widest
+    entry. Returns lines, not a string.
+
+    The padding is for whoever reads the markdown *source* -- a client that
+    shows text raw, a log, a diff, a terminal. A client that renders the table
+    ignores the whitespace entirely, so it costs nothing where it isn't
+    needed, and an unpadded table is unreadable as source the moment one cell
+    is longer than its header.
+
+    Cells are padded, never truncated: a wide cell widens its column rather
+    than losing characters. Padding is left-aligned here because most cells
+    are labels; a column that wants its digits aligned pads its own cells to a
+    fixed width before they arrive (see sector_tools.CELL_WIDTH), which this
+    then leaves alone.
+    """
+    table = [list(columns)] + [list(row) for row in rows]
+    widths = [max(len(row[i]) if i < len(row) else 0 for row in table)
+              for i in range(len(columns))]
+
+    def line(cells):
+        return "| " + " | ".join(
+            (cells[i] if i < len(cells) else "").ljust(widths[i])
+            for i in range(len(columns))) + " |"
+
+    return [line(columns),
+            "|" + "|".join("-" * (w + 2) for w in widths) + "|"] + \
+           [line(row) for row in table[1:]]
 
 
 def _hinted_table(display: dict, rows: list, columns: list) -> list:

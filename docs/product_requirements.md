@@ -273,7 +273,9 @@ Cell markers are at most 3 characters (see [UI & Rendering Design](ui_and_render
 
 The companion to `show_sector_neighborhood` over exactly the same viewport — same center rules (an `org_id` or an explicit coordinate triple, never a ship in transit), same default radius 4 and max 10, same fog of war, same single drawn z-plane with off-plane sectors counted rather than dropped. Both draw their lattice through shared helpers in `sector_tools.py`, so the two reports cannot come to disagree about which sectors count as "nearby".
 
-What differs is the question a cell answers. There: who is standing in the sector. Here: what the sector is worth. A known cell reads as its energy capacity, `·` means in range and never seen, blank means out of range, and the sector the view is centered on is bracketed (`[2200]`) — a grid of bare numbers has no other anchor for finding yourself.
+What differs is the question a cell answers. There: who is standing in the sector. Here: what the sector is worth. A known cell reads as its energy capacity **in thousands to two decimals** (`2.20` is 2,200 energy — a legend line carries the unit, since the figure alone is meaningless), `·` means in range and never seen, blank means out of range, and the sector the view is centered on takes a trailing `@` — a grid of bare numbers has no other anchor for finding yourself.
+
+Cells are a fixed five characters wide, blanks and unknowns padded to match, so the decimal points line up down a column. That matters for the markdown *source*, which is what a client showing text raw, a log or a diff displays; a rendered table would align regardless. The detail rows below use the same unit as the grid and say so in the column header — two figures for one quantity in one report is how a player misreads it.
 
 **Energy is the whole map** because energy is the only resource a sector yields; food and goods are manufactured from stock already held, never harvested. When a sector grows a second yield, the cell gains a slot rather than the suite gaining a report.
 

@@ -24,9 +24,9 @@ def _seed_colony(player_id, sector_id, name="Test Colony"):
                        (name, player_id)).fetchone()["id"]
     conn.close(); return oid
 
-def _home(x=25, y=25, confidence=100):
+def _home(x=25, y=25, confidence=100, energy=50.0):
     """Player with one ship at (x,y,0) and visibility of that sector."""
-    pid = seed_player(); sid = seed_sector(x, y, 0)
+    pid = seed_player(); sid = seed_sector(x, y, 0, energy=energy)
     oid = seed_ship(pid, sid)
     seed_player_sector(pid, sid, confidence)
     return pid, sid, oid
@@ -241,38 +241,46 @@ def test_a_live_rival_is_counted_in_the_highlights_table():
 
 # --- resource map (see show_neighborhood_resources) ---
 
-def test_resource_map_reads_energy_per_known_sector_and_brackets_the_center():
-    """Every cell is what that sector is worth, and the center is marked --
-    a grid of bare numbers has no other anchor to find yourself on."""
-    pid, sid, oid = _home()
+def test_resource_map_reads_energy_in_thousands_and_marks_the_center():
+    """Every cell is what that sector is worth, in thousands to two decimals
+    so the figures line up, and the center is marked -- a grid of bare
+    numbers has no other anchor to find yourself on."""
+    pid, sid, oid = _home(energy=2200.0)
     rich = seed_sector(27, 25, 0, energy=900.0)
     seed_player_sector(pid, rich, 60)
     result = show_neighborhood_resources("U_P1", org_id=oid)
-    assert _cell_at(result, 25, 25) == "[50]"      # _home()'s default energy
-    assert _cell_at(result, 27, 25) == "900"
+    assert _cell_at(result, 25, 25) == "2.20@"     # 2,200 energy, and you are here
+    assert _cell_at(result, 27, 25) == " 0.90"     # 900, padded to the same width
+    # The raw figure is untouched for a client that computes with it.
+    assert next(s for s in result["sectors"]
+                if s["id"] == rich)["energy_capacity"] == 900.0
 
 def test_resource_map_dots_the_unseen_and_blanks_out_of_range():
     """Same three-state cell vocabulary as the neighborhood map: known,
     in range but never seen, and outside the radius entirely."""
     pid, sid, oid = _home()
     result = show_neighborhood_resources("U_P1", org_id=oid)
-    assert _cell_at(result, 25, 21) == UNKNOWN_CELL
-    assert _cell_at(result, 21, 21) == EMPTY_CELL
+    assert _cell_at(result, 25, 21).strip() == UNKNOWN_CELL
+    assert _cell_at(result, 21, 21).strip() == EMPTY_CELL
     assert result["unknown_in_range"] == IN_RANGE_CELLS_AT_R4 - 1
 
 def test_resource_map_ranks_the_richest_sectors_it_can_see():
     """The shortlist the grid can't be: the question a resource map is opened
     to answer is where to go, and ties break on coordinates so the same board
     always ranks the same way."""
-    pid, sid, oid = _home()
+    pid, sid, oid = _home(energy=2200.0)
     for x, energy in ((26, 700.0), (27, 900.0), (24, 900.0)):
         seen = seed_sector(x, 25, 0, energy=energy)
         seed_player_sector(pid, seen, 80)
     result = show_neighborhood_resources("U_P1", org_id=oid)
+    # Same unit as the grid: the table would otherwise report one quantity
+    # two ways in one report.
     assert [(s["coords_display"], s["energy_display"]) for s in result["richest"]] == [
-        ("(24,25,0)", "900"), ("(27,25,0)", "900"), ("(26,25,0)", "700"), ("(25,25,0)", "50")]
+        ("(25,25,0)", "2.20"), ("(24,25,0)", "0.90"),
+        ("(27,25,0)", "0.90"), ("(26,25,0)", "0.70")]
     assert result["display"]["rows_key"] == "richest"
-    assert result["richest"][0]["confidence"] == 80
+    assert result["display"]["column_labels"]["energy_display"] == "Energy (000s)"
+    assert result["richest"][1]["confidence"] == 80
 
 def test_resource_map_shortlist_is_capped():
     pid, sid, oid = _home()
@@ -291,7 +299,7 @@ def test_resource_map_shows_nothing_the_player_has_not_seen():
     faded = seed_sector(26, 25, 0, energy=1000.0)
     seed_player_sector(pid, faded, 0)
     result = show_neighborhood_resources("U_P1", org_id=oid)
-    assert _cell_at(result, 26, 25) == UNKNOWN_CELL
+    assert _cell_at(result, 26, 25).strip() == UNKNOWN_CELL
     assert not any(s["id"] == faded for s in result["sectors"])
 
 def test_resource_map_draws_the_same_viewport_as_the_neighborhood_map():
@@ -308,12 +316,12 @@ def test_resource_map_draws_the_same_viewport_as_the_neighborhood_map():
     assert resources["unknown_in_range"] == who["unknown_in_range"]
 
 def test_resource_map_counts_off_plane_sectors_without_drawing_them():
-    pid, sid, oid = _home()
+    pid, sid, oid = _home(energy=2200.0)
     upstairs = seed_sector(25, 25, 1, energy=3000.0)
     seed_player_sector(pid, upstairs, 100)
     result = show_neighborhood_resources("U_P1", org_id=oid)
     assert result["off_plane_count"] == 1
-    assert _cell_at(result, 25, 25) == "[50]"          # the plane's own sector, not the one above
+    assert _cell_at(result, 25, 25) == "2.20@"         # the plane's own sector, not the one above
     assert result["richest"][0]["coords_display"] == "(25,25,1)"   # still on the shortlist
 
 def test_resource_map_accepts_explicit_coordinates():

@@ -77,7 +77,7 @@ def test_server_sends_instructions_at_initialize():
 def test_as_markdown_renders_a_display_hinted_dict():
     from xsettlers_mcp.server import _as_markdown
     data = {"widgets": [{"name": "a"}], "display": {"rows_key": "widgets", "columns": ["name"]}}
-    assert "| a |" in _as_markdown(data)
+    assert "| a    |" in _as_markdown(data)    # padded to the "name" header
 
 def test_as_markdown_falls_back_for_non_dict_results():
     from xsettlers_mcp.server import _as_markdown

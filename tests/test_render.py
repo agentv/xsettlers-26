@@ -3,6 +3,7 @@ from xsettlers_mcp.tools.organization_reports import (
     show_civilization_status, show_game_status, show_organization
 )
 from xsettlers_mcp.tools.organization_tools import set_org_scan_bearing
+from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
 from tests.conftest import (
     seed_player, seed_sector, seed_ship, seed_pod, seed_player_sector
@@ -18,11 +19,71 @@ def test_render_status_civilization_status_is_hint_driven():
     assert status["organizations"][0]["short_name"] in text
     assert status["organizations"][0]["cargo_display"] in text
 
+def test_render_status_fleet_status_opens_with_turn_and_countdown():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    text = render_status(show_civilization_status("U_P1"))
+    assert text.splitlines()[0].startswith("**Turn 0 of ")
+    assert "(--:--)" in text.splitlines()[0]   # no clock running under test
+
+def test_render_status_fleet_status_headers_stack_the_resource_order():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    text = render_status(show_civilization_status("U_P1"))
+    header_line = next(l for l in text.splitlines() if l.startswith("| Unit |"))
+    assert header_line == ("| Unit | Location | Cargo | Storage<br>E/F/G | "
+                           "Tasking<br>E/F/G/S/I | Production/Turn<br>E/F/G |")
+
+def test_render_status_fleet_status_cells_are_bare_slashed_runs():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    text = render_status(show_civilization_status("U_P1"))
+    row = next(l for l in text.splitlines() if l.startswith("| Test Ship |"))
+    assert "10/0/0" in row                 # one energy pod holding 10
+    assert "E:" not in row                 # no per-cell resource labels left
+
+def test_render_status_tasking_counts_scan_and_idle_pods():
+    """Every pod gets a slot -- a scanning or idle pod is still crew the
+    player paid for, and a fixed-width cell that omits them under-counts."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy"); seed_pod(oid, task="produce_energy")
+    seed_pod(oid, task="produce_food")
+    seed_pod(oid, task="scan")
+    seed_pod(oid, task="idle"); seed_pod(oid, task="idle")
+    status = show_civilization_status("U_P1")
+    assert status["organizations"][0]["tasking_summary"] == "2/1/0/1/2"
+    row = next(l for l in render_status(status).splitlines()
+               if l.startswith("| Test Ship |"))
+    assert "| 2/1/0/1/2 |" in row
+
+def test_render_status_fleet_totals_render_below_the_table():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_capacity=100.0, storage_current=10.0)
+    lines = render_status(show_civilization_status("U_P1")).splitlines()
+    assert lines.index("**Fleet totals**") > lines.index(
+        next(l for l in lines if l.startswith("| Test Ship |")))
+    assert "- Storage (E/F/G): 10/0/0" in lines
+    assert "- Capacity: 10 / 100 (10% full)" in lines
+
+def test_render_status_fleet_status_shows_in_transit_not_the_sentinel():
+    """A ship parked at the (-1,-1,-1) sentinel reads "in transit" -- the
+    sentinel coordinates never reach the player."""
+    pid = seed_player(); origin = seed_sector(0, 0, 0)
+    oid = seed_ship(pid, origin)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    confirm_move("U_P1", oid, 3, 0, 0)
+    status = show_civilization_status("U_P1")
+    assert status["organizations"][0]["in_transit"] is True
+    text = render_status(status)
+    row = next(l for l in text.splitlines() if l.startswith("| Test Ship |"))
+    assert "| in transit |" in row
+    assert "-1" not in row
+
 def test_render_status_game_status_uses_standings_rows_key():
     seed_player()
     status = show_game_status("U_P1")
     text = render_status(status)
-    assert "rank" in text
+    assert "Rank" in text
     assert "Player One" in text            # default seed_player display_name
 
 def test_render_status_game_status_drops_decimals_and_utilization():
@@ -32,7 +93,7 @@ def test_render_status_game_status_drops_decimals_and_utilization():
     text = render_status(status)
     assert "utilization" not in text
     header_line = text.splitlines()[2]
-    assert header_line == "| rank | Player | score | energy | food | goods |"
+    assert header_line == "| Rank | Player | Score | Energy | Food | Goods |"
     row_line = next(l for l in text.splitlines() if l.startswith("| 1 |"))
     assert ".0" not in row_line              # whole numbers, no trailing decimal
 
@@ -63,17 +124,29 @@ def test_render_status_omits_footer_section_when_there_is_none():
 
 def test_render_status_applies_column_labels_override():
     """show_organization's column_labels overrides task_display/capacity_display
-    header text to "Task"/"Utilization" while row lookups still key off the
-    raw field names."""
+    header text to "Task"/"Cargo" while row lookups still key off the raw
+    field names. Every column is labelled, so the whole header is title case
+    -- the same convention show_game_status and show_civilization_status
+    follow."""
     pid = seed_player(); sid = seed_sector(3, 3, 0); oid = seed_ship(pid, sid)
     seed_pod(oid, task="produce_energy", storage_current=10.0)
     status = show_organization("U_P1", oid)
     text = render_status(status)
     header_line = text.splitlines()[2]
-    assert "| Task |" in header_line
-    assert "| Utilization |" in header_line
+    assert header_line == "| Task | Count | Energy | Food | Goods | Cargo |"
     assert "task_display" not in header_line
     assert "capacity_display" not in header_line
+
+def test_render_status_show_organization_drops_decimals():
+    """No action in the game yields a fraction of a resource, so the table
+    carries whole numbers -- the raw columns stay floats alongside."""
+    pid = seed_player(); sid = seed_sector(3, 3, 0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    status = show_organization("U_P1", oid)
+    assert status["tasks"][0]["energy"] == 10.0        # raw field untouched
+    assert status["tasks"][0]["energy_display"] == "10"
+    row = next(l for l in render_status(status).splitlines() if l.startswith("| Energy |"))
+    assert ".0" not in row
 
 def test_render_status_columns_without_labels_header_as_field_name():
     """Unrelated tools that never set column_labels keep the old behavior --

@@ -72,6 +72,24 @@ def test_player_standings_ranks_by_weighted_score_not_raw_total():
     assert [s["rank"] for s in standings] == [1, 2]
 
 
+def test_tied_scores_share_a_rank_and_skip_the_number_they_consume():
+    """Standard competition ranking: two players tied at the top are both
+    rank 1, and the next distinct score is rank 3, not rank 2."""
+    seed_player(email="a@test.com", player_token="U_A", display_name="A")
+    seed_player(email="b@test.com", player_token="U_B", display_name="B")
+    seed_player(email="c@test.com", player_token="U_C", display_name="C")
+    conn = get_connection()
+    for token, goods in (("U_A", 10.0), ("U_B", 10.0), ("U_C", 5.0)):
+        pid = conn.execute("SELECT id FROM players WHERE player_token=?",
+                           (token,)).fetchone()["id"]
+        sid = seed_sector()
+        seed_pod(seed_ship(pid, sid), task="produce_goods", storage_current=goods)
+    standings = player_standings(conn.cursor(), WEIGHTS)
+    conn.close()
+    assert [s["display_name"] for s in standings][2] == "C"
+    assert [s["rank"] for s in standings] == [1, 1, 3]
+
+
 def test_player_standings_sums_across_every_org_and_pod():
     """Holdings are per player, not per org -- and storage is generic per pod,
     so a pod's task doesn't decide which column it counts toward."""

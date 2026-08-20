@@ -77,6 +77,17 @@ def player_standings(cur, weights: dict) -> list:
             "capacity": row["capacity"] or 0,
         })
     standings.sort(key=lambda s: s["score"], reverse=True)
-    for rank, entry in enumerate(standings, start=1):
+    # Standard competition ranking ("1224"): equal scores share the higher
+    # rank, and a shared rank consumes the numbers it occupies, so the next
+    # distinct score resumes at its ordinal position rather than the next
+    # integer -- two players tied at the top are both rank 1 and the third is
+    # rank 3. Scores are compared exactly, not as displayed: rounding happens
+    # above this in the report, and a tie a player can see has to be a tie in
+    # the figures that get persisted.
+    rank = 0
+    tied_score = None
+    for position, entry in enumerate(standings, start=1):
+        if entry["score"] != tied_score:
+            rank, tied_score = position, entry["score"]
         entry["rank"] = rank
     return standings

@@ -2,7 +2,7 @@
 Value formatting for the display hints reports carry.
 
 Two jobs, deliberately split: this module turns one value into the string a
-player reads ("E:20, F:20", "P1-01", "03:47"); views/render.py lays those
+player reads ("80/80/100", "P1-01", "03:47"); views/render.py lays those
 strings out as a table or a grid. A report builds its `display` block from
 here and hands it to the renderer.
 
@@ -29,6 +29,14 @@ _NAME_PREFIXES_TO_STRIP = ("Ship-", "Colony-")
 # one clients can render today without inventing their own column order.
 TASK_DISPLAY = {"produce_energy": "Energy", "produce_food": "Food",
                 "produce_goods": "Goods", "idle": "Idle", "scan": "Scan"}
+
+# The slots a tasking triple-and-then-some occupies, in order. Longer than
+# RESOURCE_ABBREV because a pod's task is not only production: a scanning or
+# idle pod is still a pod the player paid for, and leaving it out of the
+# tasking column makes a fixed-width cell look complete while under-counting
+# the crew. Every task a pod can hold needs a slot here.
+TASK_ABBREV = {"produce_energy": "E", "produce_food": "F", "produce_goods": "G",
+               "scan": "S", "idle": "I"}
 
 # Spelled-out compass names for the scanners footer -- distinct from the terse
 # codes (engine/bearings.py's "N"/"NE"/"N2") used everywhere else, since this
@@ -66,23 +74,82 @@ def short_name(name: str) -> str:
     return name
 
 
-def abbreviated(values: dict, key=lambda k: k) -> str:
-    """{"energy": 20.0, "food": 20.0} -> "E:20, F:20". `key` maps a dict key
-    onto a resource name, which is all that separates a resource-keyed dict
-    from a task-keyed one. Entries naming something that isn't a resource
-    (an idle or scan pod count) are left out rather than shown unabbreviated."""
-    return ", ".join(f"{RESOURCE_ABBREV[key(k)]}:{v:g}"
-                     for k, v in values.items() if key(k) in RESOURCE_ABBREV)
+def slashed(values: dict, slots: dict = RESOURCE_ABBREV) -> str:
+    """
+    {"energy": 20.0, "food": 20.0} -> "20/20/0" -- one slot per entry in
+    `slots`, in that order, 0 for anything the dict doesn't mention. What each
+    number counts is carried by the column header (see stacked_header), not
+    repeated on every cell.
+
+    Fixed width and fixed order are the point: a reader scans down a column of
+    "80/80/100" and compares the same slot each row, which a variable-length
+    "E:80, F:80" defeats the moment one entry is absent.
+
+    `slots` is what separates a resource-keyed dict from a task-keyed one --
+    RESOURCE_ABBREV for holdings and production, TASK_ABBREV for pod tasking.
+    A key with no slot is dropped, so a slot set must cover everything its
+    dicts can hold, or the cell silently under-counts.
+    """
+    return "/".join(f"{values.get(name, 0):g}" for name in slots)
 
 
 def tasking_summary(tasking: dict) -> str:
-    """{"produce_energy": 2, "produce_food": 2} -> "E:2, F:2"."""
-    return abbreviated(tasking, key=lambda task: task.replace("produce_", ""))
+    """{"produce_energy": 2, "produce_food": 2, "scan": 1} -> "2/2/0/1/0"."""
+    return slashed(tasking, TASK_ABBREV)
 
 
 def resource_summary(values: dict) -> str:
-    """{"energy": 20.0, "food": 20.0} -> "E:20, F:20"."""
-    return abbreviated(values)
+    """{"energy": 20.0, "food": 20.0} -> "20/20/0"."""
+    return slashed(values)
+
+
+def stacked_header(label: str, slots: dict = RESOURCE_ABBREV) -> str:
+    """
+    A two-line header for a column whose cells are a `slashed` run:
+    the column's name, then the order its numbers follow. Pass the same
+    `slots` the cells were built with.
+
+    `<br>` rather than a literal newline -- a markdown table cell is
+    single-line by definition, and every client that renders these tables
+    renders them as HTML.
+    """
+    return f"{label}<br>{'/'.join(slots.values())}"
+
+
+def turn_header(current_turn: int, turn_limit: int, next_tick_at: str | None) -> str:
+    """"Turn 7 of 20 (03:47)" -- the line a report puts above its table so a
+    player always knows where they are in the game and how long they have to
+    act. Shared by every turn-context report, so they cannot drift apart."""
+    return f"Turn {current_turn} of {turn_limit} ({tick_countdown(next_tick_at)})"
+
+
+def winners_label(winners: list) -> str:
+    """
+    "Winner: Ada" for one, "Winners: Ada, Grace" for a tie, "Winner: none"
+    for an empty game. Nothing breaks a tie in scoring, so every player on
+    the top rank is named and the word agrees with how many there are.
+    """
+    if not winners:
+        return "Winner: none"
+    label = "Winner" if len(winners) == 1 else "Winners"
+    return f"{label}: {', '.join(winners)}"
+
+
+def totals_footer(title: str, assets: dict) -> list:
+    """
+    The fleet-wide aggregate, rendered below the table rather than in it.
+
+    A list of lines, not a row: totals answer a different question than the
+    per-unit rows above them ("how am I doing overall?" vs "what is this unit
+    doing?"), and a totals row inside the table invites reading it as one more
+    unit. Deliberately not a table of its own either -- two shapes stacked
+    read as two reports.
+    """
+    percent = assets.get("percent_full", 0.0)
+    return [f"**{title}**",
+            f"- Storage ({'/'.join(RESOURCE_ABBREV.values())}): {slashed(assets)}",
+            f"- Capacity: {assets.get('total', 0):g} / {assets.get('capacity', 0):g} "
+            f"({percent:g}% full)"]
 
 
 def scanner_footer(scanners: list) -> str | None:

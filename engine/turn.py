@@ -487,6 +487,8 @@ def _calculate_final_scores() -> list:
     """
     Weighted game score per player: config/game_config.yaml's score_weights
     applied to each player's total stored energy/food/goods, highest wins.
+    `winners` is a list because nothing breaks a tie: players level on score
+    share rank 1 and all of them win.
 
     Both the ranking and the formula come from engine/scoring.py, which is
     also what show_game_status calls, so the winner here matches what was
@@ -520,7 +522,12 @@ def _calculate_final_scores() -> list:
     record_event_direct(cur, final_turn, FINAL_SCORES_EVENT,
                          payload={"final_turn": final_turn, "turn_limit": TURN_LIMIT,
                                   "score_weights": dict(weights),
-                                  "winner": standings[0]["display_name"] if standings else None,
+                                  # Every player on the top rank, not just the
+                                  # first row: scoring has no tiebreak, so a tie
+                                  # is a shared win rather than something the
+                                  # sort order gets to decide.
+                                  "winners": [s["display_name"] for s in standings
+                                              if s["rank"] == 1],
                                   "standings": standings})
     conn.commit(); conn.close()
     for s in standings:

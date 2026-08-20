@@ -217,12 +217,31 @@ def test_final_scores_are_recorded_as_an_event_not_just_printed():
     conn.close()
     assert row is not None
     final = get_final_scores()
-    assert final["winner"] == "Player One"
+    assert final["winners"] == ["Player One"]
     assert final["final_turn"] == final["turn_limit"]
     assert final["score_weights"]                      # self-explaining without re-reading config
     top = final["standings"][0]
     assert top["rank"] == 1
     assert {"score", "energy", "food", "goods", "total", "capacity"} <= set(top)
+
+def test_a_tied_game_has_two_winners():
+    """Nothing breaks a tie, so both players on rank 1 are named as winners
+    and the header says "Winners", plural."""
+    from engine.turn import get_final_scores, TURN_LIMIT
+    from xsettlers_mcp.tools.organization_reports import show_game_status
+    for i, (email, token, name) in enumerate([("a@test.com", "U_A", "A"),
+                                              ("b@test.com", "U_B", "B")]):
+        pid = seed_player(email=email, player_token=token, display_name=name)
+        oid = seed_ship(pid, seed_sector(i, 0, 0), name=f"Ship {name}")
+        seed_pod(oid, task="produce_goods", storage_current=50.0)
+        seed_pod(oid, task="produce_food", storage_current=100.0)
+    for _ in range(TURN_LIMIT):
+        end_of_turn()
+    final = get_final_scores()
+    assert sorted(final["winners"]) == ["A", "B"]
+    status = show_game_status("U_A")
+    assert [s["rank"] for s in status["standings"]] == [1, 1]
+    assert "Winners: " in status["display"]["header"]
 
 def test_final_scores_are_written_once():
     """Writing twice would give a game two endings."""
@@ -247,7 +266,7 @@ def test_show_game_status_becomes_the_final_scoreboard_after_game_over():
     _play_to_game_over()
     status = show_game_status("U_P1")
     assert status["game_over"] is True and status["is_final"] is True
-    assert status["winner"] == "Player One"
+    assert status["winners"] == ["Player One"]
     assert status["display"]["header"].startswith("FINAL — game over at turn")
     assert status["standings"][0]["rank"] == 1
 
@@ -255,7 +274,7 @@ def test_show_game_status_is_not_final_mid_game():
     from xsettlers_mcp.tools.organization_reports import show_game_status
     seed_player(); end_of_turn()
     status = show_game_status("U_P1")
-    assert status["game_over"] is False and status["winner"] is None
+    assert status["game_over"] is False and status["winners"] == []
     assert status["display"]["header"].startswith("Turn ")
 
 

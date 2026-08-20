@@ -17,9 +17,10 @@ from engine.production import org_production
 from engine.turn import get_next_tick_at, get_final_scores, TURN_LIMIT
 from engine.scoring import player_standings
 from engine.bearings import bearing_name
-from views.format import (RESOURCE_ABBREV, TASK_DISPLAY, resource_summary,
-                          scanner_footer, short_name, tasking_summary,
-                          tick_countdown)
+from views.format import (RESOURCE_ABBREV, TASK_ABBREV, TASK_DISPLAY,
+                          resource_summary, scanner_footer, short_name,
+                          stacked_header, tasking_summary, tick_countdown,
+                          totals_footer, turn_header, winners_label)
 import json
 import os
 
@@ -108,6 +109,12 @@ def show_organization(sess, org_id: int) -> dict:
         t["task_display"] = TASK_DISPLAY.get(t["task"], t["task"])
         current = (t["energy"] or 0) + (t["food"] or 0) + (t["goods"] or 0)
         t["capacity_display"] = f"{current:.0f}/{t['capacity']:.0f}"
+        # Whole numbers in the table: nothing in the game yields a fraction of
+        # a resource, so a trailing ".0" on every cell is noise. The raw
+        # columns stay floats for a client that computes with them, the same
+        # split show_game_status makes with its *_display fields.
+        for resource in RESOURCE_ABBREV:
+            t[f"{resource}_display"] = f"{t[resource] or 0:.0f}"
     status = (f"at ({org['coord_x']},{org['coord_y']},{org['coord_z']})"
               if org["sector_id"] != -1 else "in transit")
     result["short_name"] = short_name(org["name"])
@@ -118,8 +125,11 @@ def show_organization(sess, org_id: int) -> dict:
         "header": f"{org['name']} — {status}, {org['mission']}",
         "resource_abbrev": RESOURCE_ABBREV,
         "rows_key": "tasks",
-        "columns": ["task_display", "count", "energy", "food", "goods", "capacity_display"],
-        "column_labels": {"task_display": "Task", "capacity_display": "Utilization"},
+        "columns": ["task_display", "count", "energy_display", "food_display",
+                    "goods_display", "capacity_display"],
+        "column_labels": {"task_display": "Task", "count": "Count",
+                          "energy_display": "Energy", "food_display": "Food",
+                          "goods_display": "Goods", "capacity_display": "Cargo"},
     }
     footer = scanner_footer(scanners)
     if footer:
@@ -137,7 +147,9 @@ def show_civilization_status(sess) -> dict:
     Return a player-scoped fleet/status report (aliases: "fleet status",
     "my status") -- the full roster (ships and colonies) plus fleet-wide
     aggregates in one call:
-    - Turn context: current turn, turn limit, and next_tick_at (ISO8601, from
+    - Turn context: current turn, turn limit, next_tick_countdown (the same
+      value pre-formatted "MM:SS", or "--:--" when there is no clock running)
+      and next_tick_at (ISO8601, from
       engine/clock.py -- None if the clock has never run or is paused; a
       caller also needs to check the server is actually live before trusting
       it, since a paused clock leaves a stale value -- see get_next_tick_at()
@@ -162,6 +174,9 @@ def show_civilization_status(sess) -> dict:
       intentionally terse -- just "in transit", full stop, no destination or
       ETA; dest_sector/turns_remaining/arrival_turn are raw fields on the
       entry for a client that wants to build a richer status string itself.
+      The sentinel sector (-1,-1,-1) an in-transit ship is parked at is never
+      shown -- "in transit" is what a player reads instead, and the column
+      heads as "Location".
     - Accumulated assets: aggregate energy, food, goods, and total across all
       pods, plus total capacity and percent_full.
     - display: presentation hints (see views/format.py
@@ -173,7 +188,10 @@ def show_civilization_status(sess) -> dict:
       `display.columns` lists which of each row's fields to render, in order
       -- see views/render.py's render_status() for a renderer driven entirely
       by these hints, with no per-tool special-casing. All raw fields are
-      present alongside.
+      present alongside. `display.header` carries the turn line drawn above
+      the table and `display.footer` the fleet totals drawn below it: an
+      aggregate is a different question than a per-unit row, so it does not
+      go in the table.
     Ownership-gated — only the calling player's data.
     """
     cur = sess.cur
@@ -282,18 +300,28 @@ def show_civilization_status(sess) -> dict:
         "turn": current_turn,
         "turn_limit": TURN_LIMIT,
         "next_tick_at": next_tick_at,
+        "next_tick_countdown": tick_countdown(next_tick_at),
         "organizations": orgs,
         "assets": assets,
         "display": {
+            "header": turn_header(current_turn, TURN_LIMIT, next_tick_at),
             "resource_abbrev": RESOURCE_ABBREV,
             "rows_key": "organizations",
             "columns": ["short_name", "status", "cargo_display", "storage_summary",
                         "tasking_summary", "production_summary"],
+            # Storage, tasking and production each hold a slashed run of
+            # numbers, so what each slot counts lives in the header once
+            # instead of on every cell -- see views/format.slashed and
+            # stacked_header. Tasking runs over TASK_ABBREV, not the three
+            # resources: a scanning or idle pod has to have a slot of its own
+            # or the cell reads as a complete crew count while omitting pods.
             "column_labels": {
-                "short_name": "Unit", "status": "Status", "cargo_display": "Cargo",
-                "storage_summary": "Storage", "tasking_summary": "Tasking",
-                "production_summary": "Production/turn",
+                "short_name": "Unit", "status": "Location", "cargo_display": "Cargo",
+                "storage_summary": stacked_header("Storage"),
+                "tasking_summary": stacked_header("Tasking", TASK_ABBREV),
+                "production_summary": stacked_header("Production/Turn"),
             },
+            "footer": totals_footer("Fleet totals", assets),
         },
     }
 
@@ -327,7 +355,10 @@ def show_game_status(sess) -> dict:
     the standing shown here is checkable against the eventual result.
     Standings are ranked by `score` (highest first, "rank" field included),
     NOT by the raw `total` (an unweighted sum, included for
-    capacity/fullness context).
+    capacity/fullness context). Ranking is standard competition ranking, so
+    players level on score share a rank -- and `winners` is a list for the
+    same reason: nothing breaks a tie, so everyone on rank 1 has won. It is
+    empty until the game ends.
     Carries a display block (resource_abbrev, rows_key="standings", suggested
     column order) for clients that want a ready-to-use presentation instead
     of building one -- see views/render.py's render_status().
@@ -364,9 +395,15 @@ def show_game_status(sess) -> dict:
             s.setdefault("utilization",
                          round(s["total"] / s["capacity"] * 100, 1) if s.get("capacity") else 0.0)
     next_tick_countdown = tick_countdown(next_tick_at)
+    winners = []
+    if game_over:
+        # A game recorded before winners became a list carries a single
+        # `winner` string instead; read either shape rather than fail on an
+        # old scoreboard.
+        winners = final.get("winners") or [n for n in [final.get("winner")] if n]
     header = (f"FINAL — game over at turn {final['final_turn']} of {final['turn_limit']}. "
-              f"Winner: {final['winner']}" if game_over
-              else f"Turn {current_turn} of {TURN_LIMIT} ({next_tick_countdown})")
+              f"{winners_label(winners)}" if game_over
+              else turn_header(current_turn, TURN_LIMIT, next_tick_at))
 
     # Whole-number display variants -- score/energy/food/goods never carry a
     # meaningful fraction (production and upkeep are integer per-turn amounts),
@@ -386,7 +423,7 @@ def show_game_status(sess) -> dict:
         "next_tick_countdown": next_tick_countdown,
         "game_over": game_over,
         "is_final": game_over,
-        "winner": final["winner"] if game_over else None,
+        "winners": winners,
         "score_weights": final["score_weights"] if game_over else dict(weights),
         "standings": standings,
         "display": {
@@ -397,8 +434,8 @@ def show_game_status(sess) -> dict:
             # raw field on every standings row, just not part of the table.
             "columns": ["rank", "display_name", "score_display", "energy_display",
                         "food_display", "goods_display"],
-            "column_labels": {"display_name": "Player", "score_display": "score",
-                               "energy_display": "energy", "food_display": "food",
-                               "goods_display": "goods"},
+            "column_labels": {"rank": "Rank", "display_name": "Player",
+                               "score_display": "Score", "energy_display": "Energy",
+                               "food_display": "Food", "goods_display": "Goods"},
         },
     }

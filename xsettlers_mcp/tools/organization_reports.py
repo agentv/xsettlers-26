@@ -123,7 +123,6 @@ def show_organization(sess, org_id: int) -> dict:
     result["scanners"] = scanners
     result["display"] = {
         "header": f"{org['name']} — {status}, {org['mission']}",
-        "resource_abbrev": RESOURCE_ABBREV,
         "rows_key": "tasks",
         "columns": ["task_display", "count", "energy_display", "food_display",
                     "goods_display", "capacity_display"],
@@ -305,7 +304,6 @@ def show_civilization_status(sess) -> dict:
         "assets": assets,
         "display": {
             "header": turn_header(current_turn, TURN_LIMIT, next_tick_at),
-            "resource_abbrev": RESOURCE_ABBREV,
             "rows_key": "organizations",
             "columns": ["short_name", "status", "cargo_display", "storage_summary",
                         "tasking_summary", "production_summary"],
@@ -359,8 +357,7 @@ def show_game_status(sess) -> dict:
     players level on score share a rank -- and `winners` is a list for the
     same reason: nothing breaks a tie, so everyone on rank 1 has won. It is
     empty until the game ends.
-    Carries a display block (resource_abbrev, rows_key="standings", suggested
-    column order) for clients that want a ready-to-use presentation instead
+    Carries a display block (rows_key="standings", suggested column order) for clients that want a ready-to-use presentation instead
     of building one -- see views/render.py's render_status().
     """
     cur = sess.cur
@@ -428,7 +425,6 @@ def show_game_status(sess) -> dict:
         "standings": standings,
         "display": {
             "header": header,
-            "resource_abbrev": RESOURCE_ABBREV,
             "rows_key": "standings",
             # utilization deliberately excluded from this report -- still a
             # raw field on every standings row, just not part of the table.

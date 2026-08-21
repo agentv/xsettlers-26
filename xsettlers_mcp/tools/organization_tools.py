@@ -15,6 +15,24 @@ import json
 
 
 VALID_ORG_MISSIONS = {"idle", "move", "colonize", "defend", "attack"}
+
+# Combat is designed but not built: engine/turn.py's step 5 dispatches these
+# two to stubs that do nothing. They stay in the vocabulary and are refused
+# here instead of being dropped from it, because the two answers say different
+# things to a player. Dropped, the rejection enumerates the survivors and
+# reads as "this game has no combat", which is false. Refused, it reads as
+# "not yet", which is true, and says so at the moment the player asks.
+#
+# Silent acceptance is the thing neither answer may allow: without this gate
+# the mission is written, the fleet report prints it, and the player waits
+# turns on an order the engine will never resolve.
+#
+# set_mission is the only door -- queue_command's whitelist is
+# {move, set_pod_task, colonize, aim_scan} and the NPC layer reaches the same
+# four actions -- so one gate covers it. Building combat is deleting this set
+# and filling the stubs.
+UNIMPLEMENTED_MISSIONS = {"defend", "attack"}
+WEAPONS_INOPERABLE = "Weapons are inoperable — combat is not implemented in this build"
 VALID_POD_TASKS = {"idle", "produce_energy", "produce_food", "produce_goods", "scan"}
 VALID_TRIGGER_PHASES = TRIGGER_PHASES
 
@@ -72,17 +90,23 @@ def _write_aim(sess, org_id: int, subject_id: int, offset, clearing: bool,
 
 
 @mcp_tool(
-    "Set an organization's mission (idle/move/colonize/defend/attack). For "
+    "Set an organization's mission (idle/move/colonize). 'defend' and "
+    "'attack' are part of the design but not built -- ordering one is "
+    "refused, not silently accepted. For "
     "mission='move', params must include dest_x/dest_y/dest_z (optionally "
     "jump_range_per_turn) -- delegates to the same confirm_move flow as the "
     "dedicated tool, so prefer preview_move first to check travel time.")
 @player_tool
 def set_mission(sess, org_id: int, mission: str, params: dict = None) -> dict:
     """
-    Set an organization's mission. Validates ownership and mission type, and
+    Set an organization's mission. 'defend' and 'attack' are refused (see
+    UNIMPLEMENTED_MISSIONS): they remain part of the vocabulary, so a player
+    asking for them is told combat is not built yet rather than told it does
+    not exist -- and, more to the point, is not handed a mission the engine
+    will never resolve. Validates ownership and mission type, and
     enforces the three org-lock states (see Data Model & Storage Design):
       - in transit (sector_id == -1): locked entirely, must cancel_move first
-      - colony: locked against 'move' only — defend/attack/idle remain assignable
+      - colony: locked against 'move' only — every other assignable mission stands
       - mid-colonization (ship, is_mobile == 0, not in transit): locked entirely,
         committed for the 3-turn transition window
     Setting mission='colonize' costs COLONIZATION_ENERGY_COST energy, drawn
@@ -99,6 +123,8 @@ def set_mission(sess, org_id: int, mission: str, params: dict = None) -> dict:
     """
     if mission not in VALID_ORG_MISSIONS:
         return {"error": f"Invalid mission '{mission}'. Valid: {sorted(VALID_ORG_MISSIONS)}"}
+    if mission in UNIMPLEMENTED_MISSIONS:
+        return {"error": WEAPONS_INOPERABLE}
     cur = sess.cur
     cur.execute("SELECT id,is_mobile,org_type,sector_id FROM organizations WHERE id=? AND player_id=?",
                 (org_id, sess.player_id))

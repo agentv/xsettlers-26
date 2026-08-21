@@ -2,7 +2,8 @@ import json
 from db.connection import get_connection
 from engine.turn import end_of_turn
 from xsettlers_mcp.tools.organization_tools import (
-    set_mission, set_pod_task, rename_organization, queue_command
+    set_mission, set_pod_task, rename_organization, queue_command,
+    UNIMPLEMENTED_MISSIONS, VALID_ORG_MISSIONS, WEAPONS_INOPERABLE
 )
 from engine.production import COLONIZATION_ENERGY_COST
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
@@ -93,6 +94,31 @@ def test_set_mission_unknown_player():
 def test_set_mission_invalid_type():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     assert "error" in set_mission("U_P1", oid, "dance")
+
+def test_set_mission_refuses_combat_rather_than_accepting_it_silently():
+    """The failure that matters is not the refusal but what used to happen
+    instead: the mission was written, the fleet report printed it, and the
+    player waited turns on an order engine/turn.py's stubs never resolve."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    set_mission("U_P1", oid, "idle")
+    for mission in ("defend", "attack"):
+        result = set_mission("U_P1", oid, mission)
+        assert result["error"] == WEAPONS_INOPERABLE
+        assert "ok" not in result
+    conn = get_connection()
+    assert conn.execute("SELECT mission FROM organizations WHERE id=?",
+                        (oid,)).fetchone()["mission"] == "idle"    # left untouched
+    conn.close()
+
+def test_combat_missions_stay_in_the_vocabulary_they_are_refused_from():
+    """Refused, not removed: a player who asks is told combat is not built
+    yet, which is true, rather than shown a valid-mission list that omits it
+    and reads as "this game has no combat", which is false."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    assert UNIMPLEMENTED_MISSIONS < VALID_ORG_MISSIONS
+    unknown = set_mission("U_P1", oid, "dance")["error"]
+    assert "defend" in unknown and "attack" in unknown
+    assert "not implemented" in set_mission("U_P1", oid, "attack")["error"]
 
 def test_set_mission_colony_cannot_move():
     pid, sid, oid = _seed_colonizer()

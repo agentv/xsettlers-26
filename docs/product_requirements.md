@@ -165,7 +165,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
     * **Ship's log dispatch** — any `queue_command`-deferred action due this turn (`before_arrival`/`after_arrival`/`at_turn`) fires here, right after arrivals so a chained action sees an org's just-landed state, and before production so a re-departing org's production is correctly suppressed that turn
     * Pod consumption then production (all pods: resources consumed first, then output produced; scan resolution for stationary orgs)
     * Colonization resolution (matured `colonize_complete` events flip `org_type` ship → colony)
-    * Mission dispatch (`defend`/`attack` — still stubs)
+    * Mission dispatch (`defend`/`attack` — still stubs, and unreachable while `set_mission` refuses both; the step is kept as the seam combat lands in)
     * Fog decayed
     * **Holdings calculated** — resource totals snapshotted across all orgs and pods
     * Turn counter incremented; game-over/final-score check
@@ -186,7 +186,7 @@ This section is the canonical design-authority inventory of every action a playe
 
 ### Set Mission (`set_mission`)
 
-Assigns a mission to one of the player's organizations. Valid missions are: `idle`, `move`, `colonize`, `defend`, `attack`. Colonies cannot be assigned the `move` mission. Setting a ship's mission to `colonize` causes it to convert to a colony at end of turn if it remains in the target sector.
+Assigns a mission to one of the player's organizations. Valid missions are: `idle`, `move`, `colonize`, `defend`, `attack` — but `defend` and `attack` are **refused** with "Weapons are inoperable", since combat is designed and not built. They stay in the vocabulary rather than being dropped from it: dropped, the rejection would enumerate the survivors and read as "this game has no combat", which is false. What neither answer may do is accept the order silently, which is what happened before the gate — the mission was written, the fleet report printed it, and the engine's stubs never resolved it. Colonies cannot be assigned the `move` mission. Setting a ship's mission to `colonize` causes it to convert to a colony at end of turn if it remains in the target sector.
 
 ### Set Pod Task (`set_pod_task`)
 
@@ -317,7 +317,7 @@ There is no separate debug-vs-player view distinction at the rendering layer —
 
 # Out of Scope (POC)
 
-* Combat (`defend` / `attack` missions are stubs)
+* Combat (`defend` / `attack` missions are stubs, and `set_mission` refuses both rather than accepting an order nothing will resolve)
 * Multi-game support within a single xsettlers deployment (concurrent games, not just switching scenarios) — see GameHouse note under [Players & Game Instance](#players--game-instance) for the orchestration layer that now exists *above* individual deployments instead
 * Runtime player join to an xsettlers-internal game already in session (GameHouse's lobby is a join-before-start flow, not mid-session join)
 * Variable scan range (sensor pods)

@@ -279,7 +279,7 @@ def test_resource_map_ranks_the_richest_sectors_it_can_see():
         ("(25,25,0)", "2.20"), ("(24,25,0)", "0.90"),
         ("(27,25,0)", "0.90"), ("(26,25,0)", "0.70")]
     assert result["display"]["rows_key"] == "richest"
-    assert result["display"]["column_labels"]["energy_display"] == "Energy (000s)"
+    assert result["display"]["column_labels"]["energy_display"] == "Energy (×1k)"
     assert result["richest"][1]["confidence"] == 80
 
 def test_resource_map_shortlist_is_capped():

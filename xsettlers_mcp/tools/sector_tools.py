@@ -381,6 +381,10 @@ def show_sector_neighborhood(
 # a slot per cell rather than a second report.
 CENTER_MARK = "@"            # suffixes the cell you are centered on
 
+# What the figures are counted in, on the legend line and the table header --
+# one label, so the two cannot come to say it differently.
+ENERGY_UNIT_LABEL = "×1k"
+
 # Five characters: a figure in thousands is four ("2.20"), and the center mark
 # is the fifth. Every cell is padded to it -- blanks and unknowns included --
 # because a column of figures only reads as a column when the decimal points
@@ -399,11 +403,8 @@ RICHEST_ROWS = 10
 # makes it land -- a cell reading "2.20" states the unit and the magnitude in
 # the space a sentence about energy would have taken.
 RESOURCE_LEGEND = [
-    "Energy x 1k: 2.20 = 2,200, 0.90 = 900.",
-    f"2.20{CENTER_MARK} = the sector this view is centered on",
+    f"Energy ({ENERGY_UNIT_LABEL}): 2.20 = 2,200, 0.90 = 900.",
     f"{UNKNOWN_CELL} = in range, never seen",
-    f"Sectors blink out {TURNS_TO_BLINK_OUT} turns after they were last seen, "
-    "taking their reading with them.",
     f"The table below lists the {RICHEST_ROWS} richest sectors you can currently see.",
 ]
 
@@ -534,7 +535,7 @@ def show_neighborhood_resources(
             # Same unit as the grid, stated in the header: two figures for
             # one quantity in one report is how a player misreads it.
             "column_labels": {"coords_display": "Coords",
-                              "energy_display": "Energy (000s)",
+                              "energy_display": f"Energy ({ENERGY_UNIT_LABEL})",
                               "confidence": "Confidence"},
         },
     }

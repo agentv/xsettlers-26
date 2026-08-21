@@ -269,12 +269,12 @@ def test_render_map_draws_the_resource_grid_with_no_new_code():
     assert " — Turn 0 of " in text.splitlines()[0]
     assert "| y/x | 21 | 22 |" in _squash(text)
     assert "0.80@" in text                      # the sector you're centered on, in thousands
-    assert "Energy x 1k: 2.20 = 2,200" in text      # the unit, with its example
+    assert "Energy (×1k): 2.20 = 2,200" in text     # the unit, with its example
 
 def test_render_map_draws_the_richest_table_under_the_resource_grid():
     text = _squash(render_map(_resources()))
     header_line = next(l for l in text.splitlines() if l.startswith("| Coords |"))
-    assert header_line == "| Coords | Energy (000s) | Confidence |"
+    assert header_line == "| Coords | Energy (×1k) | Confidence |"
     assert "| (25,25,0) | 0.80 | 100 |" in text
 
 def test_render_status_dispatches_the_resource_map_to_render_map():

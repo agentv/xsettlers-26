@@ -34,7 +34,7 @@ bearings in `xsettlers_mcp/tools/sector_tools.py`, resolution in `engine/turn.py
 
 **A scan reveals only its target sector.** No halo, no ring — range governs reach, not breadth. A radius-5 halo was considered and rejected as making scanning too cheap for the value it returns.
 
-> **Future hook — sensor pods:** Scan range will eventually be derived from the org's pod manifest. A future `sensor` pod type will contribute range increments, and `get_scan_range(org_id)` will query the pod table instead of returning a constant. Do NOT hard-code the number at the call site — always call `get_scan_range()`.
+> **Future hook — scan range from the pods aboard:** Scan range will eventually be derived from an org's pods rather than a constant, and `get_scan_range(org_id)` will query the pod table. Note this is about pods *on the scan task*, not a `sensor` pod type — pods have no type (see [Product Requirements](product_requirements.md)), so range would come from how many crews are aimed at the problem. Do NOT hard-code the number at the call site — always call `get_scan_range()`.
 
 **Flow:**
 
@@ -110,7 +110,6 @@ Each `build_*_view()` function returns a plain dict. The renderer decides how to
   "pods": [
     {
       "pod_id": int,
-      "pod_type": str,
       "task": str,
       "storage_current": float,
       "storage_capacity": float,
@@ -154,7 +153,6 @@ Each `build_*_view()` function returns a plain dict. The renderer decides how to
   "pods": [
     {
       "pod_id": int,
-      "pod_type": str,
       "task": str,
       "storage_current": float,
       "storage_capacity": float,
@@ -322,8 +320,8 @@ Each organization (ship or colony) is represented as a **card** — a self-conta
 1. **Header** — org name, type icon (ship vs colony), status indicator dot (green = idle/docked, amber = in transit)
 2. **Location line** — sector coords `(x, y)` or `In Transit → (x, y)` with arrival turn
 3. **Mission line** — current mission string
-4. **Resource bars** — one bar per pod type: `energy`, `factory`, `farm`. Each bar shows:
-    1. A fill bar representing `aggregate_storage_current / aggregate_storage_capacity` for that pod type
+4. **Resource bars** — one bar per production task, colloquially `energy`, `factory`, `farm`. Each bar shows:
+    1. A fill bar representing `aggregate_storage_current / aggregate_storage_capacity` for the pods on that task
     2. The numeric readout overlaid on the bar: e.g. `82 / 100`
 5. **Footer** — player owner identifier (debug view only)
 
@@ -368,7 +366,7 @@ enforcement and confidence stamping at end-of-turn resolution
 * `views/html_renderer.py` — implement `render_org_card(view: dict) -> str` returning hydrated card HTML; consume adaptive card spec above
 * **Rival detection is not built.** `engine/turn.py`'s scan resolution still reads `# TODO: emit pod.scanned event; detect rivals` — no `alert.rival_detected` event is ever emitted, and there is no sighting history in the schema. Because rival positions can therefore only be read live from `organizations`, the neighborhood map restricts rival reporting to sectors at confidence 100 (see Cell vocabulary above). Real sighting storage would let rivals surface on decayed cells honestly, stamped with the turn they were last seen.
 * `tests/test_renderers.py` — cover the card/view-model renderers once they exist: debug view shows `_debug` fields; player view omits them; resource bar fill math correct
-* **Future:** `sensor` pod type + variable `get_scan_range(org_id)` — wire up when sensor pods are designed
+* **Future:** variable `get_scan_range(org_id)` derived from the pods on the scan task — wire up when that is designed. Not a `sensor` pod type; pods have no type.
 * **Future:** SVG map renderer — `views/svg_renderer.py`; same view model contract, different output format
 * **Future:** whole-known-map view. `player_sectors` already *is* the global known-sectors store and `get_sector_map()` already reads it, and `render_map()` is written against a viewport (center + radius + known cells) rather than against "neighborhood" specifically — so the same renderer draws it. What is genuinely unbuilt is the width problem: `game0` puts home sectors 25 apart, so a full known-map bounding box exceeds what a markdown table shows readably on a phone. Needs downsampling or paging first.
 * **Future:** Column config persistence — save/load named column layouts per player

@@ -191,7 +191,7 @@ CREATE TABLE pods (
 );
 ```
 
-Pod missions: `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. No `pod_type` field — mission defines the pod's role entirely. The colloquial names *energy*, *farm*, and *factory* correspond to `produce_energy`, `produce_food`, and `produce_goods` respectively.
+Pod tasks: `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. No `pod_type` field — a pod has no type, and the task it has been given is its whole role. (Pods have a `task`; organizations have a `mission`.) The colloquial names *energy*, *farm*, and *factory* correspond to `produce_energy`, `produce_food`, and `produce_goods` respectively.
 
 ## Events (Write-Ahead Log)
 

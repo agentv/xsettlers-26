@@ -38,7 +38,7 @@ This canvas defines the first playable MVP instance of XSettlers. It is a self-c
 
 Each ship carries **6 pods**:
 
-| Pod Type | Count | Default Task | Produces |
+| Colloquial Name | Count | Task | Produces |
 |---|---|---|---|
 | `energy` | 2 | `produce` | Energy |
 | `factory` | 2 | `produce` | Goods |
@@ -46,21 +46,21 @@ Each ship carries **6 pods**:
 
 * All pods are **active from turn 1** with default tasks assigned at bootstrap. No setup action required.
 * Players may reassign any pod's task at any time using `set_pod_task`. Valid tasks: `produce`, `mine`, `idle`.
-* **Hook:** a future `reconfigure_pods(org_id, pod_manifest)` action will allow players to change pod types entirely (e.g. swap factory pods for additional sensor pods). The data model supports this already — pods are rows, not a fixed schema.
+* There is no pod loadout to reconfigure: a pod has no type, so "swapping factory pods for sensor pods" is just `set_pod_task`, which a player may already do at any time. See [Product Requirements](product_requirements.md).
 
-> **Note:** this table's `Pod Type` / `Default Task` vocabulary predates the mission-based pod model in [Data Model & Storage Design](data_model_and_storage_design.md) and [Product Requirements](product_requirements.md), where pods carry a `mission` (`produce_energy`/`produce_food`/`produce_goods`/`scan`/`idle`) rather than a `pod_type` + `task` pair. For bootstrap seeding, treat the 6/6/6 per-ship counts and colloquial names (`energy`→`produce_energy`, `factory`→`produce_goods`, `farm`→`produce_food`) as authoritative, mapped onto the `mission` field.
+> **Note:** this table's `Pod Type` / `Default Task` vocabulary is superseded. Pods have no type — every pod is the same object and carries only a `task` (`produce_energy`/`produce_food`/`produce_goods`/`scan`/`idle`), which the player may reassign at any time; see [Data Model & Storage Design](data_model_and_storage_design.md) and [Product Requirements](product_requirements.md). A "deferred pod type" is not a thing waiting to be built. For bootstrap seeding, treat the per-ship counts and colloquial names (`energy`→`produce_energy`, `factory`→`produce_goods`, `farm`→`produce_food`) as authoritative, mapped onto `task`.
 
 ---
 
-# Pod Types
+# Pod Tasks
 
-Three pod types are **active in this game instance**. The full pod roster (including deferred types) is documented in the [Product Requirements](product_requirements.md).
+Three tasks are **active in this game instance**. Pods themselves are interchangeable — see the [Product Requirements](product_requirements.md) for the full roster of tasks a pod can be given.
 
 * **`energy`** — produces energy each turn. Energy powers other pods and contributes to movement capacity. Future: energy deficit will throttle production.
 * **`factory`** — manufactures goods each turn from resources the organization already holds (energy + food). Not sector-sourced: a factory works the same anywhere.
 * **`farm`** — manufactures food each turn from resources the organization already holds (energy + goods). Not sector-sourced either.
 
-**Deferred pod types** (not active in this instance): `crew`, `cargo`, `defense`, `attack`, `ship`, `sensor`. These are recognized in the data model but not instantiated. See the [Product Requirements](product_requirements.md) for the full roster with descriptions.
+**Deferred tasks** (not active in this instance): `defend` and `attack`, both awaiting a combat system. Nothing else on the old deferred list survives — `crew`, `cargo`, `ship` and `sensor` were pod *types*, and pods have no type. See the [Product Requirements](product_requirements.md) for the roster of tasks.
 
 ---
 

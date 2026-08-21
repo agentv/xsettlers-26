@@ -294,10 +294,10 @@ game.
     this is about loadout before that transition starts.
 
   Not designed: what fields this needs (a `ship_class` column? a stat-modifier
-  table keyed by class?), how it interacts with the `pods_per_ship` templates in
-  `config/game*.yaml`, or how it relates to the deferred `pod_type` roster (a
-  ship class could plausibly be *defined* by its pod-type mix rather than being
-  a separate field).
+  table keyed by class?), or how it interacts with the `pods_per_ship` templates
+  in `config/game*.yaml`. Note a ship class cannot be defined by its "pod-type
+  mix": pods have no type, only an assignable task, so what a ship carries is
+  identical between two ships and only what their crews are doing differs.
 * [ ] Review sector schema for ownership field creep.
 * [ ] Evaluate denormalized active player ID vector on Sector (future).
 * [ ] Evaluate Neo4j Community Edition (future).

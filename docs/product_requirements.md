@@ -64,7 +64,9 @@ Players control **organizations** — the fundamental unit of agency. Two types:
 
 ## Pod Tasks — Full Roster
 
-The following pod tasks are defined in the game model. Only a subset are active in any given game instance; the rest are deferred for future implementation.
+**A pod has no type.** Every pod is the same object — generic storage, no specialization — and the only thing that varies between two of them is the task their crew has been given. That is the point of pods being modular: a player deploys each one however they wish and retasks it whenever they wish, and because storage is generic (see above) retasking never strands or relabels what the pod is already holding. There is no `pod_type` field, no manifest to reconfigure, and no pod that can only ever do one job.
+
+So the roster below is a list of **jobs a pod can be given**, not a catalogue of pods to acquire. Only a subset are active in any given game instance; the rest are deferred.
 
 | Pod Task | Colloquial Name | Status | Description |
 |---|---|---|---|
@@ -73,10 +75,10 @@ The following pod tasks are defined in the game model. Only a subset are active 
 | `produce_food` | farm | **Active** | Manufactures food each turn from stored resources — **not** sector-sourced. Consumes energy and goods. |
 | `produce_goods` | factory | **Active** | Manufactures goods each turn from stored resources — **not** sector-sourced. Consumes energy and food. The slowest to produce and the highest-scoring. |
 | `scan` | scanner | **Active** | Scans one sector at end of turn, aimed by bearing via `set_pod_scan_bearing`. Consumes food. Suppressed (but still charged) while in transit. |
-| `crew` | crew | Deferred | General-purpose pod. Flexible but less productive than specialized pods. |
-| `cargo` | cargo | Deferred | Stores goods, energy, and food. Does not consume energy but consumes food for its crew. |
-| `defend` | defense | Deferred | Absorbs damage from attackers. Requires combat system. |
-| `attack` | attack | Deferred | Attacks other ships and colonies. Requires combat system. |
+| `defend` | defense | Deferred | Crew works the shields, absorbing damage aimed at their org. Requires combat system. |
+| `attack` | attack | Deferred | Crew works the guns against other ships and colonies. Requires combat system. |
+
+Two jobs that used to be listed here are gone rather than deferred, because the current model does their work already: a **cargo** pod is redundant when every pod stores any mix of resources up to its own capacity, and a **crew** pod — "general-purpose, flexible, less productive than a specialist" — describes what every pod now is. Neither is a thing to build; both were consequences of pods having types.
 
 ### Rates (per pod, per turn)
 

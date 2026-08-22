@@ -148,11 +148,10 @@ def npc_profile_schema() -> dict:
     The JSON schema an NPC roster entry must match, built from the strategy
     library rather than authored.
 
-    Every scenario used to restate this enum in its own `lobby:` block, and
-    each copy went stale the moment a strategy was added or renamed -- the
-    same drift the loader already refuses for min_players. The library is
-    service-wide, not per-scenario, so there is nothing for a scenario to say
-    about it.
+    The library is service-wide, not per-scenario, so there is nothing for a
+    scenario to say about which strategies exist -- restating the enum
+    per-scenario would drift out of sync with the library, the same drift the
+    loader already refuses for min_players.
 
     `config` is intentionally unconstrained: it overlays the strategy
     document's own config block, whose keys differ per strategy, and a

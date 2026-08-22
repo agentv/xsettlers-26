@@ -339,8 +339,7 @@ def end_of_turn():
                              consumption)
 
             # org_position returns None for an in-transit org (parked at the
-            # sentinel sector), which is the same suppression the explicit
-            # sector_id check used to spell out.
+            # sentinel sector), which is what suppresses scanning in transit.
             org = org_position(cur, org_id)
             if ratio > 0 and org:
                 params = json.loads(pod["task_params"] or "{}")

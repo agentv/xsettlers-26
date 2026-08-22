@@ -1,16 +1,11 @@
 """
 The MCP tool surface, declared once per tool at the function itself.
 
-A tool used to be declared in three places that had to agree by hand: an
-import in server.py, a hand-written inputSchema in list_tools(), and an entry
-in call_tool()'s dispatch dict. Twenty-two tools times three declarations is
-sixty-six chances to disagree, and one of them cost a live cross-process
-handoff -- start_session's schema said scenario_key was a string, which JSON
-Schema rejects for null, while the Python happily accepted None.
-
-Now `@mcp_tool(description=...)` on the function is the whole declaration. The
+`@mcp_tool(description=...)` on the function is the whole declaration. The
 schema is derived from the signature, which cannot drift from the parameters
 the function actually takes, and the dispatch table is the registry itself.
+See `docs/dev_history.md` for what a hand-written, drift-prone version of this
+cost in practice.
 
 The description stays hand-written rather than lifted from the docstring: it
 is addressed to a language model deciding whether to call this tool, while the

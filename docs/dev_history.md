@@ -118,6 +118,16 @@ catches this in tests, because no test imports `mcp.server` directly.
 
 ## Findings from play
 
+**A tool declared in three places will eventually disagree.** Before the
+`@mcp_tool` registry, a tool's schema meant a hand-written inputSchema in
+list_tools() plus a matching entry in call_tool()'s dispatch dict plus the
+import in server.py -- three places for each of 22 tools to agree by hand.
+One disagreement cost a live cross-process handoff: start_session's
+hand-written schema said `scenario_key` was a string, which JSON Schema
+rejects for `null`, while the Python function happily accepted `None`.
+`@mcp_tool(description=...)` derives the schema from the function signature
+instead, so it cannot drift from what the function actually takes.
+
 **Starting at full capacity breaks the economy.** A fleet at 100% fill cannot
 accumulate, so production is pure waste and only *spending* moves the score.
 Measured: holdings sat at exactly 5400 for four turns at 100% fill while score

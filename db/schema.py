@@ -106,6 +106,20 @@ def init_schema():
             session_token TEXT NOT NULL,
             CHECK (id = 1)
         );
+        -- A player-named, explicitly managed roster of that player's own
+        -- ships (never colonies -- see organizations.task_force_id). Carries
+        -- no co-location or state requirement of its own; membership changes
+        -- only by direct action (create/add/remove), with one exception --
+        -- a member flips out the moment it colonizes (engine/turn.py's
+        -- _handle_colonize), since a task force cannot hold anything but a
+        -- ship. An order against one is a fan-out over the ordinary
+        -- single-org tools, not a new turn-resolution step -- see
+        -- xsettlers_mcp/tools/task_force_tools.py.
+        CREATE TABLE IF NOT EXISTS task_forces (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id INTEGER NOT NULL REFERENCES players(id),
+            name      TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS organizations (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             org_type       TEXT CHECK(org_type IN ('ship','colony')),
@@ -116,6 +130,11 @@ def init_schema():
             mission        TEXT DEFAULT 'idle'
                            CHECK(mission IN ('idle','move','colonize','defend','attack')),
             mission_params TEXT,
+            -- NULL for a ship not currently in any task force, and always
+            -- NULL for a colony -- enforced at the tool layer (see
+            -- task_force_tools.py), not by a CHECK, since org_type and this
+            -- column are set by separate statements at separate times.
+            task_force_id INTEGER REFERENCES task_forces(id),
             -- Innate scan: every organization can scan one sector per turn on
             -- its own account -- a ship's bridge, a colony's headquarters --
             -- without spending a pod on it. Aimed by an OFFSET from the
@@ -263,6 +282,7 @@ def init_schema():
 # every poll, forever.
 ADDED_COLUMNS = {
     "players": {"gamehouse_person_id": "INTEGER"},
+    "organizations": {"task_force_id": "INTEGER REFERENCES task_forces(id)"},
 }
 
 

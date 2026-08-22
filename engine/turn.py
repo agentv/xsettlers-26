@@ -545,14 +545,18 @@ def get_final_scores() -> dict:
     return json.loads(row["payload"]) if row else None
 
 def _handle_colonize(cur, org, current_turn):
-    """Resolve a matured colonize_complete event: flip org_type to 'colony' and log ship.colonized."""
+    """Resolve a matured colonize_complete event: flip org_type to 'colony' and log ship.colonized.
+
+    Clears task_force_id in the same statement -- a task force cannot hold
+    anything but a ship, so a member that colonizes leaves the moment
+    org_type flips (see docs/TODO.md's task-forces direction)."""
     if org["org_type"] != "ship":
         return
     record_event_direct(cur, current_turn, "ship.colonized", subject_id=org["id"],
         subject_type="organization", payload={"org_id": org["id"], "sector_id": org["sector_id"]})
     cur.execute("""UPDATE organizations
-        SET org_type='colony',is_mobile=0,mission='idle',mission_params=NULL WHERE id=?""",
-        (org["id"],))
+        SET org_type='colony',is_mobile=0,mission='idle',mission_params=NULL,task_force_id=NULL
+        WHERE id=?""", (org["id"],))
 
 def _handle_defend(cur, org, params): pass   # stub
 def _handle_attack(cur, org, params): pass   # stub

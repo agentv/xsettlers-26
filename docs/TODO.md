@@ -265,35 +265,31 @@ game.
   price at all, not sized against what a colony is worth. Retune against play
   data, not analysis.
 
-### Task forces — **direction**, not built
+* [x] ~~**Task forces** — direction, not built~~ Built 2026-08-22. A
+  player-named, explicitly managed roster of a player's own ships — never
+  colonies, and a ship belongs to at most one at a time, both enforced at the
+  tool layer (`xsettlers_mcp/tools/task_force_tools.py`): `create_task_force`,
+  `add_to_task_force`, `remove_from_task_force`, `disband_task_force`,
+  `list_task_forces`. Storage is a `task_forces` table plus a nullable
+  `task_force_id` on `organizations` — no new engine mechanics, no new
+  turn-resolution step. Membership changes only by direct action; the one
+  automatic exception is a member that colonizes, which clears
+  `task_force_id` in the same statement `engine/turn.py`'s `_handle_colonize`
+  uses to flip `org_type`, since a task force cannot hold anything but a ship.
+  No co-location requirement anywhere, matching the direction as designed.
 
-A player-named, explicitly managed list of that player's own ships — never
-colonies, and a ship belongs to at most one at a time. Membership changes only
-by direct action: created with an initial roster, added to or removed from by
-name afterward. Nothing about position, mission, or any other org state
-changes it automatically, with one necessary exception — a member that
-colonizes leaves the moment `org_type` flips, since a task force cannot hold
-anything but a ship.
-
-Deliberately carries **no co-location requirement** — not to join, not to
-stay a member, not to receive an order. A task force may be scattered across
-the map; governing pod tasking across ships that aren't together is as much
-the point as moving a group in formation.
-
-A task-force order is a **fan-out, not a transaction**: the same call — the
-same destination, the same pod retask — goes independently to every current
-member's own org id, through the ordinary single-org tools that already exist
-(`set_mission`, `set_pod_task`). An order a given member cannot currently
-accept (locked mid-colonization, already in transit, wrong state for what's
-being asked) simply fails for that member and succeeds for the rest, reported
-per-member. Nothing rolls back, and a failed order never removes a member —
-only colonizing does that.
-
-Because there is no co-location constraint anywhere, this needs no new engine
-mechanics and no new turn-resolution step — a stored roster (a `task_forces`
-table plus a nullable `task_force_id` on `organizations`, or equivalent) and a
-tool-layer wrapper over calls that already exist. Every fanned-out call is
-already logged the way its own tool logs it.
+  `order_task_force` fans a **mission** order (`set_mission`'s own
+  mission/params) out to every current member's org id, independently — not a
+  transaction, so one member that cannot currently accept the order (in
+  transit, mid-colonization, wrong state) fails only for that member and
+  reports why, while the rest still go through. **Scoped narrower than the
+  original direction**: only `set_mission` is fanned. A `set_pod_task` fan-out
+  was left out because, unlike a destination or a mission, a pod id does not
+  generalize across members with different pod loadouts — the direction's
+  "same pod retask" language doesn't specify a selector (by index? by
+  matching current task?), and that's a real design decision, not a detail to
+  default silently. Pick one and add it as its own tool when a fleet actually
+  needs pod-level task-force orders.
 
 ### Resource transfer between organizations — **direction**, not built
 

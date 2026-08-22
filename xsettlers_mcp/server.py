@@ -19,6 +19,7 @@ import xsettlers_mcp.tools.sector_tools   # noqa: F401
 import xsettlers_mcp.tools.navigation_tools    # noqa: F401
 import xsettlers_mcp.tools.organization_tools  # noqa: F401
 import xsettlers_mcp.tools.organization_reports  # noqa: F401
+import xsettlers_mcp.tools.task_force_tools     # noqa: F401
 from xsettlers_mcp.gamehouse import register_with_gamehouse, run_results_reporter
 from xsettlers_mcp.tools.registry import TOOLS
 from db.schema import init_schema

@@ -62,8 +62,8 @@ def _scanners_on(cur, org: dict) -> list:
 def show_organization(sess, org_id: int) -> dict:
     """
     Return the complete properties of one of the player's own organizations:
-    org record (type, mission, mission_params, is_mobile, sector location)
-    plus pods grouped by task — count of pods on each task, total
+    org record (type, mission, mission_params, is_mobile, sector location,
+    task_force_id if it's a task force member) plus pods grouped by task — count of pods on each task, total
     capacity of that group, and what's actually stored there broken down by
     resource type (energy/food/goods). Storage is generic per pod and
     independent of current task (see engine/turn.py), so a task group's
@@ -87,7 +87,7 @@ def show_organization(sess, org_id: int) -> dict:
     cur = sess.cur
     cur.execute("""
         SELECT o.id, o.org_type, o.name, o.mission, o.mission_params,
-               o.is_mobile, o.sector_id,
+               o.is_mobile, o.sector_id, o.task_force_id,
                o.scan_offset_x, o.scan_offset_y, o.scan_offset_z,
                s.coord_x, s.coord_y, s.coord_z
         FROM organizations o

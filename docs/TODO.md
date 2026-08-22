@@ -265,14 +265,75 @@ game.
   price at all, not sized against what a colony is worth. Retune against play
   data, not analysis.
 
-* **Resource transfer between organizations** — no such tool exists; an org's
-  stock is reachable only by its own pods. The play this enables: ship a cargo
-  to a fledgling colony that has landed somewhere rich but has nothing to work
-  with, letting it bootstrap into abundance. That makes a well-chosen colony
-  site worth *investing in* rather than merely worth occupying, and gives ships
-  a logistics role distinct from exploration. Undesigned: whether transfer
-  requires co-location (almost certainly), whether it costs anything, and
-  whether it is one tool or a pair (give/take).
+### Task forces — **direction**, not built
+
+A player-named, explicitly managed list of that player's own ships — never
+colonies, and a ship belongs to at most one at a time. Membership changes only
+by direct action: created with an initial roster, added to or removed from by
+name afterward. Nothing about position, mission, or any other org state
+changes it automatically, with one necessary exception — a member that
+colonizes leaves the moment `org_type` flips, since a task force cannot hold
+anything but a ship.
+
+Deliberately carries **no co-location requirement** — not to join, not to
+stay a member, not to receive an order. A task force may be scattered across
+the map; governing pod tasking across ships that aren't together is as much
+the point as moving a group in formation.
+
+A task-force order is a **fan-out, not a transaction**: the same call — the
+same destination, the same pod retask — goes independently to every current
+member's own org id, through the ordinary single-org tools that already exist
+(`set_mission`, `set_pod_task`). An order a given member cannot currently
+accept (locked mid-colonization, already in transit, wrong state for what's
+being asked) simply fails for that member and succeeds for the rest, reported
+per-member. Nothing rolls back, and a failed order never removes a member —
+only colonizing does that.
+
+Because there is no co-location constraint anywhere, this needs no new engine
+mechanics and no new turn-resolution step — a stored roster (a `task_forces`
+table plus a nullable `task_force_id` on `organizations`, or equivalent) and a
+tool-layer wrapper over calls that already exist. Every fanned-out call is
+already logged the way its own tool logs it.
+
+### Resource transfer between organizations — **direction**, not built
+
+A new org-level action — `transfer` — moving one resource type and an amount
+from one of a player's own organizations to another. Org-scoped, not
+pod-scoped: it draws from and credits an org's pooled total, the same figure
+`apply_colonize` already reads to check affordability, not any particular
+pod's storage.
+
+Ordering it requires the two organizations to currently share a sector.
+Nothing is escrowed at that point — the resource stays live in the sender's
+own economy, spendable by its own production and upkeep, right up until
+resolution.
+
+**Resolves one tick later, and has to be the first thing `end_of_turn()` does
+— ahead of arrivals, ahead of everything.** Co-location is rechecked at
+resolution using each org's position as of the *start* of that turn, before
+any of the turn's own movement can change it. Running this step after
+arrivals would let a transfer complete on a sector pairing that only came into
+existence during the very turn being resolved — two orgs that only just met,
+credited as though they'd been together for the whole wait. Resolving
+transfers first closes that off: a transfer only ever completes between
+organizations that were already together going into the turn.
+
+If the two organizations are no longer co-located at resolution: the transfer
+does not happen. The sender keeps everything, exactly as if it had never been
+ordered.
+
+If they are still co-located: the sender loses whatever of the resource it
+currently holds, capped at the amount originally ordered — never more than
+what's actually there, so a sender that has spent some of it down in the
+intervening turn simply sends less rather than being refused outright. The
+receiver gains that amount capped at its own free capacity (total storage
+capacity across its pods, less whatever it already holds); anything beyond
+that is destroyed — not returned to the sender, not held anywhere.
+
+Needs a **credit** counterpart to the org-pool drain `apply_colonize` already
+uses to pay its cost — that helper only ever drains an org's pooled resource
+today; crediting one, spread across whichever of the receiving org's pods have
+room, is new.
 
 ## Design (Data Model)
 

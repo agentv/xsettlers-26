@@ -309,6 +309,59 @@ def test_results_are_reported_only_once():
     again = asyncio.run(report_results())
     assert again["ok"] is False and "already reported" in again["skipped"]
 
+# --- archiving on settle ---
+#
+# Once a finished game is fully settled -- reported to GameHouse if it needed
+# to be, nothing pending -- the live database is archived so a running server
+# can accept the next game without a restart. archive_active_database() itself
+# is tested in tests/test_db_archive.py; what belongs here is the gate that
+# decides WHEN it's safe to call it.
+
+def test_game_settled_is_false_while_the_game_is_running():
+    from xsettlers_mcp.gamehouse import _game_settled
+    _clear_active_game()
+    assert _game_settled() is False
+
+def test_game_settled_is_true_immediately_for_a_non_gamehouse_game():
+    """A plain (select_scenario-style) game has no session_token, so there is
+    nothing to wait for -- settled the instant it ends."""
+    from xsettlers_mcp.gamehouse import _game_settled
+    from tests.conftest import seed_player
+    # fresh_db already seeds an active (non-GameHouse) game -- clearing it
+    # would make end_of_turn() no-op forever, per CLAUDE.md.
+    seed_player()
+    _finish_game()
+    assert _game_settled() is True
+
+def test_game_settled_waits_for_the_gamehouse_handback():
+    import asyncio
+    from xsettlers_mcp.gamehouse import _game_settled, report_results
+    _clear_active_game()
+    start_session("tok1", [_npc("npc-1"), _npc("npc-2")])
+    _finish_game()
+    assert _game_settled() is False, "results haven't been reported yet"
+    asyncio.run(report_results())
+    assert _game_settled() is True
+
+def test_reporter_tick_archives_only_once_settled():
+    import asyncio, os
+    from xsettlers_mcp.gamehouse import _reporter_tick
+    _clear_active_game()
+    start_session("tok1", [_npc("npc-1"), _npc("npc-2")])
+    db_path = os.environ["DB_PATH"]
+
+    asyncio.run(_reporter_tick())  # game still running: no report, no archive
+    assert os.path.exists(db_path)
+    assert not any(f.startswith(os.path.basename(db_path) + ".finished-")
+                   for f in os.listdir(os.path.dirname(db_path) or "."))
+
+    _finish_game()
+    asyncio.run(_reporter_tick())  # reports to GameHouse (all-NPC, so a no-op
+                                    # hand-back) and, now settled, archives
+    assert any(f.startswith(os.path.basename(db_path) + ".finished-")
+               for f in os.listdir(os.path.dirname(db_path) or "."))
+    assert os.path.exists(db_path), "a fresh DB must be ready at the live path"
+
 def test_scoreboard_schema_declares_the_envelope_and_its_direction():
     from xsettlers_mcp.gamehouse import scoreboard_schema, PLACEMENT_FIELD, SCORE_FIELD
     schema = scoreboard_schema()

@@ -33,6 +33,7 @@ from config.loader import load_starting_configuration
 from db.connection import get_connection, read_one
 from db.bootstrap import bootstrap_game
 from db.events import record_event
+from db.archive import archive_active_database
 from engine.turn import get_final_scores
 from npc.profiles import assign_npc_profile
 from npc.strategies import strategy_names
@@ -371,6 +372,21 @@ def _session_token():
     return row["session_token"] if row else None
 
 
+def _game_settled() -> bool:
+    """
+    True once the game is over and nothing GameHouse-related is still
+    pending -- either this was never a GameHouse game, or the hand-back has
+    already gone out. This is the gate for archive_active_database(): moving
+    the live DB aside before a pending hand-back succeeds would strand the
+    scoreboard GameHouse still needs to poll for, the same way archiving
+    would break a plain (non-GameHouse) player's ability to read their final
+    score if it ran before the game was actually over.
+    """
+    if not get_final_scores():
+        return False
+    return _session_token() is None or _results_already_reported()
+
+
 async def report_results() -> dict:
     """
     Hand the finished game's scoreboard back to GameHouse, once.
@@ -427,9 +443,29 @@ async def report_results() -> dict:
     return {"ok": True, "reported": len(results)}
 
 
+async def _reporter_tick():
+    """
+    One pass of run_results_reporter's work, split out so a test can drive a
+    single iteration without unrolling an infinite loop: report results if
+    the game just ended, then archive the finished database once nothing is
+    still waiting on it (see _game_settled()).
+    """
+    outcome = await report_results()
+    if outcome.get("ok") and outcome.get("reported") is not None:
+        print(f"Reported final results to GameHouse for "
+              f"{outcome['reported']} player(s).")
+    elif outcome.get("error"):
+        print(f"Results hand-back failed (will retry): {outcome['error']}")
+
+    if _game_settled():
+        archived = archive_active_database()
+        if archived:
+            print(f"Game over -- archived finished database to {archived}")
+
+
 async def run_results_reporter():
     """
-    Watch for the game ending and hand results back once it has.
+    Watch for the game ending, hand results back, then archive.
 
     A poll rather than a hook at game-over, because both paths that can end a
     game -- engine/clock.py's tick and engine/turn.py's
@@ -440,19 +476,13 @@ async def run_results_reporter():
 
     Two things this gets that a hook would not: one trigger covering both
     game-over paths, and recovery across a restart -- a server that dies
-    between game-over and a successful push simply reports on its next boot,
-    because the condition is a fact in the database rather than a moment that
-    passed.
+    between game-over and a successful push simply reports (and, once
+    settled, archives) on its next boot, because both conditions are facts in
+    the database rather than a moment that passed.
     """
     while True:
         await asyncio.sleep(REPORT_POLL_SECONDS)
         try:
-            outcome = await report_results()
+            await _reporter_tick()
         except Exception as exc:      # belt and braces: this loop must not die
             print(f"Results reporter error: {exc}")
-            continue
-        if outcome.get("ok") and outcome.get("reported") is not None:
-            print(f"Reported final results to GameHouse for "
-                  f"{outcome['reported']} player(s).")
-        elif outcome.get("error"):
-            print(f"Results hand-back failed (will retry): {outcome['error']}")

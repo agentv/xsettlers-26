@@ -375,12 +375,20 @@ decided even though none of it is built:
   bootstrap time, and a not-yet-designed lobby/router layer routes a
   `player_token` to the right file. Until this lands, xsettlers runs one active
   game per deployment and every subsequent handoff bounces off the guards above.
-* [ ] A game-ending tool (doesn't exist — see the run-state item) should, on
-  completion, archive that game's database (move it out of the live path, not
-  delete it) and mark the game complete in whatever registry tracks multiple
-  games. Note the results hand-back is *not* this: it reports the outcome and
-  leaves the database exactly where it is, so a finished game still occupies
-  the single live `DB_PATH`.
+* [x] Archiving is automatic now: `xsettlers_mcp/gamehouse.py`'s results
+  reporter loop calls `db/archive.archive_active_database()` once
+  `_game_settled()` is true (game over, and either there was no GameHouse
+  session to wait for or the hand-back already succeeded) — it moves
+  `DB_PATH` to `<DB_PATH>.finished-<UTC timestamp>` and reinitializes an
+  empty schema in its place, so the running process can accept the next
+  `select_scenario`/`start_session` without a restart. Note the results
+  hand-back itself is *not* this: it reports the outcome and leaves the
+  database where it is; archiving is a separate, later step gated on the
+  hand-back being done so it can never strand a pending scoreboard.
+* [ ] Still missing: a registry that tracks multiple finished games (today
+  a finished game is just a timestamped file on disk, nothing queryable),
+  and anything to route a `player_token` to the right one — both blocked on
+  the per-game-DB routing item above.
 * [ ] Once a game can be marked complete, **GameHouse must never offer a Person
   the option to join or reconnect to a completed game.** Half of this is now
   free: the results hand-back flips `game_journal.status` to `completed`, so

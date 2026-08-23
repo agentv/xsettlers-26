@@ -16,42 +16,27 @@ from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED
 from engine.production import org_production
 from engine.turn import get_next_tick_at, get_final_scores, TURN_LIMIT
 from engine.scoring import player_standings
-from engine.bearings import bearing_name
+from engine.scanning import aim_label, scanners_on
 from views.format import (RESOURCE_ABBREV, TASK_ABBREV, TASK_DISPLAY,
                           resource_summary, scanner_footer, short_name,
                           stacked_header, tasking_summary, tick_countdown,
                           totals_footer, turn_header, winners_label)
-import json
 import os
 
 def _scanners_on(cur, org: dict) -> list:
     """
-    Every currently-active scanner on this org -- its own innate sensor (see
-    organizations.scan_offset_*) plus any pod on the scan task -- as a list of
-    {"source", "bearing", "aimed"} dicts.
+    engine.scanning.scanners_on rendered for reading: {"source", "bearing",
+    "aimed"} dicts, where `bearing` is the compass name or the raw offset.
 
-    An aimed scanner shows its compass name, or the raw offset if it doesn't
-    land on one of the 12 named bearings. An unaimed scan pod still costs its
-    food and reveals nothing, so it is listed and flagged rather than silently
-    dropped (see set_pod_task's docstring). views.format.scanner_footer turns
-    this list into the one-line summary.
+    An unaimed scan pod still costs its food and reveals nothing, so it is
+    listed and flagged rather than silently dropped (see set_pod_task's
+    docstring). views.format.scanner_footer turns this list into the one-line
+    summary.
     """
-    scanners = []
-    if org["scan_offset_x"] is not None:
-        name = bearing_name(org["scan_offset_x"], org["scan_offset_y"], org["scan_offset_z"])
-        display = name or f"({org['scan_offset_x']},{org['scan_offset_y']},{org['scan_offset_z']})"
-        scanners.append({"source": "sensors", "bearing": display, "aimed": True})
-    cur.execute("SELECT id, task_params FROM pods WHERE org_id=? AND task='scan' ORDER BY id",
-                (org["id"],))
-    for pod in cur.fetchall():
-        if pod["task_params"]:
-            p = json.loads(pod["task_params"])
-            name = bearing_name(p["offset_x"], p["offset_y"], p["offset_z"])
-            display = name or f"({p['offset_x']},{p['offset_y']},{p['offset_z']})"
-            scanners.append({"source": f"pod {pod['id']}", "bearing": display, "aimed": True})
-        else:
-            scanners.append({"source": f"pod {pod['id']}", "bearing": None, "aimed": False})
-    return scanners
+    return [{"source": s["source"],
+             "bearing": aim_label(s["offset"]) if s["offset"] else None,
+             "aimed": s["offset"] is not None}
+            for s in scanners_on(cur, org)]
 
 @mcp_tool(
     "Complete properties of one of the player's own organizations, "

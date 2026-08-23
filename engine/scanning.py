@@ -98,6 +98,48 @@ def offset_from_params(params: dict):
     return None
 
 
+def aim_label(offset) -> str:
+    """
+    How an aim is written for a person: its compass name when it lands on one
+    of the 12 named bearings, else the raw "(dx,dy,dz)". One helper because a
+    report's bearing column and a map's aim marker must name the same aim the
+    same way.
+    """
+    dx, dy, dz = offset
+    return bearing_name(dx, dy, dz) or f"({dx},{dy},{dz})"
+
+
+def scanners_on(cur, org: dict) -> list:
+    """
+    Every scanner this org carries -- its innate sensors (organizations.
+    scan_offset_*) plus every pod on the scan task -- as a list of
+    {"source", "pod_id", "offset"} dicts, ordered sensors-first then by pod id.
+
+    `offset` is the (dx, dy, dz) the scanner is aimed at, or None for a scan
+    pod that has been given the task but no aim. An unaimed pod still costs
+    its food and reveals nothing, so it is listed and flagged rather than
+    dropped (see set_pod_task).
+
+    Scanning is scanning, whoever carries the equipment: this is the one place
+    that answers "what is this org looking at", so a report listing bearings
+    and a map plotting them cannot come to disagree about which scanners exist.
+    Callers resolve the offset themselves -- against a name for a report, or
+    against the org's position for a map.
+    """
+    scanners = []
+    if org["scan_offset_x"] is not None:
+        scanners.append({"source": "sensors", "pod_id": None,
+                         "offset": (org["scan_offset_x"], org["scan_offset_y"],
+                                    org["scan_offset_z"])})
+    cur.execute("SELECT id, task_params FROM pods WHERE org_id=? AND task='scan' ORDER BY id",
+                (org["id"],))
+    for pod in cur.fetchall():
+        offset = offset_from_params(json.loads(pod["task_params"])) if pod["task_params"] else None
+        scanners.append({"source": f"pod {pod['id']}", "pod_id": pod["id"],
+                         "offset": offset})
+    return scanners
+
+
 def check_range(org_id: int, offset):
     """
     (status, None) when an aim is in range, (status, error) when it overreaches.

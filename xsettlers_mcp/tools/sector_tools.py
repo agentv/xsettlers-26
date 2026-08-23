@@ -2,6 +2,7 @@ from xsettlers_mcp.tools.registry import mcp_tool
 from db.connection import get_connection
 from db.sectors import TURNS_TO_BLINK_OUT
 from db.sightings import sightings_by_sector
+from engine.scanning import aim_label, scanners_on
 from engine.turn import get_next_tick_at, TURN_LIMIT
 from views.format import in_thousands, turn_header
 from xsettlers_mcp.tools.session import player_tool
@@ -17,6 +18,10 @@ MAX_NEIGHBORHOOD_RADIUS = 10
 UNKNOWN_CELL = "·"   # in range, never seen -- i.e. the scan-me list
 SEEN_CELL = "*"           # seen and still current; nothing of anyone's there
 EMPTY_CELL = ""           # outside the scan radius; renders as a blank cell
+AIM_CELL = ">"            # suffix: something of yours is scanning this sector
+
+AIM_LEGEND = (f"{AIM_CELL} = under scan this turn by one of your organizations "
+              f"(which ones, in scan_aims)")
 
 CELL_LEGEND = [
     "S3 = 3 of your ships    C = your colony    S3C = both",
@@ -129,7 +134,7 @@ def _sectors_in_range(cur, player_id: int, cx: int, cy: int, cz: int,
 
 
 def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict,
-               cell_width: int = 0) -> tuple:
+               cell_width: int = 0, aims: dict = None) -> tuple:
     """
     Lay the viewport out as grid rows, and count the cells in range nobody has
     ever seen.
@@ -142,6 +147,13 @@ def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict,
 
     Axis labels are absolute coordinates so anything read off the map can go
     straight into preview_move or set_pod_scan_bearing without arithmetic.
+
+    `aims` maps (x, y) to the scanners aimed there, and suffixes AIM_CELL onto
+    whatever cell the report built. It is applied here rather than folded into
+    the cell string because a scan is most often aimed at a sector nobody has
+    seen -- which has no row for a report to decorate, only an UNKNOWN_CELL
+    the lattice synthesizes. Aim is a layer over the viewport, not a property
+    of a sector, and the two other layers already read that way.
 
     `cell_width` right-pads every cell, blanks and unknowns included, to a
     fixed width -- for a grid of figures, where a column only reads as a
@@ -160,14 +172,69 @@ def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict,
                 continue
             known = by_coord.get((x, y))
             if known:
-                cells.append(known["cell"])
+                cell = known["cell"]
             else:
-                cells.append(UNKNOWN_CELL)
+                cell = UNKNOWN_CELL
                 unknown_in_range += 1
+            cells.append(cell + AIM_CELL if aims and (x, y) in aims else cell)
         rows.append({"label": str(y),
                      "cells": [c.rjust(cell_width) for c in cells]})
     grid = {"corner": "y/x", "x_labels": [str(x) for x in x_labels], "rows": rows}
     return grid, unknown_in_range
+
+
+def _scan_coverage(sess, cx: int, cy: int, cz: int, radius: int) -> tuple:
+    """
+    Which sectors in this viewport are under scan right now, and by what:
+    ({(x, y): [aim, ...]}, aims).
+
+    Coverage is a question about the neighborhood, not about one org, so it is
+    answered from the player's whole fleet. An aim is an offset from the
+    scanner's OWN sector (see engine/bearings.py), so each org's targets
+    resolve against where that org is standing -- not against the viewport
+    center, which is only the same place for the org the map happens to be
+    centered on. A ship two sectors outside the frame still covers cells
+    inside it, and its coverage is real.
+
+    Aims landing off the drawn z-plane or outside the viewport are dropped
+    rather than reported: the layer answers "what is covered here", and a scan
+    aimed elsewhere is not part of that answer. show_organization is where a
+    given ship's own bearings are listed, unaimed pods included.
+
+    An org in transit contributes nothing. It has no position to resolve an
+    offset against, and end-of-turn suppresses its scans anyway (engine/turn.py
+    step 3), so drawing its aim would promise coverage that will not happen.
+    """
+    r2 = radius ** 2
+    by_coord, aims = {}, []
+    # The whole fleet, not just orgs in the viewport -- scan range reaches
+    # across the frame edge. A player's org count is small, so this costs less
+    # than bounding the query (the same reasoning as the overlay queries in
+    # show_sector_neighborhood).
+    orgs = sess.cur.execute("""
+        SELECT o.id, o.name,
+               o.scan_offset_x, o.scan_offset_y, o.scan_offset_z,
+               s.coord_x, s.coord_y, s.coord_z
+        FROM organizations o
+        JOIN sectors s ON s.id = o.sector_id
+        WHERE o.player_id = ? AND o.sector_id != -1
+        ORDER BY o.id""", (sess.player_id,)).fetchall()
+
+    for org in orgs:
+        for scanner in scanners_on(sess.cur, org):
+            if scanner["offset"] is None:
+                continue
+            dx, dy, dz = scanner["offset"]
+            tx, ty, tz = (org["coord_x"] + dx, org["coord_y"] + dy,
+                          org["coord_z"] + dz)
+            if tz != cz or (tx - cx) ** 2 + (ty - cy) ** 2 > r2:
+                continue
+            aim = {"org_id": org["id"], "org_name": org["name"],
+                   "source": scanner["source"], "bearing": aim_label(scanner["offset"]),
+                   "target_x": tx, "target_y": ty, "target_z": tz}
+            aims.append(aim)
+            by_coord.setdefault((tx, ty), []).append(aim)
+    return by_coord, aims
 
 
 def _turn_context(cur) -> tuple:
@@ -218,6 +285,8 @@ def get_sector_map(sess) -> list:
     "grid with absolute coordinates on both axes and one <=3-character "
     "marker per cell (your orgs, rival presence, '*' for seen-and-empty, "
     "'·' for never seen, or blank for out of range), plus display.legend. "
+    "A '>' suffix marks a sector your fleet is scanning this turn; scan_aims "
+    "says which organization and bearing covers each. "
     "Pure view -- reveals nothing, costs nothing, changes no confidence.")
 @player_tool
 def show_sector_neighborhood(
@@ -247,6 +316,12 @@ def show_sector_neighborhood(
     - `display` carries a finished grid (see views/render.py's render_map),
       so every client draws the same map rather than each improvising one
       from a coordinate list.
+
+    Two layers ride on that one lattice: who is where, and what your fleet is
+    scanning this turn (`_scan_coverage`, marked with AIM_CELL and itemized in
+    `scan_aims`). Coverage answers a question about the neighborhood rather
+    than about the centered org, so it counts every scanner of yours reaching
+    into the frame, wherever it is standing.
 
     The grid is a single z-plane -- the center's. The model is 3D and distance
     is 3D everywhere else in the codebase, but no scenario has yet placed
@@ -333,7 +408,15 @@ def show_sector_neighborhood(
         if s["in_plane"]:
             by_coord[(s["coord_x"], s["coord_y"])] = s
 
-    grid, unknown_in_range = _draw_grid(cx, cy, radius, by_coord)
+    # Coverage is a property of the viewport, not of how it was centered, so
+    # it is drawn for a coordinate-centered map too.
+    aim_coords, scan_aims = _scan_coverage(sess, cx, cy, cz, radius)
+
+    grid, unknown_in_range = _draw_grid(cx, cy, radius, by_coord, aims=aim_coords)
+
+    legend = list(CELL_LEGEND)
+    if aim_coords:
+        legend.append(AIM_LEGEND)
 
     highlights = [s for s in sectors
                   if s["own_ships"] or s["own_colonies"] or s["rival_orgs"]
@@ -348,6 +431,7 @@ def show_sector_neighborhood(
         "highlights": highlights,
         "unknown_in_range": unknown_in_range,
         "off_plane_count": sum(1 for s in sectors if not s["in_plane"]),
+        "scan_aims": scan_aims,
         "display": {
             "kind": "map",
             # Same turn-and-countdown line the status reports open with, from
@@ -357,7 +441,7 @@ def show_sector_neighborhood(
                       + (f" — {turn_header(current_turn, TURN_LIMIT, next_tick_at)}"
                          if current_turn is not None else ""),
             "grid": grid,
-            "legend": CELL_LEGEND,
+            "legend": legend,
             "rows_key": "highlights",
             # No resources column: this report is about who is where. What a
             # sector holds stays on every `sectors` row for a client that

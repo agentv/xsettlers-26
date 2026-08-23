@@ -18,7 +18,9 @@ from xsettlers_mcp.tools.organization_tools import (
     set_pod_task, set_org_scan_bearing, set_pod_scan_bearing)
 from xsettlers_mcp.tools.organization_reports import show_organization
 from xsettlers_mcp.tools.navigation_tools import confirm_move
-from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
+from xsettlers_mcp.tools.sector_tools import AIM_LEGEND, show_sector_neighborhood
+from tests.conftest import (seed_player, seed_sector, seed_ship, seed_pod,
+                            seed_player_sector)
 
 
 def _scanner_with_stock(offset=(5, 0, 0), as_pod=False):
@@ -645,3 +647,180 @@ def test_a_scan_never_misses_the_sector_itself_only_its_occupants(monkeypatch):
     # fog-of-war pass, which runs after production (engine/turn.py step 6).
     assert row["confidence"] == 100 - CONFIDENCE_DECAY_PER_TURN
     assert sighted == 0                    # and nobody was noticed on it
+
+
+# --- The scan-coverage layer on the neighborhood map -------------------------
+# Which sectors in a neighborhood are under scan this turn, drawn onto the same
+# lattice that shows who is where. Coverage is a question about the frame, not
+# about the centered org, so it is assembled from the whole fleet -- and every
+# aim resolves against its own scanner's position, since an aim is an offset.
+
+def _scanner_at(pid, position, offset, as_pod=False, name="Scout"):
+    """One of pid's ships standing at `position` on a sector it can see,
+    carrying a single scanner aimed at `offset` -- innate sensors by default,
+    a pod on the scan task when as_pod. Returns the org id."""
+    sector = seed_sector(*position, energy=1000.0)
+    oid = seed_ship(pid, sector, name=name)
+    seed_player_sector(pid, sector)
+    conn = get_connection()
+    if as_pod:
+        pod = seed_pod(oid, task="scan")
+        conn.execute("UPDATE pods SET task_params=? WHERE id=?",
+                     (json.dumps({"offset_x": offset[0], "offset_y": offset[1],
+                                  "offset_z": offset[2]}), pod))
+    else:
+        conn.execute("""UPDATE organizations
+            SET scan_offset_x=?, scan_offset_y=?, scan_offset_z=? WHERE id=?""",
+            (*offset, oid))
+    conn.commit(); conn.close()
+    return oid
+
+
+def _grid_cell(view, x, y):
+    """The cell the map drew at absolute (x, y)."""
+    grid = view["display"]["grid"]
+    column = grid["x_labels"].index(str(x))
+    row = next(r for r in grid["rows"] if r["label"] == str(y))
+    return row["cells"][column]
+
+
+def _covered(view):
+    """Every (x, y) the map marked as under scan."""
+    grid = view["display"]["grid"]
+    return {(int(grid["x_labels"][i]), int(row["label"]))
+            for row in grid["rows"]
+            for i, cell in enumerate(row["cells"]) if cell.endswith(">")}
+
+
+@pytest.mark.parametrize("as_pod", [False, True])
+def test_a_pods_scan_covers_a_sector_exactly_as_the_orgs_own_sensors_do(as_pod):
+    """Scanning is scanning, whoever carries the equipment -- the marker, the
+    cell it lands on and the reported bearing are identical either way. The
+    target has never been seen, which is the ordinary case for a scan: the
+    marker has to land on a cell the lattice synthesized, not on a sector row.
+    """
+    pid = seed_player()
+    oid = _scanner_at(pid, (0, 0, 0), (1, -1, 0), as_pod=as_pod)   # NE
+    view = show_sector_neighborhood("U_P1", org_id=oid)
+
+    assert _grid_cell(view, 1, -1) == "·>"
+    assert [(a["bearing"], a["target_x"], a["target_y"]) for a in view["scan_aims"]] \
+        == [("NE", 1, -1)]
+    assert AIM_LEGEND in view["display"]["legend"]
+
+
+def test_an_aim_resolves_against_its_own_scanner_not_the_viewport_centre():
+    """The whole reason coverage can't be derived from the centered org alone:
+    an aim is an offset from the scanner's OWN sector. A picket at (3,3)
+    looking north covers (3,2), not the cell one north of the map's center.
+    """
+    pid = seed_player()
+    flagship = _scanner_at(pid, (0, 0, 0), (1, 0, 0), name="Flagship")   # E
+    _scanner_at(pid, (3, 3, 0), (0, -1, 0), name="Picket")               # N
+    view = show_sector_neighborhood("U_P1", org_id=flagship)
+
+    assert (3, 2) in _covered(view)      # resolved against the picket
+    assert (0, -1) not in _covered(view)  # not against the centre
+
+
+def test_coverage_includes_a_scanner_standing_outside_the_frame():
+    """Scan range reaches across the frame edge, so a ship the map cannot even
+    draw still covers a cell inside it. Bounding the search to orgs in the
+    viewport would report that cell as uncovered."""
+    pid = seed_player()
+    flagship = _scanner_at(pid, (0, 0, 0), (1, 0, 0), name="Flagship")   # E
+    outsider = _scanner_at(pid, (5, 0, 0), (-2, 0, 0), name="Outrider")  # W2
+    view = show_sector_neighborhood("U_P1", org_id=flagship, radius=4)
+
+    assert (3, 0) in _covered(view)
+    assert [a["org_id"] for a in view["scan_aims"] if a["target_x"] == 3] == [outsider]
+
+
+def test_two_scanners_on_one_sector_mark_it_once_and_both_are_listed():
+    """The point of the layer: seeing that two ships are spending their scans
+    on the same cell. The grid can only say covered-or-not, so the redundancy
+    has to be legible in scan_aims."""
+    pid = seed_player()
+    flagship = _scanner_at(pid, (0, 0, 0), (2, 0, 0), name="Flagship")    # E2
+    _scanner_at(pid, (4, 0, 0), (-2, 0, 0), name="Twin")                  # W2
+
+    view = show_sector_neighborhood("U_P1", org_id=flagship)
+    on_target = [a["org_name"] for a in view["scan_aims"] if (a["target_x"], a["target_y"]) == (2, 0)]
+
+    assert _grid_cell(view, 2, 0).count(">") == 1
+    assert sorted(on_target) == ["Flagship", "Twin"]
+
+
+def test_a_coordinate_centred_map_shows_coverage_too():
+    """Coverage is a property of the frame, not of how the frame was chosen."""
+    pid = seed_player()
+    _scanner_at(pid, (0, 0, 0), (1, -1, 0))                               # NE
+    view = show_sector_neighborhood("U_P1", center_x=0, center_y=0, center_z=0)
+
+    assert (1, -1) in _covered(view)
+
+
+def test_an_org_in_transit_covers_nothing():
+    """A ship in transit has no position to resolve an offset against, and
+    end-of-turn suppresses its scan anyway -- drawing its aim would promise
+    coverage that never arrives."""
+    pid = seed_player()
+    _scanner_at(pid, (0, 0, 0), (1, 0, 0), name="Anchor")
+    in_transit = seed_ship(pid, -1, name="Voyager")
+    conn = get_connection()
+    conn.execute("""UPDATE organizations
+        SET scan_offset_x=0, scan_offset_y=-1, scan_offset_z=0 WHERE id=?""",
+        (in_transit,))
+    conn.commit(); conn.close()
+
+    view = show_sector_neighborhood("U_P1", center_x=0, center_y=0, center_z=0)
+    assert [a["org_name"] for a in view["scan_aims"]] == ["Anchor"]
+
+
+def test_an_aim_landing_outside_the_frame_is_neither_drawn_nor_listed():
+    """The layer answers "what is covered here". A scan aimed somewhere this
+    viewport doesn't reach is not part of that answer -- show_organization is
+    where that ship's own bearings are listed."""
+    pid = seed_player()
+    oid = _scanner_at(pid, (0, 0, 0), (0, -2, 0))          # N2, reaches 2
+    view = show_sector_neighborhood("U_P1", org_id=oid, radius=1)
+
+    assert _covered(view) == set()
+    assert view["scan_aims"] == []
+
+
+def test_an_off_plane_aim_is_neither_drawn_nor_listed():
+    """Range is Euclidean, so a legal aim may carry a nonzero offset_z and
+    land off the single z-plane the grid draws."""
+    pid = seed_player()
+    oid = _scanner_at(pid, (0, 0, 0), (1, 0, 1))           # in range at ~1.41
+    view = show_sector_neighborhood("U_P1", org_id=oid)
+
+    assert _covered(view) == set()
+    assert view["scan_aims"] == []
+
+
+def test_a_coverage_marker_rides_on_top_of_whatever_the_cell_already_says():
+    """Coverage is a layer over the viewport, not a property of a sector: a
+    cell already reporting your own ship keeps saying so and takes the mark."""
+    pid = seed_player()
+    oid = _scanner_at(pid, (0, 0, 0), (1, 0, 0), name="Flagship")   # E
+    target = seed_sector(1, 0, 0)
+    seed_ship(pid, target, name="Picket")
+    seed_player_sector(pid, target)
+
+    assert _grid_cell(show_sector_neighborhood("U_P1", org_id=oid), 1, 0) == "S1>"
+
+
+def test_an_unaimed_scan_pod_covers_nothing():
+    """A pod given the task but no aim has nowhere to draw. show_organization
+    is where it gets flagged; the map simply has nothing to say about it."""
+    pid = seed_player()
+    home = seed_sector(0, 0, 0)
+    oid = seed_ship(pid, home)
+    seed_player_sector(pid, home)
+    seed_pod(oid, task="scan")
+
+    view = show_sector_neighborhood("U_P1", org_id=oid)
+    assert view["scan_aims"] == []
+    assert _covered(view) == set()

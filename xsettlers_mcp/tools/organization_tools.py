@@ -93,26 +93,24 @@ def _write_aim(sess, org_id: int, subject_id: int, offset, clearing: bool,
 def set_mission(sess, org_id: int, mission: str, params: dict = None) -> dict:
     """
     Set an organization's mission. 'defend' and 'attack' are refused (see
-    UNIMPLEMENTED_MISSIONS): they remain part of the vocabulary, so a player
-    asking for them is told combat is not built yet rather than told it does
-    not exist -- and, more to the point, is not handed a mission the engine
-    will never resolve. Validates ownership and mission type, and
-    enforces the three org-lock states (see Data Model & Storage Design):
+    UNIMPLEMENTED_MISSIONS): they stay in the vocabulary so a player asking
+    is told combat is not built yet, rather than handed a mission the engine
+    will never resolve. Validates ownership and mission type, and enforces
+    the three org-lock states:
       - in transit (sector_id == -1): locked entirely, must cancel_move first
-      - colony: locked against 'move' only — every other assignable mission stands
-      - mid-colonization (ship, is_mobile == 0, not in transit): locked entirely,
-        committed for the 3-turn transition window
-    Setting mission='colonize' costs COLONIZATION_ENERGY_COST energy, drawn
-    from the ship's pooled stock and charged in full at commitment; a ship
-    that cannot pay is refused outright and left untouched. On payment it
-    flips is_mobile to 0 immediately and schedules a colonize_complete event
-    3 turns out for engine/turn.py to resolve.
-    Setting mission='move' delegates entirely to navigation_tools.confirm_move
-    (params must include dest_x/dest_y/dest_z, optionally jump_range_per_turn)
-    rather than writing mission='move' onto the row directly -- confirm_move is
-    what actually parks the org at the sentinel sector and queues the
-    arrival_queue row; without it the org would sit forever with mission='move'
-    and nothing to ever resolve it.
+      - colony: locked against 'move' only — every other mission stands
+      - mid-colonization (ship, is_mobile == 0, not in transit): locked
+        entirely, committed for the 3-turn transition window
+
+    mission='colonize' costs COLONIZATION_ENERGY_COST energy from the ship's
+    pooled stock, charged in full at commitment; a ship that cannot pay is
+    refused and left untouched. On payment it flips is_mobile to 0 and
+    schedules a colonize_complete event 3 turns out.
+
+    mission='move' delegates entirely to navigation_tools.confirm_move rather
+    than writing mission='move' onto the row -- confirm_move is what parks the
+    org at the sentinel sector and queues the arrival_queue row. Without it
+    the org would sit forever with mission='move' and nothing to resolve it.
     """
     if mission not in VALID_ORG_MISSIONS:
         return {"error": f"Invalid mission '{mission}'. Valid: {sorted(VALID_ORG_MISSIONS)}"}
@@ -255,43 +253,35 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
                   params: dict = None, turn: int = None) -> dict:
     """
     Queue a one-shot command for this org, resolved automatically by the
-    engine rather than requiring the player to call the underlying tool
-    again by hand, at whichever of four fixed primitives is named:
-      - 'during_transit': fires the instant this org enters transit (event-
-        triggered by the next confirm_move on this org, not turn-based --
-        dispatched from engine.movement.apply_confirm_move, not the turn
-        sweep). Only 'set_pod_task' is a legal action here -- pod tasking is
-        the one thing not locked by an org entering transit, which is the
-        whole reason this phase exists.
+    engine at whichever of four fixed primitives is named:
+      - 'during_transit': fires the instant this org enters transit --
+        event-triggered by the next confirm_move, not the turn sweep
+        (engine.movement.apply_confirm_move). Only 'set_pod_task' is legal
+        here; pod tasking is the one thing not locked by entering transit.
       - 'before_arrival': fires the same tick this org's current move
         resolves. Requires the org to already be in transit -- there must be
         a pending arrival_queue row to anchor the resolve turn to.
       - 'after_arrival': fires exactly one end_of_turn() pass later. Same
         in-transit requirement as before_arrival.
       - 'at_turn': fires at an explicit absolute turn (the `turn` param,
-        required for this phase only) -- independent of any move, for orders
-        that don't fit the arrival-relative phases at all (e.g. "on turn 7,
-        jump somewhere else"). No in-transit requirement.
-    Action whitelist, all valid for before_arrival/after_arrival/at_turn
-    (during_transit is restricted to set_pod_task only):
-      - 'move' -- either dest_x/dest_y/dest_z (absolute, the same shape
-        confirm_move takes) or d_x/d_y/d_z (relative to wherever this org is
-        standing when the order fires), never both, plus optional
-        jump_range_per_turn. The relative form is what makes an order portable
-        between starting positions -- "three further out the way I'm heading"
-        rather than a fixed coordinate.
-      - 'set_pod_task' -- pod_id, task, optionally bearing/offset_x/y/z, same
-        shape set_pod_task itself takes.
-      - 'colonize' -- no params. Commits this ship to becoming a colony, at
-        whatever sector it occupies when the order fires. Alone among these,
-        it can be refused at fire time rather than failing: colonizing is paid
-        for in energy, and a ship that cannot pay when the moment arrives is
-        declined and left untouched (logged as alert.queued_command_refused).
-      - 'aim_scan' -- optionally bearing/offset_x/y/z, same shape
-        set_org_scan_bearing takes; pass none of them to clear the aim.
-    If a player gives the org new orders before a before_arrival/after_arrival/
-    at_turn command fires, the queued command is silently dropped rather than
-    clobbering them (see engine.ship_log.dispatch_due_commands)."""
+        required for this phase only), independent of any move. No
+        in-transit requirement.
+
+    Action whitelist, all valid for before_arrival/after_arrival/at_turn:
+      - 'move' -- either dest_x/dest_y/dest_z or d_x/d_y/d_z (relative to
+        wherever this org is standing when the order fires), never both,
+        plus optional jump_range_per_turn.
+      - 'set_pod_task' -- pod_id, task, optionally bearing/offset_x/y/z.
+      - 'colonize' -- no params. Alone among these it can be refused at fire
+        time rather than failing: a ship that cannot pay when the moment
+        arrives is declined and left untouched
+        (logged as alert.queued_command_refused).
+      - 'aim_scan' -- optionally bearing/offset_x/y/z; pass none to clear.
+
+    If a player gives the org new orders before a queued command fires, the
+    command is silently dropped rather than clobbering them (see
+    engine.ship_log.dispatch_due_commands).
+    """
     if trigger_phase not in VALID_TRIGGER_PHASES:
         return {"error": f"Invalid trigger_phase '{trigger_phase}'. Valid: {sorted(VALID_TRIGGER_PHASES)}"}
     if action not in ACTION_NAMES:

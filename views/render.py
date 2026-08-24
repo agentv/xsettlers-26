@@ -41,29 +41,18 @@ def _hinted_table(display: dict, rows: list, columns: list) -> list:
 
 def render_status(data: dict) -> str:
     """
-    Generic renderer for any tool that follows the display-hints convention:
-    a top-level `display` dict naming `rows_key` (which field holds the list of
-    row-dicts to render), `columns` (which fields to show, in order), an
-    optional `header` line, an optional `column_labels` dict overriding a
-    column's header text (keyed by field name) when the raw field name isn't
-    what a human should read -- e.g. `task_display` -> "Task" -- and an
-    optional `footer` line (or list of lines) appended below the table, e.g.
-    show_organization's scanner summary. Columns with no
-    entry in `column_labels` header as the field name itself, same as always.
-    Covers the status tools in
-    xsettlers_mcp/tools/organization_reports.py (show_game_status,
-    show_civilization_status, show_organization).
+    Generic renderer for any tool following the display-hints convention: a
+    top-level `display` dict naming `rows_key` (which field holds the row
+    list), `columns` (which fields to show, in order), an optional `header`,
+    an optional `column_labels` overriding a column's header text when the
+    raw field name isn't what a human should read, and an optional `footer`
+    line or list of lines appended below the table. A column with no entry in
+    `column_labels` headers as the field name itself.
 
-    `display.kind == "map"` hands off to render_map() -- a grid is not a table,
-    but the dispatch is still on the *shape* of the data, not on which tool
-    produced it. Deliberately has no per-tool-name branching: any future tool
-    returning either shape renders here with zero changes, which is the whole
-    point of putting the hints in the data instead of the client.
-
-    This is an interim, MVP-level renderer (markdown, plain str(cell)
-    formatting); it's expected to be superseded by the fuller card/renderer
-    architecture sketched in docs/ui_and_rendering_design.md once that's
-    actually built.
+    `display.kind == "map"` hands off to render_map(). Dispatch is on the
+    *shape* of the data, never on which tool produced it -- there is no
+    per-tool branching here, so any future tool returning either shape
+    renders with no changes.
     """
     if "error" in data:
         return f"Error: {data['error']}"

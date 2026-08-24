@@ -167,18 +167,17 @@ def _resolve_scan(cur, current_turn: int, org_id: int, player_id: int, origin,
 def _apply_org_upkeep(cur, consumption: dict):
     """
     Per-organization upkeep, once per turn (not per pod) -- every ship/colony
-    costs ORG_UPKEEP_COST to keep running at all, on top of whatever its
-    individual pods cost. Applies regardless of transit state, and is not
-    discounted or surcharged by org type: the colony advantage is purely on
-    the output side (see COLONY_PRODUCTION_MULTIPLIER).
-    Prorated the same way as pod recipes: not enough on hand means a partial
-    (not all-or-nothing) draw of whatever's actually available.
-    Runs before the per-pod production pass, so upkeep gets first claim on
-    an org's stock for the turn.
-    `consumption` is a {player_id: {resource: amount}} accumulator (see
-    end_of_turn()'s turn.snapshot ledger) -- upkeep drains are tallied into
-    it alongside pod recipe costs, so the ledger's derived waste figure
-    accounts for every resource sink in the turn, not just production inputs.
+    costs ORG_UPKEEP_COST to keep running at all, on top of its pods. Applies
+    regardless of transit state, and is not discounted or surcharged by org
+    type: the colony advantage is purely on the output side.
+
+    Prorated like pod recipes -- not enough on hand draws partially rather
+    than not at all -- and runs before the per-pod production pass, so upkeep
+    gets first claim on an org's stock for the turn.
+
+    `consumption` is a {player_id: {resource: amount}} accumulator that
+    upkeep drains tally into alongside pod recipe costs, so the ledger's
+    derived waste figure accounts for every sink in the turn.
     """
     for org in cur.execute("SELECT id, player_id FROM organizations").fetchall():
         _pay_for(cur, org["id"], org["player_id"], ORG_UPKEEP_COST, consumption)

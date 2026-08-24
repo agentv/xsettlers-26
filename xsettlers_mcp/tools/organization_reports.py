@@ -41,27 +41,13 @@ def _scanners_on(cur, org: dict) -> list:
 def show_organization(sess, org_id: int) -> dict:
     """
     Return the complete properties of one of the player's own organizations:
-    org record (type, mission, mission_params, is_mobile, sector location,
-    task_force_id if it's a task force member) plus pods grouped by task — count of pods on each task, total
-    capacity of that group, and what's actually stored there broken down by
-    resource type (energy/food/goods). Storage is generic per pod and
-    independent of current task (see engine/turn.py), so a task group's
-    contents don't necessarily match its own task -- e.g. produce_goods pods
-    can still be holding energy leftover from before a retask. Individual
-    pods aren't listed separately; a ship with 6 pods reads as up to 3 task
-    rows, not 6 pod rows.
-    display: presentation hints (see views/format.py) -- a ready-to-render header ("<name> — at (x,y,z), <mission>")
-    and the locked MVP column order for the cargo table (Task, Count, Energy,
-    Food, Goods, Capacity). Each task row also gets task_display (e.g.
-    "produce_energy" -> "Energy") and capacity_display ("current/total", e.g.
-    "200/200") alongside the raw fields -- all raw fields stay present, this
-    is purely additive. `display.rows_key` ("tasks") names which top-level
-    field holds the row list, for a generic renderer -- see views/render.py.
-    `scanners` (see _scanners_on) lists every active scanner on this org
-    -- innate sensors plus scan-task pods -- and `display.footer`, when
-    present, is that same information as a ready-to-render line below the
-    table ("Scans: North, South, Southeast").
-    Ownership-gated — only the calling player's orgs are accessible.
+    the org record plus its pods grouped by task.
+
+    Storage is generic per pod and independent of current task, so a task
+    group's contents don't necessarily match its own task -- produce_goods
+    pods can still be holding energy left over from before a retask.
+    Individual pods aren't listed separately; a ship with 6 pods reads as up
+    to 3 task rows, not 6 pod rows.
     """
     cur = sess.cur
     cur.execute("""
@@ -124,53 +110,19 @@ def show_civilization_status(sess) -> dict:
     """
     Return a player-scoped fleet/status report (aliases: "fleet status",
     "my status") -- the full roster (ships and colonies) plus fleet-wide
-    aggregates in one call:
-    - Turn context: current turn, turn limit, next_tick_countdown (the same
-      value pre-formatted "MM:SS", or "--:--" when there is no clock running)
-      and next_tick_at (ISO8601, from
-      engine/clock.py -- None if the clock has never run or is paused; a
-      caller also needs to check the server is actually live before trusting
-      it, since a paused clock leaves a stale value -- see get_next_tick_at()
-      and scripts/status.py for how the CLI report reconciles the two)
-    - All player organizations (ships and colonies) with name, org_type, mission,
-      sector location, a per-org cargo summary (current/capacity summed across
-      that org's pods), a per-org storage breakdown (energy/food/goods
-      currently held, summed across that org's pods regardless of each pod's
-      own task -- storage is generic per pod, see RESOURCE_STORAGE_COLUMN),
-      a tasking breakdown (pod count per task, e.g.
-      {"produce_energy": 2, "produce_food": 2, "produce_goods": 2} -- this is
-      the pod-deployment picture), and a production breakdown (see
-      engine.production.org_production -- gross per-turn output at full input availability,
-      not netted against consumption costs). Ships in
-      transit are marked with in_transit=True, destination sector, expected
-      arrival turn, and turns_remaining as raw fields -- arrival_turn is the
-      turn the ship is actually free to act, not the turn whose end_of_turn()
-      pass performs the landing (that happens one turn earlier; see
-      engine/turn.py's arrival resolution). turns_remaining counts down to
-      that same turn, so it only reaches 0 once the ship has actually landed
-      and can take a new mission. The display `status` string itself is
-      intentionally terse -- just "in transit", full stop, no destination or
-      ETA; dest_sector/turns_remaining/arrival_turn are raw fields on the
-      entry for a client that wants to build a richer status string itself.
-      The sentinel sector (-1,-1,-1) an in-transit ship is parked at is never
-      shown -- "in transit" is what a player reads instead, and the column
-      heads as "Location".
-    - Accumulated assets: aggregate energy, food, goods, and total across all
-      pods, plus total capacity and percent_full.
-    - display: presentation hints (see views/format.py
-      module docstring) -- every org also carries ready-to-use short_name,
-      status, cargo_display, tasking_summary, and production_summary fields
-      alongside the raw ones, so a client with no LLM in the loop doesn't have
-      to build its own formatting logic. `display.rows_key` names which
-      top-level field holds the row list ("organizations", here) and
-      `display.columns` lists which of each row's fields to render, in order
-      -- see views/render.py's render_status() for a renderer driven entirely
-      by these hints, with no per-tool special-casing. All raw fields are
-      present alongside. `display.header` carries the turn line drawn above
-      the table and `display.footer` the fleet totals drawn below it: an
-      aggregate is a different question than a per-unit row, so it does not
-      go in the table.
-    Ownership-gated — only the calling player's data.
+    aggregates in one call.
+
+    Two things a caller gets wrong otherwise. next_tick_at is None if the
+    clock has never run or is paused, and a paused clock leaves a stale
+    value, so a caller also needs to check the server is actually live
+    before trusting it (see get_next_tick_at() and scripts/status.py). And
+    arrival_turn is the turn the ship is actually free to act, not the turn
+    whose end_of_turn() pass performs the landing -- that happens one turn
+    earlier. turns_remaining counts down to that same turn, so it only
+    reaches 0 once the ship has actually landed and can take a new mission.
+
+    The sentinel sector (-1,-1,-1) an in-transit ship is parked at is never
+    shown -- "in transit" is what a player reads instead.
     """
     cur = sess.cur
 
@@ -310,34 +262,23 @@ def show_civilization_status(sess) -> dict:
 @player_tool
 def show_game_status(sess) -> dict:
     """
-    Return the public scoreboard -- turn context (including next_tick_at,
-    see show_civilization_status's docstring for the caveat about a paused
-    clock, and next_tick_countdown -- the same value pre-formatted "MM:SS",
-    or "--:--" when next_tick_at is None) plus every player's aggregate
-    resource totals, side by side.
-    Unlike show_civilization_status (or every other tool in this module),
-    this is NOT ownership-gated to the caller's own data: aggregate totals
-    are treated as public standing, the same information
-    _calculate_final_scores reveals at game-over, available on demand
-    throughout the game. player_token is only used to confirm the caller is a
-    real player in this game -- it does not filter or restrict what's
-    returned. Detailed fleet composition, position, and tasking of other
-    players is NOT included here and stays private -- only aggregate resource
-    totals are public.
+    Return the public scoreboard -- turn context plus every player's
+    aggregate resource totals, side by side.
+
+    Unlike every other tool in this module, this is NOT ownership-gated:
+    aggregate totals are treated as public standing. player_token is only
+    used to confirm the caller is a real player in this game -- it does not
+    filter or restrict what's returned. Detailed fleet composition, position
+    and tasking of other players stays private.
+
     `score` is the actual game score, not just another resource total:
-    energy/food/goods currently held are weighted by `config/game_config.yaml`'s
-    `score_weights` (energy is a means of production, not a scored asset;
-    goods score double food) and summed. Same formula `engine/turn.py`'s
-    `_calculate_final_scores()` uses to decide the winner at game-over, so
-    the standing shown here is checkable against the eventual result.
-    Standings are ranked by `score` (highest first, "rank" field included),
-    NOT by the raw `total` (an unweighted sum, included for
-    capacity/fullness context). Ranking is standard competition ranking, so
-    players level on score share a rank -- and `winners` is a list for the
-    same reason: nothing breaks a tie, so everyone on rank 1 has won. It is
-    empty until the game ends.
-    Carries a display block (rows_key="standings", suggested column order) for clients that want a ready-to-use presentation instead
-    of building one -- see views/render.py's render_status().
+    holdings weighted by config/game_config.yaml's score_weights, the same
+    formula engine/turn.py's _calculate_final_scores() uses to decide the
+    winner, so the standing shown here is checkable against the eventual
+    result. Standings rank by `score`, not by the unweighted `total`.
+    Ranking is standard competition ranking, so players level on score share
+    a rank -- and `winners` is a list for the same reason. It is empty until
+    the game ends.
     """
     cur = sess.cur
 

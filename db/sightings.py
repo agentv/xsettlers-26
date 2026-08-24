@@ -50,18 +50,10 @@ def record_sightings(cur, observer_id: int, sector_id: int, current_turn: int) -
     Note every rival organization standing in `sector_id` that this observer's
     scan notices, and return what was seen.
 
-    Called from engine/turn.py's scan resolution, on the same cursor, so a
-    sighting lands in the same transaction as the reveal that produced it.
-
     A look is authoritative for the sector it looks at: whatever the observer
     previously believed about this sector's occupants is cleared first, then
     replaced by what was detected now. That is what makes an empty sector read
     as empty rather than as whatever was standing there last time.
-
-    Note what that means once DETECTION_THRESHOLD drops below certainty: an
-    organization that survives its roll is one the observer genuinely did not
-    see, and their map showing nothing is the honest record of that. Missing
-    something is supposed to cost you, which is the whole point of rolling.
 
     Own organizations are skipped -- a player already knows where their own
     fleet is, and a self-sighting would show up as a rival marker on their own

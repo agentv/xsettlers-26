@@ -694,7 +694,7 @@ def _covered(view):
 
 @pytest.mark.parametrize("as_pod", [False, True])
 def test_a_pods_scan_covers_a_sector_exactly_as_the_orgs_own_sensors_do(as_pod):
-    """Scanning is scanning, whoever carries the equipment -- the marker, the
+    """The marker, the
     cell it lands on and the reported bearing are identical either way. The
     target has never been seen, which is the ordinary case for a scan: the
     marker has to land on a cell the lattice synthesized, not on a sector row.

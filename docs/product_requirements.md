@@ -147,7 +147,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 * Scan range is **fixed at 2 sectors** (Euclidean distance ≤ 2), derived from `get_scan_range(org_id)` — always call it, never hard-code the number. Under a Euclidean metric, range 1 would reach only the four orthogonal neighbours, because a diagonal is √2 ≈ 1.41, and being refused a scan of the diagonally adjacent sector reads as broken. Range 2 reaches **12 sectors** — 4 orthogonal, 4 diagonal, 4 two-out orthogonal — the smallest radius at which scanning behaves the way a player expects.
 * **A scan is aimed by a bearing relative to the scanner, not by absolute coordinates.** Sensors are mounted on the thing that carries them: they look a fixed direction and distance from wherever it currently is, and a ship flying away from a sector does not keep seeing it. Two consequences: a scan pattern survives a move with no re-aiming, and range becomes a permanent property of the aim rather than something that can silently stop being true — so an out-of-range aim is **rejected when set** instead of failing at resolution.
 * **Bearings**: `N NE E SE S SW W NW` (distance 1 or √2) and `N2 E2 S2 W2` (distance 2) — the 12 names map exactly onto the 12 sectors reachable at range 2. Explicit `offset_x/y/z` is always available for anything the table doesn't name (including off-plane targets). **North is −y**, matching the neighborhood map's rendering; arbitrary but fixed.
-* **Scanning is scanning.** An organization's own sensors and a scan pod's follow identical rules — same bearings, same cost, same range, same suppression in transit. The only difference is what carries the equipment.
+* An organization's own sensors and a scan pod's follow identical rules — same bearings, same cost, same range, same suppression in transit.
 * **A scan reveals the targeted sector only — no halo, no surrounding ring.** A radius-5 halo was considered and rejected. If scanning is to be a meaningful activity with a real cost, it must not also be cheap area coverage: one pod-turn plus its food buys one sector of knowledge, and the player chooses which. Range says how far you can *reach*; it does not widen what you *get*.
 * If the designated target sector is **out of range** at end-of-turn resolution, the scan does not execute and the player receives an alert. The food cost is still paid (see `docs/TODO.md`).
 * Ships in transit cannot scan — the reveal is suppressed for the duration of transit.
@@ -230,7 +230,7 @@ Aims an organization's **own** sensors. Every ship and colony can scan one secto
 
 ### Set Pod Scan Bearing (`set_pod_scan_bearing`)
 
-Aims a pod already on the `scan` task. Same vocabulary and same rules as the organization's own sensors — scanning is scanning, whoever carries the equipment.
+Aims a pod already on the `scan` task. Same vocabulary and same rules as the organization's own sensors.
 
 Both take either a compass `bearing` or an explicit `offset_x/y/z`, and passing neither clears the aim (and stops paying for it).
 

@@ -66,12 +66,6 @@ class HotspotDef:
     """
     A region of the map that rolls richer (or poorer) than open space.
 
-    `multiplier` scales the WHOLE discovery roll, not just its die -- a x3
-    hotspot rolls 3 x (400 + d6x100) = 1500..3000, so its floor clears open
-    space's ceiling and finding the region is itself the decision. Scaling
-    only the die would make a hotspot a gamble instead; that is a different
-    game and not the one this models.
-
     Nothing constrains the multiplier to be above 1. A value below it marks a
     lean region, which is the same mechanism read the other way, and is how a
     scenario draws a desert without a second vocabulary for it.
@@ -148,14 +142,6 @@ class LobbyDef:
     it in the file would be exactly the "changing a value in the YAML and
     expecting it to take effect" trap this codebase already warns against
     elsewhere (see CLAUDE.md on game_config.yaml's dead `game:` fields).
-
-    The NPC profile schema is NOT here, for the same derivation reason: the
-    strategy library is service-wide, not per-scenario, so every scenario
-    would restate the same enum and each copy would go stale the moment a
-    strategy was added. gamehouse.py builds it from npc/library.py at
-    registration time instead. `config/` may not import from `npc/`
-    (see CLAUDE.md's layering rule), which is the other reason it cannot be
-    derived in this module.
 
     wait_window_seconds IS scenario-authored (nothing to derive it from) but
     optional -- a scenario silent on `lobby:` entirely gets a sensible default
@@ -274,12 +260,7 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
 def _load_map(map_raw: dict) -> MapDef:
     """
     Parse a scenario's `map:` block. Absent or empty means open space
-    everywhere -- every sector takes the ordinary discovery roll.
-
-    Rejected here rather than at bootstrap because a malformed map is an
-    authoring error and the author is holding the file right now; discovering
-    it at bootstrap means discovering it on a live server instead.
-    """
+    everywhere -- every sector takes the ordinary discovery roll."""
     if not isinstance(map_raw, dict):
         raise ValueError("map must be a mapping with 'hotspots' and/or 'scatter'")
     unknown = set(map_raw) - {"hotspots", "scatter"}
@@ -405,12 +386,7 @@ def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameC
     token to an identity have no business asserting which game is being
     played. When it is given, the scenario's participants are resolved
     against the directory into `seats`; when it isn't, `seats` is empty and
-    `starting_configuration` is None.
-
-    There is no file-level default scenario: this service is a library of
-    games, and which one is being bootstrapped is a runtime choice made by a
-    player through select_scenario().
-    """
+    `starting_configuration` is None."""
     with open(path, "r") as f:
         raw = yaml.safe_load(f)
     g = raw.get("game", {})

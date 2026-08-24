@@ -66,13 +66,6 @@ def _write_aim(sess, org_id: int, subject_id: int, offset, clearing: bool,
     The half of aiming a scanner that does not care what carries it: check the
     range, write the aim, and report where it now points.
 
-    Scanning is scanning, whoever holds the equipment -- an org's own sensors
-    and a pod on the scan task take the same range check and return the same
-    shape, so both scan-bearing tools end here. What differs is only who the
-    aim is about: `apply_aim` is one of engine/scanning.py's two apply_*
-    functions (they share a signature), `subject_id` is the pod or org it
-    writes to, and `identity` names it in the response.
-
     `org_id` is the org whose position the aim is measured from -- the org
     itself, or a scan pod's parent.
     """
@@ -182,12 +175,6 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     subsequent tick (the queue row is deleted only after its handler returns);
     a missing dest_y/dest_z raises KeyError the same way; and a `pod_id`
     belonging to another player's org would be retasked.
-
-    Validating here rather than at dispatch is also what the player needs: an
-    order rejected three turns later by a background clock has no one to tell.
-    Refusing it in the tool call that created it puts the error in front of
-    the player while they can still fix it -- the same reasoning set_mission
-    uses to charge colonization up front.
 
     Normalization serves the same end: a compass `bearing` is resolved to
     offset_x/y/z here, because both dispatchers read only the offsets and
@@ -304,16 +291,7 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
         set_org_scan_bearing takes; pass none of them to clear the aim.
     If a player gives the org new orders before a before_arrival/after_arrival/
     at_turn command fires, the queued command is silently dropped rather than
-    clobbering them (see engine.ship_log.dispatch_due_commands).
-
-    Params are fully validated here, when the order is given, not when the
-    clock fires it (see _normalize_queued_params): the pod must belong to this
-    org, the task must be a real task, a move needs all three non-negative
-    destination coordinates, and a scan aim must be in range. An order that
-    could never work is refused outright -- nothing is queued, the pod keeps
-    whatever mission it already had, and the player is told why while they can
-    still do something about it.
-    """
+    clobbering them (see engine.ship_log.dispatch_due_commands)."""
     if trigger_phase not in VALID_TRIGGER_PHASES:
         return {"error": f"Invalid trigger_phase '{trigger_phase}'. Valid: {sorted(VALID_TRIGGER_PHASES)}"}
     if action not in ACTION_NAMES:
@@ -403,8 +381,7 @@ def set_pod_task(sess, pod_id: int, task: str,
 
 @mcp_tool(
     "Aim a pod already on the scan task. Same rules and same bearing "
-    "vocabulary as set_org_scan_bearing -- scanning is scanning, whoever "
-    "carries the equipment. Relative aim, persists across turns, out-of- "
+    "vocabulary as set_org_scan_bearing. Relative aim, persists across turns, out-of- "
     "range rejected. Pass neither bearing nor offset to clear.")
 @player_tool
 def set_pod_scan_bearing(sess, pod_id: int, bearing: str = None,
@@ -412,8 +389,7 @@ def set_pod_scan_bearing(sess, pod_id: int, bearing: str = None,
                          offset_z: int = None) -> dict:
     """
     Aim a pod already on the scan task, by compass bearing or explicit offset.
-    Identical rules to an organization's own sensors (set_org_scan_bearing) --
-    scanning is scanning, whoever carries the equipment.
+    Identical rules to an organization's own sensors (set_org_scan_bearing).
 
     The aim is relative and persists across turns, so a ship keeps scanning
     the same bearing after it moves, with no re-aiming. Pass no bearing and no
@@ -442,12 +418,6 @@ MAX_ORG_NAME_LENGTH = 24
 def rename_organization(sess, org_id: int, name: str) -> dict:
     """
     Give one of your own ships or colonies a name of your choosing.
-
-    Names are how a player actually refers to a unit ("send S3 north", "what
-    is Fort Hope holding"), so they are required to be unique among that
-    player's own organizations -- an ambiguous name is not a name. Uniqueness
-    is per player, not global: two players may each field a "Vanguard", and
-    neither can see the other's roster anyway.
 
     Bounded at MAX_ORG_NAME_LENGTH characters and stripped of surrounding
     whitespace, because the name has to fit a fleet-report column on a phone.
@@ -482,8 +452,8 @@ def rename_organization(sess, org_id: int, name: str) -> dict:
 @mcp_tool(
     "Aim an organization's own sensors. Every ship and colony can scan one "
     "sector per turn on its own account -- a ship's bridge, a colony's "
-    "headquarters -- without dedicating a pod to it. Scanning is scanning: "
-    "identical rules to a scan pod (same food cost, range, transit "
+    "headquarters -- without dedicating a pod to it. Identical "
+    "rules to a scan pod (same food cost, range, transit "
     "suppression). Aim by compass bearing (N/NE/E/SE/S/SW/W/NW, or "
     "N2/E2/S2/W2 for two sectors out) or by explicit offset_x/y/z. The aim "
     "is RELATIVE to the org's own sector and persists across turns, so it "
@@ -497,11 +467,6 @@ def set_org_scan_bearing(sess, org_id: int, bearing: str = None,
     Aim an organization's own sensors. Every ship and colony can scan one
     sector per turn on its own account -- a ship's bridge, a colony's
     headquarters -- without dedicating a pod to it.
-
-    Scanning is scanning: identical in every rule to a scan pod
-    (set_pod_scan_bearing) -- same food cost, same range, same suppression in
-    transit, same relative aiming. An org that also carries scan pods gets
-    both, and each pays its own way.
 
     Aim by compass `bearing` ("N", "NE", "W2" -- see bearings.SCAN_BEARINGS)
     or by explicit `offset_x/y/z`. The aim is relative to the org's own sector

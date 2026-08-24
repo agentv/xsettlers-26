@@ -26,13 +26,7 @@ import os
 def _scanners_on(cur, org: dict) -> list:
     """
     engine.scanning.scanners_on rendered for reading: {"source", "bearing",
-    "aimed"} dicts, where `bearing` is the compass name or the raw offset.
-
-    An unaimed scan pod still costs its food and reveals nothing, so it is
-    listed and flagged rather than silently dropped (see set_pod_task's
-    docstring). views.format.scanner_footer turns this list into the one-line
-    summary.
-    """
+    "aimed"} dicts, where `bearing` is the compass name or the raw offset."""
     return [{"source": s["source"],
              "bearing": aim_label(s["offset"]) if s["offset"] else None,
              "aimed": s["offset"] is not None}

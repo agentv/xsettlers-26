@@ -46,11 +46,7 @@ def roll_sector_energy(multiplier: float = 1.0) -> float:
     The die is rolled before scaling, and always, so the sequence of rolls
     across a game does not depend on where the sectors happened to be. Two
     games on the same seed reveal the same faces in the same order whatever
-    map they are played on.
-
-    Home sectors do not use this -- they are seeded flat by db/bootstrap.py
-    from the scenario's own figure (see HOME_SECTOR_ENERGY).
-    """
+    map they are played on."""
     roll = SECTOR_ENERGY_BASE + _rng.randint(1, SECTOR_ENERGY_DIE_SIDES) * SECTOR_ENERGY_DIE_UNIT
     return roll * multiplier
 
@@ -120,12 +116,6 @@ def reveal_sector(cur, player_id: int, coord_x: int, coord_y: int, coord_z: int)
     function does not commit; callers (bootstrap_game(), end_of_turn())
     commit as part of their own transaction.
 
-    How rich the roll is depends on where the sector sits: the scenario's map
-    may declare regions that roll richer or leaner than open space (see
-    richness_multiplier). A player learns a region exists by revealing into it
-    and reading what it rolled -- the layout itself is never exposed, so a
-    scenario can keep its map secret.
-
     An already-revealed sector's energy capacity is left untouched -- the
     richness roll happens once, on first reveal, whoever that reveal belongs
     to, and every later look (by any player, by any means) reads the
@@ -134,11 +124,7 @@ def reveal_sector(cur, player_id: int, coord_x: int, coord_y: int, coord_z: int)
     path for a scan, a ship arrival, and bootstrap placement alike, so two
     rivals discovering the same sector cannot be told two different things
     about it, and a rival arriving later cannot re-roll your find or refill
-    what you have already drawn down. Returns the sector's id either way.
-
-    Energy is the only capacity a sector carries: food and goods are
-    manufactured from stock already held, never harvested from the map.
-    """
+    what you have already drawn down. Returns the sector's id either way."""
     cur.execute("SELECT id FROM sectors WHERE coord_x=? AND coord_y=? AND coord_z=?",
                 (coord_x, coord_y, coord_z))
     row = cur.fetchone()

@@ -133,13 +133,6 @@ def _resolve_scan(cur, current_turn: int, org_id: int, player_id: int, origin,
     Resolve one aimed scanner: reveal the sector it points at, or log an
     out-of-range alert if the aim overreaches.
 
-    Scanning is scanning, whoever carries the equipment -- an org's innate
-    sensors and a pod on the scan task follow identical rules, and this is
-    where that claim stops being a comment in two places and becomes one
-    piece of code. The only thing the two callers differ on is who the event
-    is *about* (subject_id/subject_type, plus a pod_id in the payload), which
-    is why those are parameters and nothing else is.
-
     `origin` is the scanning org's absolute (x,y,z); `offset` is the relative
     aim (see bearings.SCAN_BEARINGS -- aim is relative so it survives a
     move). Range is re-checked here even though it was validated at set time
@@ -438,13 +431,6 @@ def _snapshot_holdings(cur, turn: int, before_holdings: dict, production: dict, 
     execution, arrivals, and mission dispatch have resolved. Called as step 6
     of end_of_turn() -- never before processing is complete.
 
-    Writes one turn.snapshot event per player per turn, so a game's history
-    (e.g. "how much did each player waste, turn by turn") can be read back
-    from the events table rather than replayed from bootstrap in a scratch DB.
-    Payload carries the after-state holdings, this turn's score (same
-    score_weights formula as show_game_status/_calculate_final_scores), and
-    derived waste.
-
     Waste is derived, not directly measured -- for each resource:
         wasted = produced - consumed - (after - before)
     i.e. whatever was produced and consumed this turn but doesn't show up in
@@ -493,15 +479,6 @@ def _calculate_final_scores() -> list:
     also what show_game_status calls, so the winner here matches what was
     checkable mid-game via that tool by construction rather than by two
     copies of an expression happening to stay in step.
-
-    The result is PERSISTED as a `game.final_scores` event, not merely printed.
-    A game whose outcome exists only in a server log is a game nobody can be
-    told they won: players need the result back, and replay/audit needs the
-    scoreboard as it stood at the final whistle rather than something
-    recomputed later against state that may have moved on. The payload carries
-    the full breakdown (rank, score, per-resource totals, and the weights used
-    to derive it) so the scoreboard is self-explaining without re-reading
-    config.
 
     Idempotent: writing twice would give a game two endings, so an existing
     event for this game is left alone and returned as-is.

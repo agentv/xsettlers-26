@@ -18,11 +18,7 @@ def move_params_error(params: dict) -> str | None:
     order portable between starting positions, and it is why the
     negative-coordinate guard only applies to the absolute form here -- a
     relative move's real destination isn't knowable until it fires, so
-    resolve_move_destination checks it then.
-
-    Returns a bare sentence so callers can frame it: a tool returns it as
-    {"error": ...}, a program validator prefixes it with which step failed.
-    """
+    resolve_move_destination checks it then."""
     absolute = [k for k in ABSOLUTE_KEYS if params.get(k) is not None]
     relative = [k for k in RELATIVE_KEYS if params.get(k) is not None]
     if absolute and relative:
@@ -47,13 +43,7 @@ def resolve_move_destination(cur, org_id: int, params: dict):
     this runs -- which is the whole point of that form, and why it cannot be
     resolved when the order is given. Both the ship's log firing a queued move
     and an NPC program dispatching an immediate one land here, so "three
-    further out the way I'm heading" means the same thing either way.
-
-    Returns the error rather than raising, because the two callers want
-    opposite things with it: engine/ship_log.py raises so its handler guard
-    logs alert.queued_command_failed without stopping the turn, while a
-    program collects it into the profile's error list.
-    """
+    further out the way I'm heading" means the same thing either way."""
     if params.get("dest_x") is not None:
         return (params["dest_x"], params["dest_y"], params["dest_z"]), None
     org = org_position(cur, org_id)
@@ -70,11 +60,6 @@ def plan_move(origin, dest, jump_range_per_turn: int, current_turn: int) -> dict
     """
     What a move would cost, as pure arithmetic: straight-line distance, whole
     turns needed, and the turn the org is free to act again. No DB, no writes.
-
-    Both halves of the two-step move flow call this -- preview_move to quote a
-    move, apply_confirm_move to commit one -- so a quote and the move that
-    follows it cannot disagree about travel time. Computed independently in two
-    places, they could.
 
     arrival_turn is the turn the org becomes free to act, one turn AFTER the
     end_of_turn() pass that performs the landing (engine/turn.py's arrival

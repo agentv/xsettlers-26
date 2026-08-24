@@ -7,15 +7,7 @@ ledger (engine/turn._snapshot_holdings), and the game-over result
 (engine/turn._calculate_final_scores). Sharing one implementation is what
 makes that true -- with a copy each, a weights change applied to two of the
 three would show a player one standing mid-game and crown a different winner
-at the whistle.
-
-Deliberately a leaf module: it imports nothing from engine/, db/, or
-xsettlers_mcp/, and takes an open cursor plus an already-loaded weights dict
-rather than reaching for a connection or config itself. That keeps it
-importable from both the engine and the tool layer with no risk of joining
-the circular-import tangle those two already navigate carefully (see
-db/events.py and engine/turn.py's lazy imports).
-"""
+at the whistle."""
 
 # The resources that carry score. Energy is currently weighted 0 (it's a means
 # of production, not a scored asset -- see config/game_config.yaml), but it
@@ -47,14 +39,7 @@ def player_standings(cur, weights: dict) -> list:
     LEFT JOINs, so a wiped-out player still appears in the standings rather
     than vanishing from the scoreboard. Sums run across all of a player's
     pods regardless of which org carries them or what task each pod is on
-    (storage is generic per pod -- see engine/production.RESOURCE_STORAGE_COLUMN).
-
-    Values are returned unrounded. Presentation is the caller's business:
-    show_game_status rounds to 2dp and adds a utilization percentage,
-    _calculate_final_scores persists the raw figures. Rounding here would
-    quietly change what gets written into the permanent game.final_scores
-    event.
-    """
+    (storage is generic per pod -- see engine/production.RESOURCE_STORAGE_COLUMN)."""
     cur.execute("""
         SELECT p.id AS player_id, p.display_name,
                SUM(pods.energy_stored) AS energy,

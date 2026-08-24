@@ -44,19 +44,7 @@ def _cell_marker(known: bool, ships: int, colonies: int, rivals: int,
     because they are different claims. "R" means a rival is there now, and is
     only ever shown for a sector you occupy. "r" means a scan saw one there on
     some turn, which may be long past -- the turn itself is in the table, since
-    a grid cell has no room to date itself.
-
-    Confidence deliberately does NOT appear on the grid. It's a reporting
-    number, not a thing to steer by: with a flat decay a sector is either still
-    on your map or it has blinked off it (see db/sectors.py), so the readout
-    that matters is binary and the exact figure belongs in `highlights`.
-
-    A rival always wins the third character, truncating the own-org marker to
-    make room ("S6C" + rival -> "S6!"): a contested sector is the most
-    important cell on the board, and what it costs -- knowing a colony is also
-    there -- is static information the player already has, whereas the rival is
-    news. Exact composition of any marked cell is in `highlights` regardless.
-    """
+    a grid cell has no room to date itself."""
     if not known:
         return UNKNOWN_CELL
     if ships and colonies:
@@ -84,14 +72,7 @@ def _cell_marker(known: bool, ships: int, colonies: int, rivals: int,
 
 def _resolve_center(sess, org_id, center_x, center_y, center_z) -> dict:
     """
-    Where a viewport is centered: {"x", "y", "z", "label"}, or {"error": ...}.
-
-    Either an org's current sector -- the normal way to call a neighborhood
-    report, "show me what's around this ship" -- or explicit coordinates. A
-    ship in transit (sector_id = -1) has no location and is not a valid
-    center. `label` is what the report header names the place: the org's name
-    when there is one, else the coordinates.
-    """
+    Where a viewport is centered: {"x", "y", "z", "label"}, or {"error": ...}."""
     if org_id is not None:
         origin = sess.own_org(org_id, columns="name, sector_id")
         origin_sector = sess.cur.execute("""SELECT coord_x, coord_y, coord_z FROM sectors
@@ -145,22 +126,12 @@ def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict,
     the most actionable number on either map. Out of range renders blank
     rather than unknown: the two are different claims.
 
-    Axis labels are absolute coordinates so anything read off the map can go
-    straight into preview_move or set_pod_scan_bearing without arithmetic.
-
     `aims` maps (x, y) to the scanners aimed there, and suffixes AIM_CELL onto
     whatever cell the report built. It is applied here rather than folded into
     the cell string because a scan is most often aimed at a sector nobody has
     seen -- which has no row for a report to decorate, only an UNKNOWN_CELL
     the lattice synthesizes. Aim is a layer over the viewport, not a property
-    of a sector, and the two other layers already read that way.
-
-    `cell_width` right-pads every cell, blanks and unknowns included, to a
-    fixed width -- for a grid of figures, where a column only reads as a
-    column if its digits sit in the same place each row. It pads and never
-    truncates, so a cell wider than the width widens its column instead of
-    losing characters. 0 leaves cells exactly as their report built them.
-    """
+    of a sector, and the two other layers already read that way."""
     x_labels = list(range(cx - radius, cx + radius + 1))
     r2 = radius ** 2
     rows, unknown_in_range = [], 0
@@ -195,11 +166,6 @@ def _scan_coverage(sess, cx: int, cy: int, cz: int, radius: int) -> tuple:
     center, which is only the same place for the org the map happens to be
     centered on. A ship two sectors outside the frame still covers cells
     inside it, and its coverage is real.
-
-    Aims landing off the drawn z-plane or outside the viewport are dropped
-    rather than reported: the layer answers "what is covered here", and a scan
-    aimed elsewhere is not part of that answer. show_organization is where a
-    given ship's own bearings are listed, unaimed pods included.
 
     An org in transit contributes nothing. It has no position to resolve an
     offset against, and end-of-turn suppresses its scans anyway (engine/turn.py
@@ -303,43 +269,11 @@ def show_sector_neighborhood(
     directly as (center_x, center_y, center_z). Ships in transit
     (sector_id = -1) have no location and are not valid org_id centers.
 
-    Three things distinguish this from get_sector_map(), which returns a bare
-    list of what you know:
-
-    - It returns the *complete* lattice, not just known sectors. A cell you
-      have never seen is the most actionable thing on the map (it's where to
-      send a scan pod), and it has no `sectors` row at all under the lazy
-      reveal model (db/sectors.py) -- so the grid is synthesized from the
-      center and radius, and known sectors are overlaid onto it. Nothing here
-      creates sector rows: this is a pure view, it never calls reveal_sector().
-    - Cells carry your own orgs and rival presence, not just sector resources.
-    - `display` carries a finished grid (see views/render.py's render_map),
-      so every client draws the same map rather than each improvising one
-      from a coordinate list.
-
-    Two layers ride on that one lattice: who is where, and what your fleet is
-    scanning this turn (`_scan_coverage`, marked with AIM_CELL and itemized in
-    `scan_aims`). Coverage answers a question about the neighborhood rather
-    than about the centered org, so it counts every scanner of yours reaching
-    into the frame, wherever it is standing.
-
-    The grid is a single z-plane -- the center's. The model is 3D and distance
-    is 3D everywhere else in the codebase, but no scenario has yet placed
-    anything off z=0, so a plane is the whole picture today. Known sectors in
-    range but off-plane are still returned in `sectors` and counted in
-    `off_plane_count` rather than silently dropped, so the day z matters the
-    view says so instead of quietly lying.
-
     Rival presence comes from two sources that are never mixed. Sectors at
     confidence 100 -- ones you currently occupy -- report rivals live from
     `organizations`, because standing there means seeing what is there now.
     Everywhere else reports remembered sightings from `org_sightings`, dated
-    with the turn the scan was made (see db/sightings.py).
-
-    Keeping them apart is what stops a stale cell from handing out current
-    intel: a sector you scanned fifty turns ago shows what was there then, and
-    says so, rather than quietly reporting who is there today.
-    """
+    with the turn the scan was made (see db/sightings.py)."""
     if radius < 1 or radius > MAX_NEIGHBORHOOD_RADIUS:
         return {"error": f"radius must be between 1 and {MAX_NEIGHBORHOOD_RADIUS}"}
     cur = sess.cur
@@ -496,14 +430,7 @@ RESOURCE_LEGEND = [
 def _energy_cell(energy: float, is_center: bool) -> str:
     """One grid cell: a sector's energy capacity in thousands (see
     views.format.in_thousands), marked when it is the sector the view is
-    centered on, and right-padded to CELL_WIDTH.
-
-    The center is marked because this map has no other anchor -- the
-    who-is-where map shows your own ships, and a reader of a grid of bare
-    numbers would otherwise count axis labels to find where they are standing.
-    A one-character suffix rather than brackets so the marked cell is the same
-    width as every other, and CENTER_MARK deliberately isn't SEEN_CELL's "*":
-    the two maps must not use one character for two claims."""
+    centered on, and right-padded to CELL_WIDTH."""
     figure = in_thousands(energy)
     return (figure + CENTER_MARK if is_center else figure).rjust(CELL_WIDTH)
 
@@ -532,36 +459,11 @@ def show_neighborhood_resources(
     Render what the neighborhood around a center point is worth, as a
     ready-to-draw grid plus the underlying sector data.
 
-    The companion to show_sector_neighborhood, over exactly the same viewport:
-    same center rules (an org's sector or explicit coordinates, never a ship
-    in transit), same radius, same fog of war, same single z-plane with
-    off-plane sectors counted rather than dropped. Both draw their lattice
-    through the shared helpers above, so the two reports cannot come to
-    disagree about which sectors are "nearby". What differs is the question a
-    cell answers: there, who is standing in the sector; here, what the sector
-    holds.
-
-    Figures are in thousands to two decimals -- "2.20" is 2,200 energy -- so
-    every cell is the same width whatever a sector is worth, and a column of
-    them lines up to be read down the page. `energy_capacity` stays raw on
-    every row, and the legend carries the unit, since "2.20" alone is
-    meaningless.
-
     Only energy today, because a sector yields nothing else -- food and goods
     are manufactured from stock a player already holds, never harvested from
     the map (see db/sectors.py). A cell is therefore a single figure rather
     than a slashed run; the day a sector has a second yield, the cell gains a
     slot and this report keeps its name.
-
-    A figure is only as current as the sector it came from. Energy capacity
-    doesn't change on its own, but your knowledge of it ages: a reading is
-    from whenever you last saw the place, and when that sector blinks out at
-    confidence 0 the reading leaves the map with it. `confidence` rides on
-    every row for exactly that reason.
-
-    `richest` is the shortlist the grid can't be: the RICHEST_ROWS best
-    sectors in view, ranked. Ties break on coordinates so the same board
-    always ranks the same way.
 
     Pure view -- it never calls reveal_sector(), and reading a resource map
     costs nothing and reveals nothing to anyone else.

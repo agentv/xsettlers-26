@@ -1,13 +1,6 @@
 """
 Scanning: what a legal aim is, and how an aim gets written down.
 
-Scanning is scanning, whoever carries the equipment. An organization's innate
-sensors and a pod on the scan task follow identical rules -- same food cost,
-same range, same relative aiming, same suppression in transit -- so both live
-here rather than in a pod module and an org module that have to agree by hand.
-engine/turn.py's _resolve_scan is the matching single implementation of the
-resolution half.
-
 The apply_* functions operate on an already-open cur/transaction and do no
 ownership check (the caller's job). That split is what lets engine/ship_log.py
 dispatch a queued aim from inside end_of_turn()'s own transaction --
@@ -118,14 +111,7 @@ def scanners_on(cur, org: dict) -> list:
     `offset` is the (dx, dy, dz) the scanner is aimed at, or None for a scan
     pod that has been given the task but no aim. An unaimed pod still costs
     its food and reveals nothing, so it is listed and flagged rather than
-    dropped (see set_pod_task).
-
-    Scanning is scanning, whoever carries the equipment: this is the one place
-    that answers "what is this org looking at", so a report listing bearings
-    and a map plotting them cannot come to disagree about which scanners exist.
-    Callers resolve the offset themselves -- against a name for a report, or
-    against the org's position for a map.
-    """
+    dropped (see set_pod_task)."""
     scanners = []
     if org["scan_offset_x"] is not None:
         scanners.append({"source": "sensors", "pod_id": None,
@@ -199,13 +185,7 @@ def apply_set_pod_scan_bearing(cur, pod_id: int, player_id: int, offset,
                                current_turn: int, bearing: str = None):
     """
     Aim a scan pod at `offset`, or clear its aim when offset is None. The pod's
-    task is left alone -- this only writes task_params.
-
-    The pod-side twin of apply_set_org_scan_bearing, and deliberately the same
-    shape: clearing writes no event, and `bearing` is payload decoration only.
-    A pod's aim lives in pods.task_params rather than in dedicated columns,
-    which is the only real difference between the two.
-    """
+    task is left alone -- this only writes task_params."""
     if offset is None:
         cur.execute("UPDATE pods SET task_params=NULL WHERE id=?", (pod_id,))
         return

@@ -43,13 +43,7 @@ def record_event_direct(cur, turn: int, event_type: str, actor_id=None,
     ("database is locked") rather than blocking. Takes `turn` as an explicit
     parameter (unlike record_event, which calls get_current_turn() itself)
     so this module never needs to import engine.turn -- avoids a circular
-    import.
-
-    resolve_at_turn carries the same meaning it does in record_event -- a
-    deferred event a later end_of_turn() pass picks up once current_turn
-    reaches it. engine/missions.py's apply_colonize uses it to schedule
-    colonize_complete from inside the turn transaction.
-    """
+    import."""
     cur.execute("SELECT COALESCE(MAX(seq),-1)+1 FROM events WHERE turn=?", (turn,))
     seq = cur.fetchone()[0]
     cur.execute("""
@@ -92,12 +86,7 @@ def record_dispatch_failure(cur, turn: int, command_id: int, org_id: int,
     The rule it upholds: one player's bad order must never stop the turn for
     everyone else. An escaping exception would leave the offending row
     undeleted (deletion happens after the handler returns) to re-fire on every
-    subsequent tick, and the game could never advance again.
-
-    Lives here rather than in either dispatcher because both need it and they
-    cannot import from each other -- engine/ship_log.py imports
-    engine/movement.py for the 'move' action.
-    """
+    subsequent tick, and the game could never advance again."""
     record_event_direct(cur, turn, DISPATCH_FAILURE_EVENT,
         actor_id=player_id, subject_id=org_id, subject_type="organization",
         payload={"command_id": command_id, "org_id": org_id,

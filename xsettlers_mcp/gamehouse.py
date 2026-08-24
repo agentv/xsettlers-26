@@ -15,14 +15,7 @@ Two directions of traffic:
     registration model is push, not pull -- xsettlers announces itself;
     GameHouse does not interrogate it.
   - start_session(): xsettlers acts as an MCP SERVER, GameHouse calls this
-    once a lobby closes.
-
-The existing static-roster auth (xsettlers_mcp/auth.py, config/game_config.yaml's
-players: directory) is untouched by this module. start_session() is an
-additional bootstrap path alongside select_scenario(), not a replacement --
-it still produces ordinary player_token-based players rows that every
-existing gameplay tool already knows how to check.
-"""
+    once a lobby closes."""
 from xsettlers_mcp.tools.registry import mcp_tool
 import asyncio
 import os
@@ -148,11 +141,6 @@ def npc_profile_schema() -> dict:
     The JSON schema an NPC roster entry must match, built from the strategy
     library rather than authored.
 
-    The library is service-wide, not per-scenario, so there is nothing for a
-    scenario to say about which strategies exist -- restating the enum
-    per-scenario would drift out of sync with the library, the same drift the
-    loader already refuses for min_players.
-
     `config` is intentionally unconstrained: it overlays the strategy
     document's own config block, whose keys differ per strategy, and a
     conditional schema keyed on strategy_ref would be a second copy of the
@@ -226,13 +214,7 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
     email or display_name, so both are synthesized here -- xsettlers'
     players.email/display_name columns exist for the existing static-roster
     auth path, which a GameHouse-driven session has no use for beyond
-    satisfying the schema.
-
-    Response shape (player_id/xsettlers_player_id/player_token per entry) is
-    xsettlers' own invention -- GameHouse's doc defines what it sends here,
-    not what a game returns, so this is the piece GameHouse would need to
-    relay each generated player_token back to its actual human player.
-    """
+    satisfying the schema."""
     sc = load_starting_configuration(SCENARIO_FILE)
     err = _validate_players(players, sc.lobby)
     if err:
@@ -325,12 +307,7 @@ def build_results() -> list:
     reattach to its game_journal row via (session_token, person_id) with no
     second identity mapping. Players with no `gamehouse_person_id` are
     silently absent: NPCs have no Person to attach a score to, and
-    static-roster players were never GameHouse's to begin with.
-
-    Each entry's score object carries the envelope (placement, score) plus
-    xsettlers' own breakdown. GameHouse stores the whole thing and reads only
-    the envelope -- see scoreboard_schema().
-    """
+    static-roster players were never GameHouse's to begin with."""
     final = get_final_scores()
     if not final:
         return []
@@ -471,14 +448,7 @@ async def run_results_reporter():
     check_consensus_acceleration -- live in engine/, which may not import
     this module (CLAUDE.md's layering rule allows exactly one function-level
     exception and warns against a second). Polling from the server layer
-    needs no change in engine/ at all.
-
-    Two things this gets that a hook would not: one trigger covering both
-    game-over paths, and recovery across a restart -- a server that dies
-    between game-over and a successful push simply reports (and, once
-    settled, archives) on its next boot, because both conditions are facts in
-    the database rather than a moment that passed.
-    """
+    needs no change in engine/ at all."""
     while True:
         await asyncio.sleep(REPORT_POLL_SECONDS)
         try:

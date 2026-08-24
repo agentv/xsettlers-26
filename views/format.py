@@ -4,12 +4,7 @@ Value formatting for the display hints reports carry.
 Two jobs, deliberately split: this module turns one value into the string a
 player reads ("80/80/100", "P1-01", "03:47"); views/render.py lays those
 strings out as a table or a grid. A report builds its `display` block from
-here and hands it to the renderer.
-
-Pure functions over plain values -- no database, no engine imports, nothing to
-know about which tool is calling. That is what lets a report add a formatted
-field without either the renderer or the engine learning about it.
-"""
+here and hands it to the renderer."""
 from datetime import datetime, timezone
 
 # Offloads simple, repetitive formatting onto the server rather than every
@@ -74,11 +69,7 @@ def tick_countdown(next_tick_at: str | None) -> str:
 
 
 def in_thousands(value: float) -> str:
-    """2200.0 -> "2.20" -- a figure in thousands, always two decimals.
-
-    Fixed width is the point, same as `slashed`: a reader comparing a column
-    of these is comparing digits in the same place each row. The caller's
-    legend carries the unit."""
+    """2200.0 -> "2.20" -- a figure in thousands, always two decimals."""
     return f"{value / ENERGY_UNIT:.2f}"
 
 
@@ -97,10 +88,6 @@ def slashed(values: dict, slots: dict = RESOURCE_ABBREV) -> str:
     `slots`, in that order, 0 for anything the dict doesn't mention. What each
     number counts is carried by the column header (see stacked_header), not
     repeated on every cell.
-
-    Fixed width and fixed order are the point: a reader scans down a column of
-    "80/80/100" and compares the same slot each row, which a variable-length
-    "E:80, F:80" defeats the moment one entry is absent.
 
     `slots` is what separates a resource-keyed dict from a task-keyed one --
     RESOURCE_ABBREV for holdings and production, TASK_ABBREV for pod tasking.
@@ -154,14 +141,7 @@ def winners_label(winners: list) -> str:
 
 def totals_footer(title: str, assets: dict) -> list:
     """
-    The fleet-wide aggregate, rendered below the table rather than in it.
-
-    A list of lines, not a row: totals answer a different question than the
-    per-unit rows above them ("how am I doing overall?" vs "what is this unit
-    doing?"), and a totals row inside the table invites reading it as one more
-    unit. Deliberately not a table of its own either -- two shapes stacked
-    read as two reports.
-    """
+    The fleet-wide aggregate, rendered below the table rather than in it."""
     percent = assets.get("percent_full", 0.0)
     return [f"**{title}**",
             f"- Storage ({'/'.join(RESOURCE_ABBREV.values())}): {slashed(assets)}",
@@ -172,11 +152,7 @@ def totals_footer(title: str, assets: dict) -> list:
 def scanner_footer(scanners: list) -> str | None:
     """
     A ready-to-render line for an org's active scanners ("Scans: North, South,
-    Southeast"), or None when it has none in use.
-
-    An unaimed scan pod still costs its food and reveals nothing, so it is
-    counted and flagged rather than silently dropped.
-    """
+    Southeast"), or None when it has none in use."""
     if not scanners:
         return None
     aimed = [BEARING_FULL_NAME.get(s["bearing"], s["bearing"])

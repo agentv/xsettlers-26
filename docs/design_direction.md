@@ -382,9 +382,11 @@ behavioural descriptions (see `config/npc_strategies/`).
 ### Tournament standing — stale, needs a re-run
 
 `../xsettlers-designer`'s `xs-tournament` plays every pair of registered strategies
-once each, one subprocess and scratch DB per matchup (repeatedly reloading the
-SpatiaLite extension across connections in one long-running process segfaults on
-the second matchup). `xs-report` renders the results as a static-SVG report.
+once each, one subprocess and scratch DB per matchup. That isolation was forced by a
+segfault on the second matchup, caused by repeatedly reloading the SpatiaLite
+extension across connections in one long-running process — SpatiaLite was
+dropped from this repo on 2026-08-24, so the cause is gone and the
+subprocess-per-matchup workaround can probably go with it. Worth testing. `xs-report` renders the results as a static-SVG report.
 Both used to live in this repo's `scripts/`; the harness is a separate codebase
 now, so a re-run means checking out the designer repo, not this one alone.
 

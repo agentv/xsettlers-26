@@ -8,7 +8,7 @@ XSettlers is a multiplayer, turn-based space strategy game played through any MC
 
 # Players & Game Instance
 
-* A game instance is defined by a single scenario file (e.g. `config/game0.yaml`) and a corresponding SQLite/SpatiaLite database — one shared game per deployed instance.
+* A game instance is defined by a single scenario file (e.g. `config/game0.yaml`) and a corresponding SQLite database — one shared game per deployed instance.
 * The player roster is **fixed at bootstrap time**. There is no mechanism for joining a game already in session through xsettlers' own tools (see GameHouse below for the one exception).
 * Internally, xsettlers still supports several scenario files side by side (`config/game*.yaml`), each declaring its own `participants` against a service-wide player *directory* in `config/game_config.yaml` — player count is a property of the scenario, not the deployment, and a solo, two-player, or five-player game differs only in YAML. **Presenting itself as a browsable library to a person is not xsettlers' job** — that role belongs to a separate sibling service, **GameHouse** (`../gamehouse`), which owns Person-level identity and lobby matchmaking across potentially many hosted games, xsettlers being one of them. See `docs/TODO.md`'s "GameHouse handoff" section for the current integration. `list_scenarios`/`select_scenario` remain live as xsettlers-internal tools; they are simply not the only way a game gets started.
 * Each player is identified by an opaque `player_token`, not a Slack-specific ID — nothing in the auth path is platform-specific. A GameHouse-driven session (see above) generates its own `player_token`s per handoff, entirely separate from `config/game_config.yaml`'s static roster; both paths are live.
@@ -117,7 +117,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 
 **POC active tasks:** `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. All other entries above are recognized in the data model but are not instantiated in any current game instance.
 
-**Platform note:** The stack is **Python · SpatiaLite · MCP SDK**, served over streamable HTTP to any MCP-speaking client — identity and transport are both client-agnostic (see [Overview](#overview)), not Slack-specific.
+**Platform note:** The stack is **Python · SQLite · MCP SDK**, served over streamable HTTP to any MCP-speaking client — identity and transport are both client-agnostic (see [Overview](#overview)), not Slack-specific.
 
 ---
 

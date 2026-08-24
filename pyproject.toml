@@ -30,7 +30,6 @@ dependencies = [
     "mcp>=1.0.0,<2.0.0",
     "starlette",
     "uvicorn",
-    "spatialite",
     "python-dotenv",
     "pyyaml",
     "anyio",

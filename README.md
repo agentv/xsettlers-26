@@ -40,7 +40,7 @@ Playable end to end, solo or multiplayer, but pre-MVP. The significant gaps: com
 
 ## Stack
 
-Python · SpatiaLite · MCP SDK · Starlette/uvicorn · Fly.io
+Python · SQLite · MCP SDK · Starlette/uvicorn · Fly.io
 
 ## License
 

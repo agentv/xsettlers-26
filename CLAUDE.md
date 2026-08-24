@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-XSettlers is a multiplayer space strategy game, playable from any MCP-speaking client. This repo is the Python MCP server: a client calls MCP tools with a player's token attached, tools query/mutate a SpatiaLite database, and a background clock resolves turns on a fixed interval. **There is no separate web/API layer** — `xsettlers_mcp/server.py` *is* the server, on MCP's streamable HTTP transport (Starlette + uvicorn, `POST /mcp`, `GET /health`) so a network-hosted deployment can be reached remotely. There is no stdio path; stdio only works for a client that spawns the process locally.
+XSettlers is a multiplayer space strategy game, playable from any MCP-speaking client. This repo is the Python MCP server: a client calls MCP tools with a player's token attached, tools query/mutate a SQLite database, and a background clock resolves turns on a fixed interval. **There is no separate web/API layer** — `xsettlers_mcp/server.py` *is* the server, on MCP's streamable HTTP transport (Starlette + uvicorn, `POST /mcp`, `GET /health`) so a network-hosted deployment can be reached remotely. There is no stdio path; stdio only works for a client that spawns the process locally.
 
 **Identity is client-agnostic.** Every tool's first argument is `player_token` — an opaque per-player secret compared with `hmac.compare_digest` in `xsettlers_mcp/auth.py`, not a platform credential. Slack, curl, another LLM agent, or anything else holding a valid token authenticates identically.
 
@@ -43,7 +43,7 @@ scripts/shrink.py --context [ref]   # tokens a fresh session pays before any wor
 
 The local `xsettlers.db` is scratch — safe to `rm` and restart clean.
 
-Requires **Python 3.12** (per the Dockerfile) with `sqlite3.Connection.enable_load_extension` and `mod_spatialite` (`brew install spatialite-tools`). `db/connection.get_connection()` loads the extension on every connection. Deploy target is Fly.io (`fly.toml`, `Dockerfile`), persistent volume at `/data`.
+Requires **Python 3.12** (per the Dockerfile) and nothing else — storage is the standard-library `sqlite3` module, no extension to load. Deploy target is Fly.io (`fly.toml`, `Dockerfile`), persistent volume at `/data`.
 
 Config is env-driven (`.env.example`, via `python-dotenv`): `DB_PATH`, `GAME_CONFIG_PATH`, `CONFIDENCE_DECAY_PER_TURN`, `GAME_TICK_SECONDS`, `TURN_LIMIT`. **These env vars shadow `config/game_config.yaml`, whose `game:` block is largely inert** — the shadowed fields are kept deliberately for a precedence rule tracked in `docs/TODO.md`, so don't "clean them up", and check that something reads a field before changing its value there.
 
@@ -68,7 +68,7 @@ Any MCP client (Slack, curl, an LLM agent) → POST /mcp (carries player_token)
                           │                    task_force_tools)
                           │                   all gated by session.py's @player_tool
                           │
-                    db/connection.py → SpatiaLite (.db file)
+                    db/connection.py → SQLite (.db file)
 ```
 
 ### Layering — imports point one way

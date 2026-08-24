@@ -150,8 +150,6 @@ def reveal_sector(cur, player_id: int, coord_x: int, coord_y: int, coord_z: int)
             (coord_x, coord_y, coord_z, roll_sector_energy(
                 richness_multiplier(cur, coord_x, coord_y, coord_z))))
         sector_id = cur.lastrowid
-        cur.execute("UPDATE sectors SET location=MakePointZ(?,?,?,-1) WHERE id=?",
-                    (coord_x, coord_y, coord_z, sector_id))
     cur.execute("""INSERT INTO player_sectors (player_id,sector_id,confidence) VALUES (?,?,100)
         ON CONFLICT(player_id,sector_id) DO UPDATE SET confidence=100""",
         (player_id, sector_id))

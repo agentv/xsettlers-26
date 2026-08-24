@@ -23,49 +23,37 @@ The model must support:
 
 ---
 
-# Storage Choice: SpatiaLite
+# Storage Choice: SQLite
 
-## Why SpatiaLite
+A single `.db` file — no server process, no config, no ports, and no
+extension to install. Coordinates are plain `coord_x/y/z` integers and
+distance is ordinary SQL arithmetic.
 
-| Option | Spatial Queries | Graph Traversal | Zero Infrastructure | Python Support |
-|---|---|---|---|---|
-| **SpatiaLite** | ✅ Full | ⚠️ Adequate | ✅ Single file | ✅ Native |
-| PostgreSQL + PostGIS | ✅ Full | ⚠️ Adequate | ❌ Server required | ✅ Excellent |
-| Redis | ⚠️ 2D only | ❌ Weak | ❌ Server required | ✅ Good |
-| Neo4j Community | ✅ Good | ✅ Excellent | ❌ Server required | ✅ Good |
-| MongoDB | ⚠️ Limited | ❌ Weak | ❌ Server required | ✅ Good |
+SpatiaLite was the original choice and was dropped once it became clear
+nothing read the geometry it stored. It cost 4.6 ms of `dlopen` on every
+connection, added 22 bookkeeping tables and 7 MB to every database
+including each of the ~526 created by the test suite, and required
+`mod_spatialite` on every developer machine. Removing it took the test
+suite from 69 s to 8.4 s and a fresh database from 7,114,752 bytes to
+131,072.
 
-**SpatiaLite** was chosen for the POC because:
+| Option | Spatial Queries | Graph Traversal | Zero Infrastructure |
+|---|---|---|---|
+| **SQLite** | ➖ none needed yet | ⚠️ Adequate | ✅ Single file |
+| SQLite + SpatiaLite | ✅ Full | ⚠️ Adequate | ✅ Single file |
+| PostgreSQL + PostGIS | ✅ Full | ⚠️ Adequate | ❌ Server required |
+| Neo4j Community | ✅ Good | ✅ Excellent | ❌ Server required |
 
-* It is a single `.db` file — no server process, no config, no ports
-* It is SQLite + `mod_spatialite` extension — standard, open source, free
-* Full spatial query support including 3D geometry (`POINTZ`)
-* The schema migrates cleanly to **PostGIS** when a real server is needed
-
-**Neo4j** remains the long-term candidate for at-scale deployments where traversing large object trees (Pods → Ships/Colonies → Sectors) becomes a performance concern.
+**Neo4j** remains the long-term candidate for at-scale deployments where
+traversing large object trees (Pods → Ships/Colonies → Sectors) becomes a
+performance concern.
 
 ---
 
 # Python Setup
 
-```
-# macOS
-brew install spatialite-tools
-
-# Ubuntu/Debian
-sudo apt-get install spatialite-bin libsqlite3-mod-spatialite
-```
-
-```python
-import sqlite3
-
-conn = sqlite3.connect("outlanders.db")
-conn.enable_load_extension(True)
-conn.load_extension("mod_spatialite")
-conn.execute("SELECT InitSpatialMetaData(1)")  # Run once on new database
-```
-
-No additional `pip install` required — uses Python's built-in `sqlite3` module.
+Nothing to install beyond `requirements.txt` — the standard-library
+`sqlite3` module is the whole storage dependency.
 
 ---
 
@@ -104,11 +92,10 @@ CREATE TABLE sectors (
     energy_capacity REAL,  -- the ONLY resource drawn from the map
     discovered_by INTEGER  -- player_id
 );
-SELECT AddGeometryColumn('sectors', 'location', -1, 'POINTZ', 'XYZ');
 CREATE UNIQUE INDEX idx_sector_coords ON sectors(coord_x, coord_y, coord_z);
 ```
 
-Sectors are **lazily instantiated** — only created when a player interacts with them, keeping the sparse grid efficient. The `POINTZ` geometry column enables true 3D spatial queries. Note: sectors have no `player_id` — ownership is not a sector property. A player's presence in a sector is determined by the organizations they have located there.
+Sectors are **lazily instantiated** — only created when a player interacts with them, keeping the sparse grid efficient. Note: sectors have no `player_id` — ownership is not a sector property. A player's presence in a sector is determined by the organizations they have located there.
 
 ## Organizations (Ships & Colonies)
 
@@ -301,12 +288,14 @@ This uses integer grid math for the POC. When migrating to PostGIS, this becomes
 
 # Migration Path
 
-When the POC outgrows SpatiaLite:
+When the POC outgrows SQLite:
 
-1. Stand up a PostgreSQL instance with the PostGIS extension
-2. Port the schema — `AddGeometryColumn` syntax is nearly identical
-3. Replace the Python connection string — `sqlite3` → `psycopg2` or `SQLAlchemy`
-4. Spatial queries require minimal changes (`ST_3DDistance` replaces manual distance math)
+1. Stand up a PostgreSQL instance, with PostGIS if spatial queries are by
+   then actually wanted
+2. Port the schema — the tables are ordinary SQL
+3. Replace the connection string — `sqlite3` → `psycopg2` or `SQLAlchemy`
+4. A geometry column, if one is ever needed, is generated from
+   `coord_x/y/z`; those integers are the source of truth
 
 This is a well-documented, well-traveled migration path.
 

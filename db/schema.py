@@ -1,12 +1,9 @@
 from db.connection import get_connection
 
 def init_schema():
-    """Create all tables and spatial metadata. Safe to run on existing DB."""
+    """Create all tables. Safe to run on an existing DB."""
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='spatial_ref_sys'")
-    if cur.fetchone()[0] == 0:
-        cur.execute("SELECT InitSpatialMetaData(1)")
     # No migration step: the CREATE TABLE statements below are the whole
     # schema. See docs/dev_history.md if a database older than the current
     # shape ever turns up.
@@ -257,10 +254,6 @@ def init_schema():
         CREATE INDEX IF NOT EXISTS idx_events_type    ON events(event_type);
         CREATE INDEX IF NOT EXISTS idx_events_resolve ON events(event_type, resolve_at_turn);
     """)
-    cur.execute("""SELECT COUNT(*) FROM geometry_columns
-                   WHERE f_table_name='sectors' AND f_geometry_column='location'""")
-    if cur.fetchone()[0] == 0:
-        cur.execute("SELECT AddGeometryColumn('sectors','location',-1,'POINTZ','XYZ')")
     _add_missing_columns(cur)
     conn.commit()
     conn.close()

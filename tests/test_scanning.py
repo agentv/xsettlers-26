@@ -132,6 +132,20 @@ def test_set_pod_scan_bearing_clears_when_given_nothing():
         assert conn.execute("SELECT task_params FROM pods WHERE id=?",
                             (pod,)).fetchone()["task_params"] is None
 
+def test_clearing_a_pod_aim_leaves_a_trace():
+    """Cancelling an aim is a player action like any other, so it logs. Without
+    it, clearing would be the one move that changes state silently."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    pod = seed_pod(oid, task="scan")
+    set_pod_scan_bearing("U_P1", pod, "N")
+    set_pod_scan_bearing("U_P1", pod)
+    with connection() as conn:
+        row = conn.execute("""SELECT actor_id, subject_id, subject_type, payload
+            FROM events WHERE event_type='pod.scan_bearing_cleared'""").fetchone()
+    assert row is not None
+    assert (row["actor_id"], row["subject_id"], row["subject_type"]) == (pid, pod, "pod")
+    assert json.loads(row["payload"]) == {"pod_id": pod}
+
 def test_aim_is_rejected_on_a_non_scan_task():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     pod = seed_pod(oid)
@@ -229,6 +243,19 @@ def test_set_org_scan_target_clears_when_given_no_coordinates():
     with connection() as conn:
         row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
     assert row["scan_offset_x"] is None
+
+def test_clearing_an_org_aim_leaves_a_trace():
+    """Same rule for an org's own sensors as for a scan pod -- one subject, one
+    set of rules, so the audit trail agrees too."""
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    set_org_scan_bearing("U_P1", oid, "E")
+    set_org_scan_bearing("U_P1", oid)
+    with connection() as conn:
+        row = conn.execute("""SELECT actor_id, subject_id, subject_type, payload
+            FROM events WHERE event_type='organization.scan_bearing_cleared'""").fetchone()
+    assert row is not None
+    assert (row["actor_id"], row["subject_id"], row["subject_type"]) == (pid, oid, "organization")
+    assert json.loads(row["payload"]) == {"org_id": oid}
 
 def test_show_organization_reports_no_scanners_when_none_are_active():
     pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)

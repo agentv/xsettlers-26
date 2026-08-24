@@ -163,11 +163,13 @@ def apply_set_org_scan_bearing(cur, org_id: int, player_id: int, offset,
     Point an org's sensors at `offset` (a relative x/y/z triple), or clear the
     aim entirely when offset is None.
 
-    Clearing writes no event -- there is no organization.scan_bearing_cleared
-    type. `bearing` is the compass name for the offset when the caller happens
-    to know it; it is payload decoration only, never used to compute the aim.
+    `bearing` is the compass name for the offset when the caller happens to
+    know it; it is payload decoration only, never used to compute the aim.
     """
     if offset is None:
+        record_event_direct(cur, current_turn, "organization.scan_bearing_cleared",
+            payload={"org_id": org_id},
+            actor_id=player_id, subject_id=org_id, subject_type="organization")
         cur.execute("""UPDATE organizations
             SET scan_offset_x=NULL, scan_offset_y=NULL, scan_offset_z=NULL WHERE id=?""",
             (org_id,))
@@ -187,6 +189,9 @@ def apply_set_pod_scan_bearing(cur, pod_id: int, player_id: int, offset,
     Aim a scan pod at `offset`, or clear its aim when offset is None. The pod's
     task is left alone -- this only writes task_params."""
     if offset is None:
+        record_event_direct(cur, current_turn, "pod.scan_bearing_cleared",
+            payload={"pod_id": pod_id},
+            actor_id=player_id, subject_id=pod_id, subject_type="pod")
         cur.execute("UPDATE pods SET task_params=NULL WHERE id=?", (pod_id,))
         return
     params = {"offset_x": offset[0], "offset_y": offset[1], "offset_z": offset[2]}

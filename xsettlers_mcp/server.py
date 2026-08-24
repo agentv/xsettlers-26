@@ -115,13 +115,7 @@ def _as_markdown(result) -> str:
 
 def _as_json(result) -> str:
     """
-    Serialize a tool's return value as JSON.
-
-    `default=str` is a backstop, not a design: every field a tool returns today
-    is a primitive out of sqlite3, but a response that fails to serialize would
-    fail the whole call, and losing type fidelity on some future stray value is
-    a far better outcome than a tool that errors at the transport layer.
-    """
+    Serialize a tool's return value as JSON."""
     return json.dumps(result, default=str)
 
 # Streamable HTTP transport -- deployed on Fly.io (see fly.toml), which routes

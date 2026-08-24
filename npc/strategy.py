@@ -21,11 +21,6 @@ a name that later steps substitute with `$name`.
 opened leaves the program counter where it is and is retried next turn. That
 is how waiting is expressed -- there is no wait verb.
 
-**Conditions live here, not in the ship's log.** `org_command_queue` stays
-one-shot and unconditional; this module decides and then emits ordinary
-orders into it. Putting gates on queue rows instead would make the log
-itself a rule engine, which is exactly what it is not.
-
 `loop: true` on the document restarts the counter after the last step, for
 strategies with no terminal state. A looping document still executes at most
 one pass per turn.
@@ -94,13 +89,7 @@ def params_for(order: dict, fleet_index: int) -> dict:
     """
     This ship's params: the order's single mapping, or its list cycled
     round-robin keyed on the ship's own fleet index, with repeat_each
-    consecutive ships sharing an entry.
-
-    Keying on the fleet index rather than the position within the selection is
-    what makes a direction stick to a ship: under `ships: idle` the selection
-    is a different subset every turn, and position-keyed cycling would
-    reassign a ship's heading whenever another ship landed.
-    """
+    consecutive ships sharing an entry."""
     params = order.get("params") or {}
     if isinstance(params, dict):
         return params
@@ -148,11 +137,6 @@ def run_strategy(player_id: int, player_token: str, document: dict, memory: dict
                  config_override: dict = None) -> dict:
     """
     Advance one player's strategy by one turn.
-
-    Runs from run_npc_decisions(), which completes before end_of_turn() opens
-    its own transaction -- so orders go through the ordinary @player_tool
-    wrappers, the same path a human player's MCP call takes, each committing
-    its own connection. Nothing here mutates organizations or pods directly.
 
     Executes at most one pass over the document per turn, so a looping
     document advances rather than spinning.
@@ -292,12 +276,6 @@ def validate_strategy(document) -> dict | None:
     """
     Check a document's shape before it is ever stored. Returns an
     {"error": ...} dict, or None when the document is sound.
-
-    Validated at *assign* time (npc/profiles.py's assign_npc_profile), not
-    when it runs. A document is authored by a person -- eventually in a
-    builder, eventually by a player trading one -- and an error has to reach
-    them while they are still holding it, not three turns later inside a clock
-    tick with no one to tell.
 
     What is checkable here is structure and vocabulary, not outcome: fleet
     size, ship positions and energy stocks belong to a game that may not have

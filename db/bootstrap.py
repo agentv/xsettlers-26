@@ -73,14 +73,7 @@ def _starting_cargo_for_task(task: str, capacity: float, fill: float) -> dict:
     `fill` comes from the scenario, not from here -- how rich a game starts
     is a scenario characteristic (see config/loader.py's starting_fill), so
     that scenarios can differ in intent and so that a fleet does not begin at
-    capacity, where it cannot accumulate and production is pure waste.
-
-    Note the floor this trades against: production costs other resources to
-    run (engine/production.py's POD_CONSUMPTION_RECIPE -- produce_goods costs
-    energy, and so on), so a scenario that starts at or near 0.0 deadlocks its
-    own economy at bootstrap with nothing to spend. Scarcity is a dial, not a
-    switch.
-    """
+    capacity, where it cannot accumulate and production is pure waste."""
     stored = {"energy_stored": 0.0, "food_stored": 0.0, "goods_stored": 0.0}
     for resource, producing_task in RESOURCE_PRODUCING_TASK.items():
         if producing_task == task:
@@ -131,16 +124,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
     player_token, home_sector, optional is_npc) used instead of the
     scenario's own participants -- for a lobby that assembles seats
     dynamically (real players + NPC fill-in) rather than reading a fixed YAML
-    list.
-
-    This is a live path, not a reserved one: xsettlers_mcp/gamehouse.py's
-    start_session() passes a roster_override for every GameHouse handoff, and
-    the game on the deployed Fly volume was bootstrapped through it (its
-    players are gamehouse-N@handoff).
-
-    xsettlers_mcp/game_select.py's select_scenario() -- the other bootstrap
-    path -- passes no override and always uses the scenario's participants.
-    """
+    list."""
     cfg  = load_config(config_path, scenario_override=scenario_file) if config_path \
            else load_config(scenario_override=scenario_file)
     if cfg.starting_configuration is None:

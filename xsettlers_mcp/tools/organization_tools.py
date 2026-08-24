@@ -17,20 +17,9 @@ import json
 VALID_ORG_MISSIONS = {"idle", "move", "colonize", "defend", "attack"}
 
 # Combat is designed but not built: engine/turn.py's step 5 dispatches these
-# two to stubs that do nothing. They stay in the vocabulary and are refused
-# here instead of being dropped from it, because the two answers say different
-# things to a player. Dropped, the rejection enumerates the survivors and
-# reads as "this game has no combat", which is false. Refused, it reads as
-# "not yet", which is true, and says so at the moment the player asks.
-#
-# Silent acceptance is the thing neither answer may allow: without this gate
-# the mission is written, the fleet report prints it, and the player waits
-# turns on an order the engine will never resolve.
-#
-# set_mission is the only door -- queue_command's whitelist is
-# {move, set_pod_task, colonize, aim_scan} and the NPC layer reaches the same
-# four actions -- so one gate covers it. Building combat is deleting this set
-# and filling the stubs.
+# two to stubs. set_mission is the only door -- queue_command's whitelist and
+# the NPC layer reach the same four actions -- so one gate covers it.
+# Building combat is deleting this set and filling the stubs.
 UNIMPLEMENTED_MISSIONS = {"defend", "attack"}
 WEAPONS_INOPERABLE = "Weapons are inoperable — combat is not implemented in this build"
 VALID_POD_TASKS = {"idle", "produce_energy", "produce_food", "produce_goods", "scan"}

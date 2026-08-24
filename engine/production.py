@@ -7,16 +7,12 @@ POD_PRODUCTION = {
 }
 
 # What a colony gains over a ship: every pod aboard a colony produces this
-# multiple of its base rate. Ships get 1.0. This is the entire mechanical
-# payoff for colonizing -- without it a colony would be a ship that had
-# thrown away its mobility for nothing. Stability pays; that advantage is the
-# counterweight to the transit stress a mobile fleet lives with.
+# multiple of its base rate. Ships get 1.0.
 #
 # Deliberately output-only: POD_CONSUMPTION_RECIPE and ORG_UPKEEP_COST are
-# untouched, so a colony pays exactly what a ship pays for the same tasking
-# and simply gets more back. The multiplier applies to the sector draw too
-# (see engine/turn.py) -- a colony harvesting energy strips its sector 1.5x
-# as fast, so the reward carries its own clock.
+# untouched, so a colony pays what a ship pays and gets more back. The
+# multiplier applies to the sector draw too (see engine/turn.py), so a colony
+# strips its sector 1.5x as fast.
 COLONY_PRODUCTION_MULTIPLIER = 1.5
 
 # One-time energy price to convert a ship into a colony, charged in full at

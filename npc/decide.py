@@ -13,12 +13,7 @@ grants no ability a player doesn't already have.
 `player_sectors` row at `confidence > 0`, so no strategy -- including one a
 player writes -- can read a sector its owner has not seen. A Python strategy
 could always have queried `sectors` directly and cheated; a document has no
-way to express that, because the only way in is through these functions.
-
-Adding a gate or a rank field is adding a name here. That is the intended
-growth path: combat will want a threat field and an "if attacked" gate, and
-neither changes the shape of a document.
-"""
+way to express that, because the only way in is through these functions."""
 from db.connection import read_all
 
 # The one attribute a sector has that is worth comparing (db/schema.py's
@@ -38,13 +33,7 @@ def _aimed_targets(player_id: int) -> list:
     absolute coordinates (see engine/bearings.py), so the target only exists
     while the ship has a position to offset from -- a ship in transit sits at
     the sentinel sector and is reported unresolved rather than being measured
-    from (-1,-1,-1).
-
-    Shared by the gate and the source below on purpose: "has every scan come
-    back" and "what did the scans find" are two readings of one question, and
-    letting them drift apart is how a strategy waits for one thing and then
-    ranks another.
-    """
+    from (-1,-1,-1)."""
     rows = read_all("""
         SELECT o.id AS org_id, o.sector_id, o.mission,
                o.scan_offset_x, o.scan_offset_y, o.scan_offset_z,

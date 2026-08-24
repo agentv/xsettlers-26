@@ -18,27 +18,12 @@ DEFAULT_STARTING_FILL = 0.3
 # position is a promise about a specific number rather than a bet on a range,
 # so this is written straight over whatever home rolled (db/bootstrap.py) --
 # home is not expressed as a hotspot even though the map layer could carry it.
+# Per-scenario by design. Pod throughput, not the sector, is what actually
+# limits a player; see docs/design_direction.md.
 #
-# Eight ships stacked at home draw 64 energy/turn, and the same eight as
-# colonies draw 96 (two energy pods each, 4/turn, x1.5 for a colony). At 2200
-# a fleet that colonizes in place on turn one therefore does NOT empty its
-# home sector inside a 20-turn game -- it ends with roughly 376 left, and
-# would run dry around turn 24. Emptying it on turn 16 would take about 1500.
-#
-# That gap is deliberate for now rather than an oversight, because the sector
-# stopped being the binding constraint when the pod rates changed: a fleet's
-# own stored energy floors at turn 15 whatever this is set to, since two
-# energy pods produce 8/turn (12 as a colony) while the org spends 13 on goods
-# production, food production and upkeep. Lowering this figure makes a player
-# poorer without making them leave any sooner. See docs/TODO.md.
-#
-# Per-scenario by design -- a survival variant is free to make home as poor as
-# anywhere else, and a longer game will want more.
-#
-# NOTE: this is the HOME sector, meaning the scenario's starting coordinates
-# where the first colony sits. It is NOT the "sentinel sector" (id = -1),
-# which is the parking slot for ships in transit and must stay at 0 energy --
-# that zero is the entire mechanism suppressing energy harvesting mid-flight.
+# NOT the "sentinel sector" (id = -1), the parking slot for ships in transit,
+# which must stay at 0 energy -- that zero is the entire mechanism
+# suppressing energy harvesting mid-flight.
 HOME_SECTOR_ENERGY = 2_200.0
 
 @dataclass

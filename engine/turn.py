@@ -191,22 +191,12 @@ def end_of_turn():
         # on an empty game.
         return
 
-    # 0. NPC decisions -- each is_npc=1 player with a profile acts before
-    #    this turn resolves, by calling the same confirm_move/set_pod_task/
-    #    set_mission tool functions a human player would (see npc/strategies.py).
-    #    Each of those calls opens and commits its own connection, so this
-    #    runs to completion with nothing left open before the turn's own
-    #    conn/cur (below) starts -- no shared transaction, no lock contention.
-    #    Function-level import, and the one place anything below the tool
-    #    layer reaches up through it. npc/ sits ABOVE xsettlers_mcp/tools/ (a
-    #    strategy acts by calling the same tool functions a human does, so
-    #    every ownership check applies unmodified), and those tools import
-    #    this module -- so a module-level import here would close the loop
-    #    engine -> npc -> tools -> engine while this module is still executing
-    #    its own top-level imports. Deferring it to call time is what keeps
-    #    that legal. Closing the loop for real means the caller of
-    #    end_of_turn() driving NPC decisions instead, which changes what a
-    #    direct end_of_turn() call does -- a behavior change, not a move.
+    # 0. NPC decisions, before this turn resolves. Each opens and commits its
+    #    own connection, so nothing is left open when the turn's own conn/cur
+    #    starts. Function-level import, and the one place anything below the
+    #    tool layer reaches up through it -- at module level it would close
+    #    the loop engine -> npc -> tools -> engine during this module's own
+    #    top-level imports.
     from npc.strategies import run_npc_decisions
     run_npc_decisions()
 
@@ -249,12 +239,8 @@ def end_of_turn():
     #    Produce tasks run for all pods regardless of transit state, but
     #    produce_energy specifically can't harvest anything while in transit
     #    (see below). Scan resolution runs only for stationary orgs (transit
-    #    suppresses scan).
-    #
-    #    before_holdings/production/consumption feed the turn.snapshot ledger
-    #    (see _snapshot_holdings, step 6 below) -- captured/accumulated here,
-    #    inline with work this pass is already doing, so the ledger costs no
-    #    extra queries beyond the one before/after holdings snapshot each.
+    #    suppresses scan). before_holdings/production/consumption feed the
+    #    turn.snapshot ledger (see _snapshot_holdings, step 6).
     before_holdings = _player_holdings(cur)
     production = collections.defaultdict(lambda: collections.defaultdict(float))
     consumption = collections.defaultdict(lambda: collections.defaultdict(float))
@@ -269,22 +255,15 @@ def end_of_turn():
         player_id = pod["player_id"]
 
         # 3a/b. Production, gated by input cost.
-        #    Each producing task (plus scan) costs some other resource(s)
-        #    to run (see POD_CONSUMPTION_RECIPE) -- drawn
-        #    from the org's own pooled stock of that resource (see
-        #    available_org_resource/drain_org_resource above). idle costs
-        #    nothing. Output is prorated to whatever fraction of the required
-        #    input is actually available: e.g. only half the energy needed on
-        #    hand gives half the normal output, rather than an all-or-nothing
-        #    gate. produce_energy is additionally capped by the sector's own
-        #    remaining pool (depleted as it's drawn from, floored at 0, no
-        #    regeneration yet) -- a ship in transit is parked at the sentinel
-        #    sector (id=-1, permanently 0 capacity), so this alone drives
-        #    energy production to 0 while traveling, with no special-case
-        #    branch needed. Other resources aren't sector-sourced at all.
-        #    Known gap, deferred: when multiple players' pods share one
-        #    sector, whoever's pod processes first (by pod id) gets first
-        #    claim on what's left that turn -- no fair-split model yet.
+        #    Each producing task (plus scan) costs other resources to run,
+        #    drawn from the org's pooled stock; idle costs nothing. Output is
+        #    prorated to the fraction of required input actually available,
+        #    not gated all-or-nothing. produce_energy is additionally capped
+        #    by the sector's remaining pool -- a ship in transit sits at the
+        #    sentinel sector (permanently 0 capacity), so that alone drives
+        #    energy production to 0 while travelling, with no special case.
+        #    Known gap: pods of different players sharing a sector are served
+        #    by pod id, so whoever processes first gets first claim.
         if task in ("produce_energy", "produce_food", "produce_goods"):
             # Colony bonus (see COLONY_PRODUCTION_MULTIPLIER): applied to the
             # output side only -- `recipe` below is left at the base rate, so
@@ -343,18 +322,11 @@ def end_of_turn():
                         offset=offset, subject_id=pod["id"], subject_type="pod",
                         payload_extra={"pod_id": pod["id"]})
 
-    # 3d. Innate organization scan — every org can scan one sector per turn on
-    #     its own account (a ship's bridge, a colony's headquarters), without
-    #     dedicating a pod to it. Deliberately identical in cost and rules to
-    #     carrying one scan pod: same food recipe, same range, same suppression
-    #     while in transit, same out-of-range alert. An org that ALSO has scan
-    #     pods simply gets both, each paying its own way.
-    #
-    #     Runs after pod scans so both are resolved against the same
-    #     pre-existing state, and the aim persists across turns -- re-scanning
-    #     is idempotent (reveal_sector doesn't re-randomize) and refreshes
-    #     confidence, so holding a target is a legitimate way to keep a sector
-    #     from blinking out.
+    # 3d. Innate organization scan -- one sector per turn per org, no pod
+    #     required. An org that also has scan pods gets both, each paying its
+    #     own way. Runs after pod scans so both resolve against the same
+    #     pre-existing state. The aim persists across turns and re-scanning is
+    #     idempotent, so holding a target keeps a sector from blinking out.
     scan_recipe = get_consumption_recipe("scan")
     cur.execute("""SELECT o.id, o.player_id, o.sector_id,
                           o.scan_offset_x AS dx, o.scan_offset_y AS dy, o.scan_offset_z AS dz,

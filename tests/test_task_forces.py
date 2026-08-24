@@ -1,4 +1,4 @@
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from engine.turn import end_of_turn
 from engine.production import COLONIZATION_ENERGY_COST
 from xsettlers_mcp.tools.organization_tools import set_mission
@@ -23,9 +23,8 @@ def _seed_colony(player_id, sector_id, name="Test Colony"):
 
 
 def _task_force_id_of(org_id):
-    conn = get_connection()
-    row = conn.execute("SELECT task_force_id FROM organizations WHERE id=?", (org_id,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT task_force_id FROM organizations WHERE id=?", (org_id,)).fetchone()
     return row["task_force_id"]
 
 
@@ -60,9 +59,8 @@ def test_create_task_force_rejects_colony_in_roster():
     cid = _seed_colony(pid, sid)
     result = create_task_force("U_P1", "Vanguard", [cid])
     assert result["error"] == NOT_A_SHIP
-    conn = get_connection()
-    assert conn.execute("SELECT COUNT(*) AS n FROM task_forces").fetchone()["n"] == 0
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM task_forces").fetchone()["n"] == 0
 
 
 def test_create_task_force_rejects_org_not_owned():
@@ -79,10 +77,9 @@ def test_create_task_force_rejects_ship_already_in_another_task_force():
     create_task_force("U_P1", "First", [oid])
     result = create_task_force("U_P1", "Second", [oid])
     assert "error" in result
-    conn = get_connection()
-    assert conn.execute("SELECT COUNT(*) AS n FROM task_forces WHERE name='Second'"
-                        ).fetchone()["n"] == 0
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM task_forces WHERE name='Second'"
+                            ).fetchone()["n"] == 0
 
 
 # --- add / remove membership ---
@@ -141,9 +138,8 @@ def test_remove_from_task_force_does_not_touch_other_org_state():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     tfid = create_task_force("U_P1", "Vanguard", [oid])["task_force_id"]
     remove_from_task_force("U_P1", tfid, oid)
-    conn = get_connection()
-    org = conn.execute("SELECT mission, sector_id FROM organizations WHERE id=?", (oid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT mission, sector_id FROM organizations WHERE id=?", (oid,)).fetchone()
     assert org["mission"] == "idle"
     assert org["sector_id"] == sid
 
@@ -158,10 +154,9 @@ def test_disband_task_force_frees_members_and_deletes_roster():
     assert result["ok"] is True
     assert _task_force_id_of(o1) is None
     assert _task_force_id_of(o2) is None
-    conn = get_connection()
-    assert conn.execute("SELECT COUNT(*) AS n FROM task_forces WHERE id=?",
-                        (tfid,)).fetchone()["n"] == 0
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM task_forces WHERE id=?",
+                            (tfid,)).fetchone()["n"] == 0
 
 
 def test_disband_task_force_unowned():
@@ -195,10 +190,9 @@ def test_colonizing_removes_ship_from_task_force():
     assert _task_force_id_of(oid) == tfid   # not flipped yet
     end_of_turn(); end_of_turn(); end_of_turn()  # resolve_at_turn = 3
     assert _task_force_id_of(oid) is None
-    conn = get_connection()
-    tf_members = conn.execute("SELECT COUNT(*) AS n FROM organizations WHERE task_force_id=?",
-                              (tfid,)).fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        tf_members = conn.execute("SELECT COUNT(*) AS n FROM organizations WHERE task_force_id=?",
+                                  (tfid,)).fetchone()["n"]
     assert tf_members == 0
 
 

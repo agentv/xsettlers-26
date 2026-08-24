@@ -1,4 +1,4 @@
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from engine.movement import plan_move
 from engine.turn import get_current_turn
 from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
@@ -48,10 +48,9 @@ def test_preview_move_no_db_write():
     pid = seed_player(); oid = seed_sector(0,0,0)
     sid = seed_ship(pid, oid)
     preview_move("U_P1", sid, 2, 0, 0)
-    conn = get_connection()
-    org = conn.execute("SELECT sector_id FROM organizations WHERE id=?", (sid,)).fetchone()
-    aq  = conn.execute("SELECT * FROM arrival_queue WHERE org_id=?", (sid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT sector_id FROM organizations WHERE id=?", (sid,)).fetchone()
+        aq  = conn.execute("SELECT * FROM arrival_queue WHERE org_id=?", (sid,)).fetchone()
     assert org["sector_id"] != -1
     assert aq is None
 
@@ -62,9 +61,8 @@ def test_confirm_move_parks_ship_at_sentinel():
     sid = seed_ship(pid, oid)
     result = confirm_move("U_P1", sid, 3, 0, 0)
     assert result["confirmed"] is True
-    conn = get_connection()
-    org = conn.execute("SELECT sector_id,mission FROM organizations WHERE id=?", (sid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT sector_id,mission FROM organizations WHERE id=?", (sid,)).fetchone()
     assert org["sector_id"] == -1
     assert org["mission"] == "move"
 
@@ -72,9 +70,8 @@ def test_confirm_move_inserts_arrival_queue_with_origin():
     pid = seed_player(); oid = seed_sector(0,0,0)
     sid = seed_ship(pid, oid)
     result = confirm_move("U_P1", sid, 1, 0, 0)
-    conn = get_connection()
-    row = conn.execute("SELECT * FROM arrival_queue WHERE org_id=?", (sid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT * FROM arrival_queue WHERE org_id=?", (sid,)).fetchone()
     assert row is not None
     assert row["dest_x"] == 1 and row["dest_y"] == 0 and row["dest_z"] == 0
     assert row["origin_sector_id"] == oid
@@ -85,9 +82,8 @@ def test_confirm_move_rejects_negative_coordinates():
     pid = seed_player(); oid = seed_sector(0,0,0)
     sid = seed_ship(pid, oid)
     assert "error" in confirm_move("U_P1", sid, -1, 0, 0)
-    conn = get_connection()
-    org = conn.execute("SELECT sector_id FROM organizations WHERE id=?", (sid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT sector_id FROM organizations WHERE id=?", (sid,)).fetchone()
     assert org["sector_id"] == oid  # unchanged -- still docked, not parked at sentinel
 
 def test_preview_move_rejects_negative_coordinates():
@@ -97,12 +93,11 @@ def test_preview_move_rejects_negative_coordinates():
 
 def test_confirm_move_colony_rejected():
     pid = seed_player(); sid = seed_sector()
-    conn = get_connection()
-    conn.execute("INSERT INTO organizations (org_type,name,player_id,sector_id,is_mobile,mission)"
-                 " VALUES ('colony','Base',?,?,0,'idle')", (pid, sid))
-    conn.commit()
-    cid = conn.execute("SELECT id FROM organizations WHERE name='Base'").fetchone()["id"]
-    conn.close()
+    with connection() as conn:
+        conn.execute("INSERT INTO organizations (org_type,name,player_id,sector_id,is_mobile,mission)"
+                     " VALUES ('colony','Base',?,?,0,'idle')", (pid, sid))
+        conn.commit()
+        cid = conn.execute("SELECT id FROM organizations WHERE name='Base'").fetchone()["id"]
     assert "error" in confirm_move("U_P1", cid, 1, 0, 0)
 
 # --- cancel_move ---
@@ -114,10 +109,9 @@ def test_cancel_move_rubber_bands_to_origin():
     result = cancel_move("U_P1", sid)
     assert result["cancelled"] is True
     assert result["rubber_banded_to_sector_id"] == oid
-    conn = get_connection()
-    org = conn.execute("SELECT sector_id,mission FROM organizations WHERE id=?", (sid,)).fetchone()
-    aq  = conn.execute("SELECT * FROM arrival_queue WHERE org_id=?", (sid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT sector_id,mission FROM organizations WHERE id=?", (sid,)).fetchone()
+        aq  = conn.execute("SELECT * FROM arrival_queue WHERE org_id=?", (sid,)).fetchone()
     assert org["sector_id"] == oid
     assert org["mission"] == "idle"
     assert aq is None
@@ -147,11 +141,10 @@ def test_arrival_reads_a_rivals_established_sector_rather_than_reseeding_it():
     confirm_move("U_TRAV", ship, 2, 0, 0)
     end_of_turn(); end_of_turn(); end_of_turn()   # distance 2, resolved once turn >= 2
 
-    conn = get_connection()
-    landed = conn.execute("SELECT sector_id FROM organizations WHERE id=?",
-                          (ship,)).fetchone()["sector_id"]
-    energy = conn.execute("SELECT energy_capacity AS e FROM sectors WHERE id=?",
-                          (landed,)).fetchone()["e"]
-    conn.close()
+    with connection() as conn:
+        landed = conn.execute("SELECT sector_id FROM organizations WHERE id=?",
+                              (ship,)).fetchone()["sector_id"]
+        energy = conn.execute("SELECT energy_capacity AS e FROM sectors WHERE id=?",
+                              (landed,)).fetchone()["e"]
     assert landed == contested        # joined the existing row, didn't make a new one
     assert energy == 40.0             # inherited the depleted state

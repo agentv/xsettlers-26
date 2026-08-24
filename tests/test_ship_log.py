@@ -1,5 +1,5 @@
 import json
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from engine.turn import end_of_turn
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.organization_tools import queue_command
@@ -89,9 +89,8 @@ def test_before_arrival_fires_same_end_of_turn_call_that_lands_org():
     org = _org(ship)
     assert org["sector_id"] == -1  # already back in transit toward the chained destination
     assert org["mission"] == "move"
-    conn = get_connection()
-    aq = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?", (ship,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        aq = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?", (ship,)).fetchone()
     assert (aq["dest_x"], aq["dest_y"], aq["dest_z"]) == (5, 0, 0)
     assert _queue_count() == 0  # one-shot: dispatched and deleted
 
@@ -126,9 +125,8 @@ def test_dispatch_skips_when_org_mission_changed_before_trigger_fires():
         end_of_turn()  # lands at turn 3, mission='idle'
 
     # Player manually gives the org new orders before after_arrival's turn 4 fires.
-    conn = get_connection()
-    conn.execute("UPDATE organizations SET mission='defend' WHERE id=?", (ship,))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE organizations SET mission='defend' WHERE id=?", (ship,))
 
     end_of_turn()  # after_arrival is due now, but must not clobber the manual order
 
@@ -227,19 +225,17 @@ def test_at_turn_requires_turn_parameter():
 
 def _inject_raw_command(org_id, action, params_json, resolve_turn=0,
                         trigger_phase="at_turn"):
-    conn = get_connection()
-    conn.execute("""INSERT INTO org_command_queue
-        (org_id,trigger_phase,resolve_turn,action,params,created_turn)
-        VALUES (?,?,?,?,?,0)""", (org_id, trigger_phase, resolve_turn, action, params_json))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("""INSERT INTO org_command_queue
+            (org_id,trigger_phase,resolve_turn,action,params,created_turn)
+            VALUES (?,?,?,?,?,0)""", (org_id, trigger_phase, resolve_turn, action, params_json))
 
 
 def _failure_alerts():
-    conn = get_connection()
-    rows = [dict(r) for r in conn.execute(
-        """SELECT subject_id, payload FROM events
-           WHERE event_type='alert.queued_command_failed' ORDER BY id""").fetchall()]
-    conn.close()
+    with connection() as conn:
+        rows = [dict(r) for r in conn.execute(
+            """SELECT subject_id, payload FROM events
+               WHERE event_type='alert.queued_command_failed' ORDER BY id""").fetchall()]
     for row in rows:
         row["payload"] = json.loads(row["payload"])
     return rows
@@ -287,12 +283,11 @@ def test_a_bad_command_does_not_stop_another_players_turn_resolving():
     seed_pod(o2, task="produce_food", storage_capacity=100.0, storage_current=50.0)
     _inject_raw_command(o1, "move", '{"dest_x": 3}')      # KeyError on dest_y
     end_of_turn()
-    conn = get_connection()
-    produced = conn.execute("SELECT energy_stored FROM pods WHERE id=?",
-                            (good_pod,)).fetchone()["energy_stored"]
-    snapshots = conn.execute(
-        "SELECT COUNT(*) n FROM events WHERE event_type='turn.snapshot'").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        produced = conn.execute("SELECT energy_stored FROM pods WHERE id=?",
+                                (good_pod,)).fetchone()["energy_stored"]
+        snapshots = conn.execute(
+            "SELECT COUNT(*) n FROM events WHERE event_type='turn.snapshot'").fetchone()["n"]
     assert produced > 50.0, "the unaffected player's production still resolved"
     assert snapshots == 2, "both players' ledger rows were still written"
     assert len(_failure_alerts()) == 1
@@ -347,10 +342,9 @@ def test_relative_move_resolves_against_position_at_fire_time():
     for _ in range(3):  # land at (4,0,0) on turn 2, then fire after_arrival on turn 3
         end_of_turn()
 
-    conn = get_connection()
-    aq = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?",
-                      (ship,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        aq = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?",
+                          (ship,)).fetchone()
     # 4+3, not 0+3: resolved from where the ship landed, not where it started.
     assert (aq["dest_x"], aq["dest_y"], aq["dest_z"]) == (7, 0, 0)
     assert _queue_count() == 0
@@ -384,11 +378,10 @@ def _org_row(org_id):
     conn.close(); return row
 
 def _refusals():
-    conn = get_connection()
-    rows = [dict(r) for r in conn.execute(
-        """SELECT payload FROM events WHERE event_type='alert.queued_command_refused'
-           ORDER BY id""").fetchall()]
-    conn.close()
+    with connection() as conn:
+        rows = [dict(r) for r in conn.execute(
+            """SELECT payload FROM events WHERE event_type='alert.queued_command_refused'
+               ORDER BY id""").fetchall()]
     for row in rows:
         row["payload"] = json.loads(row["payload"])
     return rows
@@ -405,11 +398,10 @@ def test_queued_colonize_commits_the_ship_when_it_can_pay():
     org = _org_row(ship)
     assert org["mission"] == "colonize"
     assert org["is_mobile"] == 0
-    conn = get_connection()
-    scheduled = conn.execute(
-        """SELECT resolve_at_turn FROM events
-           WHERE event_type='colonize_complete' AND subject_id=?""", (ship,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        scheduled = conn.execute(
+            """SELECT resolve_at_turn FROM events
+               WHERE event_type='colonize_complete' AND subject_id=?""", (ship,)).fetchone()
     assert scheduled is not None, "the 3-turn completion event must be scheduled"
     # The sweep is due when resolve_turn <= current_turn+1, so an at_turn=1
     # order fires during the pass where current_turn is still 0 -- and the
@@ -463,10 +455,9 @@ def test_queue_command_rejects_an_out_of_range_aim_scan_at_queue_time():
 def test_queued_aim_scan_with_no_aim_clears_the_bearing():
     p1 = seed_player()
     ship = seed_ship(p1, seed_sector(5, 5, 5))
-    conn = get_connection()
-    conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2, scan_offset_z=0
-                    WHERE id=?""", (ship,))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2, scan_offset_z=0
+                        WHERE id=?""", (ship,))
 
     queue_command("U_P1", ship, "at_turn", "aim_scan", {}, turn=1)
     end_of_turn(); end_of_turn()

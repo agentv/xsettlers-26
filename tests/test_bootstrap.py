@@ -1,4 +1,4 @@
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from db.bootstrap import bootstrap_game
 from db.sectors import MIN_SECTOR_ENERGY, MAX_SECTOR_ENERGY
 from config.loader import HOME_SECTOR_ENERGY
@@ -45,36 +45,32 @@ def test_bootstrap_home_colony_gets_same_pod_loadout_as_ship():
 
 def test_bootstrap_diaspora_ships_alongside_colony():
     _bootstrap(scenario_file="config/game1.yaml", scenario_name="game1")
-    conn = get_connection()
-    for (player_id,) in conn.execute("SELECT id FROM players").fetchall():
-        ships = conn.execute(
-            "SELECT id FROM organizations WHERE player_id=? AND org_type='ship'",
-            (player_id,)).fetchall()
-        assert len(ships) == 8
-    conn.close()
+    with connection() as conn:
+        for (player_id,) in conn.execute("SELECT id FROM players").fetchall():
+            ships = conn.execute(
+                "SELECT id FROM organizations WHERE player_id=? AND org_type='ship'",
+                (player_id,)).fetchall()
+            assert len(ships) == 8
 
 def test_bootstrap_home_sectors_stamped_visible():
     _bootstrap()
-    conn = get_connection()
-    for (player_id,) in conn.execute("SELECT id FROM players").fetchall():
-        org = conn.execute(
-            "SELECT sector_id FROM organizations WHERE player_id=? LIMIT 1",
-            (player_id,)).fetchone()
-        ps = conn.execute(
-            "SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",
-            (player_id, org["sector_id"])).fetchone()
-        assert ps["confidence"] == 100
-    conn.close()
+    with connection() as conn:
+        for (player_id,) in conn.execute("SELECT id FROM players").fetchall():
+            org = conn.execute(
+                "SELECT sector_id FROM organizations WHERE player_id=? LIMIT 1",
+                (player_id,)).fetchone()
+            ps = conn.execute(
+                "SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",
+                (player_id, org["sector_id"])).fetchone()
+            assert ps["confidence"] == 100
 
 def test_bootstrap_idempotent():
     _bootstrap()
-    conn = get_connection()
-    before = conn.execute("SELECT COUNT(*) AS n FROM organizations").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        before = conn.execute("SELECT COUNT(*) AS n FROM organizations").fetchone()["n"]
     _bootstrap()
-    conn = get_connection()
-    after = conn.execute("SELECT COUNT(*) AS n FROM organizations").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        after = conn.execute("SELECT COUNT(*) AS n FROM organizations").fetchone()["n"]
     assert before == after
 
 def test_bootstrap_game_state_starts_at_turn_zero():
@@ -88,27 +84,25 @@ def test_bootstrap_seats_players_at_their_scenario_declared_home_sectors():
     """Home sectors come from the participant entry that names the player, not
     from a separate positional list — so the two can't drift out of step."""
     _bootstrap()
-    conn = get_connection()
-    rows = conn.execute("""
-        SELECT p.display_name, s.coord_x, s.coord_y, s.coord_z
-        FROM players p
-        JOIN organizations o ON o.player_id = p.id
-        JOIN sectors s ON s.id = o.sector_id
-        GROUP BY p.id ORDER BY p.id""").fetchall()
-    conn.close()
+    with connection() as conn:
+        rows = conn.execute("""
+            SELECT p.display_name, s.coord_x, s.coord_y, s.coord_z
+            FROM players p
+            JOIN organizations o ON o.player_id = p.id
+            JOIN sectors s ON s.id = o.sector_id
+            GROUP BY p.id ORDER BY p.id""").fetchall()
     assert [(r["display_name"], r["coord_x"], r["coord_y"], r["coord_z"]) for r in rows] == \
            [("Vincent", 25, 25, 0), ("Player Two", 25, 50, 0)]
 
 def test_bootstrap_solo_scenario_seeds_exactly_one_player():
     _bootstrap(scenario_file="config/game_solo.yaml", scenario_name="game_solo")
-    conn = get_connection()
-    players = conn.execute("SELECT id FROM players").fetchall()
-    sectors = conn.execute("SELECT COUNT(*) AS n FROM sectors WHERE id != -1").fetchone()["n"]
-    ships = conn.execute(
-        "SELECT COUNT(*) AS n FROM organizations WHERE org_type='ship'").fetchone()["n"]
-    colonies = conn.execute(
-        "SELECT COUNT(*) AS n FROM organizations WHERE org_type='colony'").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        players = conn.execute("SELECT id FROM players").fetchall()
+        sectors = conn.execute("SELECT COUNT(*) AS n FROM sectors WHERE id != -1").fetchone()["n"]
+        ships = conn.execute(
+            "SELECT COUNT(*) AS n FROM organizations WHERE org_type='ship'").fetchone()["n"]
+        colonies = conn.execute(
+            "SELECT COUNT(*) AS n FROM organizations WHERE org_type='colony'").fetchone()["n"]
     assert len(players) == 1
     assert sectors == 1        # one participant, one home sector revealed
     assert ships == 8
@@ -148,10 +142,9 @@ def test_bootstrap_seeds_only_home_sectors_not_full_grid():
     seeded flat and bottomless instead (HOME_SECTOR_ENERGY) -- a player's own
     footing should never be what runs out from under them."""
     _bootstrap()
-    conn = get_connection()
-    sectors = conn.execute("""SELECT coord_x,coord_y,coord_z,energy_capacity
-        FROM sectors WHERE id != -1""").fetchall()
-    conn.close()
+    with connection() as conn:
+        sectors = conn.execute("""SELECT coord_x,coord_y,coord_z,energy_capacity
+            FROM sectors WHERE id != -1""").fetchall()
     assert len(sectors) == 2
     for s in sectors:
         assert s["energy_capacity"] == HOME_SECTOR_ENERGY
@@ -171,12 +164,11 @@ def test_home_sector_is_rich_but_the_transit_sentinel_stays_at_zero():
     sentinel by mistake would silently delete transit stress from the game.
     """
     _bootstrap()
-    conn = get_connection()
-    sentinel = conn.execute(
-        "SELECT energy_capacity AS e FROM sectors WHERE id=-1").fetchone()
-    homes = conn.execute(
-        "SELECT energy_capacity AS e FROM sectors WHERE id!=-1").fetchall()
-    conn.close()
+    with connection() as conn:
+        sentinel = conn.execute(
+            "SELECT energy_capacity AS e FROM sectors WHERE id=-1").fetchone()
+        homes = conn.execute(
+            "SELECT energy_capacity AS e FROM sectors WHERE id!=-1").fetchall()
     assert sentinel["e"] == 0.0
     assert all(h["e"] == HOME_SECTOR_ENERGY for h in homes)
 
@@ -198,9 +190,8 @@ def test_bootstrap_places_the_scenarios_hotspots(tmp_path):
     bootstrap_game(scenario_file=_mapped_scenario(tmp_path,
         'map:\n  hotspots:\n    - {center: [30, 31, 0], radius: 2, multiplier: 3.0}\n'),
         scenario_name="mapped", selected_by="test")
-    conn = get_connection()
-    rows = conn.execute("SELECT * FROM map_hotspots").fetchall()
-    conn.close()
+    with connection() as conn:
+        rows = conn.execute("SELECT * FROM map_hotspots").fetchall()
     assert len(rows) == 1
     assert (rows[0]["center_x"], rows[0]["center_y"], rows[0]["center_z"]) == (30, 31, 0)
     assert (rows[0]["radius"], rows[0]["multiplier"]) == (2.0, 3.0)
@@ -289,16 +280,15 @@ def test_bootstrap_the_crowd_seats_blue_and_red_close_together():
     exists to be."""
     import math
     _bootstrap(scenario_file="config/game_crowd.yaml", scenario_name="game_crowd")
-    conn = get_connection()
-    rows = conn.execute("""SELECT p.display_name, s.coord_x, s.coord_y, s.coord_z
-        FROM players p JOIN organizations o ON o.player_id = p.id
-        JOIN sectors s ON s.id = o.sector_id
-        GROUP BY p.id ORDER BY p.id""").fetchall()
-    ships = conn.execute("""SELECT COUNT(*) AS n FROM organizations
-                            WHERE org_type='ship'""").fetchone()["n"]
-    colonies = conn.execute("""SELECT COUNT(*) AS n FROM organizations
-                               WHERE org_type='colony'""").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        rows = conn.execute("""SELECT p.display_name, s.coord_x, s.coord_y, s.coord_z
+            FROM players p JOIN organizations o ON o.player_id = p.id
+            JOIN sectors s ON s.id = o.sector_id
+            GROUP BY p.id ORDER BY p.id""").fetchall()
+        ships = conn.execute("""SELECT COUNT(*) AS n FROM organizations
+                                WHERE org_type='ship'""").fetchone()["n"]
+        colonies = conn.execute("""SELECT COUNT(*) AS n FROM organizations
+                                   WHERE org_type='colony'""").fetchone()["n"]
     homes = {r["display_name"]: (r["coord_x"], r["coord_y"], r["coord_z"]) for r in rows}
     assert homes == {"Blue": (15, 20, 0), "Red": (20, 15, 0)}
     assert ships == 16 and colonies == 0      # both fleets mobile, nothing pinned

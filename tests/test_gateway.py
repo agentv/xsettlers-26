@@ -10,14 +10,13 @@ The per-tool check is the @player_tool decorator
 (xsettlers_mcp/tools/session.py); the gate is per-tool, and these tests are
 what say so.
 """
-from db.connection import get_connection
+from db.connection import connection
 from xsettlers_mcp.game_select import select_scenario
 from xsettlers_mcp.tools.organization_reports import show_civilization_status
 
 def _clear_active_game():
-    conn = get_connection()
-    conn.execute("DELETE FROM games")
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("DELETE FROM games")
 
 def test_gameplay_blocked_before_any_scenario_selected():
     _clear_active_game()
@@ -119,13 +118,11 @@ def test_declare_end_turn_cannot_be_triggered_by_a_stranger():
     from xsettlers_mcp.tools.player_tools import declare_end_turn
     _clear_active_game()
     select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
-    conn = get_connection()
-    before = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
-    conn.close()
+    with connection() as conn:
+        before = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
     assert _stranger_sees_only(declare_end_turn("U_TOTAL_STRANGER"))
-    conn = get_connection()
-    after = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
-    declared = conn.execute("SELECT COUNT(*) FROM players WHERE end_turn_declared=1").fetchone()[0]
-    conn.close()
+    with connection() as conn:
+        after = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
+        declared = conn.execute("SELECT COUNT(*) FROM players WHERE end_turn_declared=1").fetchone()[0]
     assert after == before, "a stranger must not advance the turn"
     assert declared == 0, "a stranger must not mark anyone as having declared"

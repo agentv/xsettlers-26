@@ -7,15 +7,14 @@ push_start_session (which always sends the field) doesn't crash on an
 unexpected keyword argument.
 """
 import json
-from db.connection import get_connection
+from db.connection import connection
 from xsettlers_mcp.gamehouse import start_session
 from xsettlers_mcp.tools.player_tools import get_player_state
 
 def _clear_active_game():
-    conn = get_connection()
-    conn.execute("DELETE FROM games")
-    conn.execute("DELETE FROM game_session")
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("DELETE FROM games")
+        conn.execute("DELETE FROM game_session")
 
 def _person(pid):
     return {"player_id": pid, "kind": "person"}
@@ -90,9 +89,8 @@ def test_start_session_seats_a_person_and_an_npc():
     assert "player_token" in person_entry
     assert "player_token" not in npc_entry  # never returned for NPCs
 
-    conn = get_connection()
-    players = {r["id"]: r for r in conn.execute("SELECT * FROM players").fetchall()}
-    conn.close()
+    with connection() as conn:
+        players = {r["id"]: r for r in conn.execute("SELECT * FROM players").fetchall()}
     person_row = players[person_entry["xsettlers_player_id"]]
     npc_row = players[npc_entry["xsettlers_player_id"]]
     assert person_row["is_npc"] == 0
@@ -101,12 +99,11 @@ def test_start_session_seats_a_person_and_an_npc():
 
     # Home sectors match game0.yaml's own two authored participants,
     # positionally (person is entry 0, npc is entry 1).
-    conn = get_connection()
-    orgs = conn.execute("""SELECT o.player_id, s.coord_x, s.coord_y, s.coord_z
-        FROM organizations o JOIN sectors s ON s.id=o.sector_id
-        WHERE o.player_id IN (?,?) LIMIT 2""",
-        (person_row["id"], npc_row["id"])).fetchall()
-    conn.close()
+    with connection() as conn:
+        orgs = conn.execute("""SELECT o.player_id, s.coord_x, s.coord_y, s.coord_z
+            FROM organizations o JOIN sectors s ON s.id=o.sector_id
+            WHERE o.player_id IN (?,?) LIMIT 2""",
+            (person_row["id"], npc_row["id"])).fetchall()
     coords = {(o["coord_x"], o["coord_y"], o["coord_z"]) for o in orgs}
     assert coords <= {(25, 25, 0), (25, 50, 0)}  # game0.yaml's two home_sector values
 
@@ -114,13 +111,12 @@ def test_start_session_bootstraps_ships_and_pods():
     _clear_active_game()
     result = start_session("tok1", [_person(1), _npc("npc-1")])
     person_id = next(p for p in result["players"] if p["kind"] == "person")["xsettlers_player_id"]
-    conn = get_connection()
-    ships = conn.execute(
-        "SELECT COUNT(*) AS n FROM organizations WHERE player_id=? AND org_type='ship'",
-        (person_id,)).fetchone()
-    pods = conn.execute("""SELECT COUNT(*) AS n FROM pods p
-        JOIN organizations o ON o.id=p.org_id WHERE o.player_id=?""", (person_id,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        ships = conn.execute(
+            "SELECT COUNT(*) AS n FROM organizations WHERE player_id=? AND org_type='ship'",
+            (person_id,)).fetchone()
+        pods = conn.execute("""SELECT COUNT(*) AS n FROM pods p
+            JOIN organizations o ON o.id=p.org_id WHERE o.player_id=?""", (person_id,)).fetchone()
     assert ships["n"] == 8  # game0.yaml's ships_per_player
     assert pods["n"] == 8 * 6  # 6 pod templates per ship
 
@@ -129,10 +125,9 @@ def test_start_session_assigns_npc_profile_with_config():
     result = start_session("tok1", [_person(1), _npc("npc-1", strategy="fan_out",
                                                        config={"jump_range_per_turn": 2})])
     npc_id = next(p for p in result["players"] if p["kind"] == "npc")["xsettlers_player_id"]
-    conn = get_connection()
-    profile = conn.execute("SELECT strategy_name, config FROM npc_profiles WHERE player_id=?",
-                           (npc_id,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        profile = conn.execute("SELECT strategy_name, config FROM npc_profiles WHERE player_id=?",
+                               (npc_id,)).fetchone()
     import json
     assert profile["strategy_name"] == "fan_out"
     assert json.loads(profile["config"]) == {"jump_range_per_turn": 2}
@@ -140,9 +135,8 @@ def test_start_session_assigns_npc_profile_with_config():
 def test_start_session_stores_the_session_token():
     _clear_active_game()
     start_session("tok-xyz", [_person(1), _npc("npc-1")])
-    conn = get_connection()
-    row = conn.execute("SELECT session_token FROM game_session WHERE id=1").fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT session_token FROM game_session WHERE id=1").fetchone()
     assert row["session_token"] == "tok-xyz"
 
 def test_returned_player_token_actually_works_against_gameplay_tools():
@@ -182,13 +176,12 @@ def test_a_referenced_npc_seated_here_actually_plays():
 
     end_of_turn()  # the only thing driving the NPC
 
-    conn = get_connection()
-    orgs = conn.execute("""SELECT mission, sector_id, scan_offset_x, scan_offset_y
-                           FROM organizations WHERE player_id=? AND org_type='ship'""",
-                        (npc_id,)).fetchall()
-    memory = json.loads(conn.execute(
-        "SELECT memory FROM npc_profiles WHERE player_id=?", (npc_id,)).fetchone()["memory"])
-    conn.close()
+    with connection() as conn:
+        orgs = conn.execute("""SELECT mission, sector_id, scan_offset_x, scan_offset_y
+                               FROM organizations WHERE player_id=? AND org_type='ship'""",
+                            (npc_id,)).fetchall()
+        memory = json.loads(conn.execute(
+            "SELECT memory FROM npc_profiles WHERE player_id=?", (npc_id,)).fetchone()["memory"])
 
     # fan_out's first two steps ran; the third is a decide step still waiting
     # on its scans, which is where the program counter should be parked.
@@ -218,10 +211,9 @@ def test_start_session_stamps_the_gamehouse_person_id_on_person_seats_only():
     it has to mean exactly 'GameHouse has a Person for this seat'."""
     _clear_active_game()
     start_session("tok1", [_person(42), _npc("npc-1")])
-    conn = get_connection()
-    rows = {r["email"]: r["gamehouse_person_id"] for r in conn.execute(
-        "SELECT email, gamehouse_person_id FROM players").fetchall()}
-    conn.close()
+    with connection() as conn:
+        rows = {r["email"]: r["gamehouse_person_id"] for r in conn.execute(
+            "SELECT email, gamehouse_person_id FROM players").fetchall()}
     assert rows["gamehouse-42@handoff"] == 42
     assert rows["gamehouse-npc-1@handoff"] is None, "an NPC has no Person to credit"
 
@@ -250,9 +242,8 @@ def test_build_results_matches_the_recorded_scoreboard_not_a_recomputation():
     _finish_game()
 
     recorded = {s["player_id"]: s for s in get_final_scores()["standings"]}
-    conn = get_connection()
-    xs_id = conn.execute("SELECT id FROM players WHERE gamehouse_person_id=42").fetchone()["id"]
-    conn.close()
+    with connection() as conn:
+        xs_id = conn.execute("SELECT id FROM players WHERE gamehouse_person_id=42").fetchone()["id"]
     entry = build_results()[0]
     assert entry["score"][SCORE_FIELD] == recorded[xs_id]["score"]
     assert entry["score"][PLACEMENT_FIELD] == recorded[xs_id]["rank"]
@@ -293,10 +284,9 @@ def test_an_all_npc_game_records_the_event_without_calling_gamehouse():
 
     outcome = asyncio.run(report_results())
     assert outcome == {"ok": True, "reported": 0}
-    conn = get_connection()
-    n = conn.execute("SELECT COUNT(*) AS n FROM events WHERE event_type=?",
-                     (RESULTS_REPORTED_EVENT,)).fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        n = conn.execute("SELECT COUNT(*) AS n FROM events WHERE event_type=?",
+                         (RESULTS_REPORTED_EVENT,)).fetchone()["n"]
     assert n == 1
 
 def test_results_are_reported_only_once():

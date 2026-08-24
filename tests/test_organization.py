@@ -1,5 +1,5 @@
 import json
-from db.connection import get_connection
+from db.connection import connection
 from engine.turn import end_of_turn
 from xsettlers_mcp.tools.organization_tools import (
     set_mission, set_pod_task, rename_organization, queue_command,
@@ -14,10 +14,9 @@ def test_set_mission_idle():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     result = set_mission("U_P1", oid, "idle")
     assert result.get("ok") is True
-    conn = get_connection()
-    assert conn.execute("SELECT mission FROM organizations WHERE id=?",
-                        (oid,)).fetchone()["mission"] == "idle"
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT mission FROM organizations WHERE id=?",
+                            (oid,)).fetchone()["mission"] == "idle"
 
 def _seed_colonizer(storage_current=200.0):
     """A ship that can afford to colonize. Colonizing costs
@@ -31,10 +30,9 @@ def _seed_colonizer(storage_current=200.0):
 def test_set_mission_colonize_locks_immediately_but_does_not_convert_yet():
     pid, sid, oid = _seed_colonizer()
     set_mission("U_P1", oid, "colonize")
-    conn = get_connection()
-    org = conn.execute("SELECT org_type,is_mobile,mission FROM organizations WHERE id=?",
-                       (oid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT org_type,is_mobile,mission FROM organizations WHERE id=?",
+                           (oid,)).fetchone()
     assert org["org_type"] == "ship"      # not flipped yet -- only at resolution
     assert org["is_mobile"] == 0          # locked immediately, per set_mission
     assert org["mission"] == "colonize"
@@ -43,16 +41,14 @@ def test_set_mission_colonize_converts_after_three_turns():
     pid, sid, oid = _seed_colonizer()
     set_mission("U_P1", oid, "colonize")   # scheduled for current_turn(0) + 3
     end_of_turn(); end_of_turn()           # turns 1, 2 -- not resolved yet
-    conn = get_connection()
-    still_ship = conn.execute("SELECT org_type FROM organizations WHERE id=?",
-                              (oid,)).fetchone()["org_type"]
-    conn.close()
+    with connection() as conn:
+        still_ship = conn.execute("SELECT org_type FROM organizations WHERE id=?",
+                                  (oid,)).fetchone()["org_type"]
     assert still_ship == "ship"
     end_of_turn()                          # turn 3 -- resolve_at_turn matches
-    conn = get_connection()
-    org = conn.execute("SELECT org_type,is_mobile,mission FROM organizations WHERE id=?",
-                       (oid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT org_type,is_mobile,mission FROM organizations WHERE id=?",
+                           (oid,)).fetchone()
     assert org["org_type"] == "colony"
     assert org["is_mobile"] == 0
     assert org["mission"] == "idle"
@@ -63,10 +59,9 @@ def test_set_mission_colonize_charges_energy_up_front():
     result = set_mission("U_P1", oid, "colonize")
     assert result.get("ok") is True
     assert result["energy_spent"] == COLONIZATION_ENERGY_COST
-    conn = get_connection()
-    energy = conn.execute("SELECT SUM(energy_stored) AS e FROM pods WHERE org_id=?",
-                          (oid,)).fetchone()["e"]
-    conn.close()
+    with connection() as conn:
+        energy = conn.execute("SELECT SUM(energy_stored) AS e FROM pods WHERE org_id=?",
+                              (oid,)).fetchone()["e"]
     assert energy == 200.0 - COLONIZATION_ENERGY_COST
 
 def test_set_mission_colonize_refused_when_energy_short():
@@ -76,12 +71,11 @@ def test_set_mission_colonize_refused_when_energy_short():
     pid, sid, oid = _seed_colonizer(storage_current=COLONIZATION_ENERGY_COST - 1)
     result = set_mission("U_P1", oid, "colonize")
     assert "error" in result
-    conn = get_connection()
-    org = conn.execute("SELECT mission,is_mobile FROM organizations WHERE id=?",
-                       (oid,)).fetchone()
-    energy = conn.execute("SELECT SUM(energy_stored) AS e FROM pods WHERE org_id=?",
-                          (oid,)).fetchone()["e"]
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT mission,is_mobile FROM organizations WHERE id=?",
+                           (oid,)).fetchone()
+        energy = conn.execute("SELECT SUM(energy_stored) AS e FROM pods WHERE org_id=?",
+                              (oid,)).fetchone()["e"]
     assert org["mission"] != "colonize"
     assert org["is_mobile"] == 1                      # never locked
     assert energy == COLONIZATION_ENERGY_COST - 1     # never charged
@@ -105,10 +99,9 @@ def test_set_mission_refuses_combat_rather_than_accepting_it_silently():
         result = set_mission("U_P1", oid, mission)
         assert result["error"] == WEAPONS_INOPERABLE
         assert "ok" not in result
-    conn = get_connection()
-    assert conn.execute("SELECT mission FROM organizations WHERE id=?",
-                        (oid,)).fetchone()["mission"] == "idle"    # left untouched
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT mission FROM organizations WHERE id=?",
+                            (oid,)).fetchone()["mission"] == "idle"    # left untouched
 
 def test_combat_missions_stay_in_the_vocabulary_they_are_refused_from():
     """Refused, not removed: a player who asks is told combat is not built
@@ -138,12 +131,11 @@ def test_set_mission_move_delegates_to_confirm_move():
     result = set_mission("U_P1", oid, "move", {"dest_x": 3, "dest_y": 0, "dest_z": 0})
     assert result.get("confirmed") is True
     assert result["arrival_turn"] > 0
-    conn = get_connection()
-    org = conn.execute("SELECT sector_id,is_mobile,mission FROM organizations WHERE id=?",
-                       (oid,)).fetchone()
-    queued = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?",
-                          (oid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT sector_id,is_mobile,mission FROM organizations WHERE id=?",
+                           (oid,)).fetchone()
+        queued = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?",
+                              (oid,)).fetchone()
     assert org["sector_id"] == -1          # parked at the sentinel, not left in place
     assert org["is_mobile"] == 0
     assert org["mission"] == "move"
@@ -154,10 +146,9 @@ def test_set_mission_move_requires_dest_params():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
     result = set_mission("U_P1", oid, "move", {"dest_x": 3})
     assert "error" in result
-    conn = get_connection()
-    org = conn.execute("SELECT sector_id,mission FROM organizations WHERE id=?",
-                       (oid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT sector_id,mission FROM organizations WHERE id=?",
+                           (oid,)).fetchone()
     assert org["sector_id"] != -1          # rejected before anything was mutated
     assert org["mission"] != "move"
 
@@ -168,10 +159,9 @@ def test_set_pod_task_produce_energy():
     pod = seed_pod(oid)
     result = set_pod_task("U_P1", pod, "produce_energy")
     assert result.get("ok") is True
-    conn = get_connection()
-    assert conn.execute("SELECT task FROM pods WHERE id=?",
-                        (pod,)).fetchone()["task"] == "produce_energy"
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT task FROM pods WHERE id=?",
+                            (pod,)).fetchone()["task"] == "produce_energy"
 
 # --- set_pod_task negative paths ---
 
@@ -196,9 +186,8 @@ def test_rename_organization_sets_a_new_name():
     result = rename_organization("U_P1", oid, "Vanguard")
     assert result["ok"] is True
     assert (result["previous_name"], result["name"]) == ("S1", "Vanguard")
-    conn = get_connection()
-    assert conn.execute("SELECT name FROM organizations WHERE id=?", (oid,)).fetchone()["name"] == "Vanguard"
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT name FROM organizations WHERE id=?", (oid,)).fetchone()["name"] == "Vanguard"
 
 def test_rename_organization_rejects_a_duplicate_within_one_player():
     """An ambiguous name is not a name -- names are the player's handle for
@@ -243,16 +232,14 @@ def _org_with_pod(token="U_P1", email="p@t.com", task="produce_food"):
 
 
 def _pod_task(pod_id):
-    conn = get_connection()
-    row = conn.execute("SELECT task, task_params FROM pods WHERE id=?", (pod_id,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT task, task_params FROM pods WHERE id=?", (pod_id,)).fetchone()
     return row["task"], row["task_params"]
 
 
 def _queued_count():
-    conn = get_connection()
-    n = conn.execute("SELECT COUNT(*) n FROM org_command_queue").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        n = conn.execute("SELECT COUNT(*) n FROM org_command_queue").fetchone()["n"]
     return n
 
 
@@ -286,10 +273,9 @@ def test_queue_command_normalizes_a_compass_bearing_to_offsets():
     _, oid, pod = _org_with_pod()
     queue_command("U_P1", oid, "at_turn", "set_pod_task",
                   {"pod_id": pod, "task": "scan", "bearing": "N2"}, turn=3)
-    conn = get_connection()
-    stored = json.loads(conn.execute(
-        "SELECT params FROM org_command_queue").fetchone()["params"])
-    conn.close()
+    with connection() as conn:
+        stored = json.loads(conn.execute(
+            "SELECT params FROM org_command_queue").fetchone()["params"])
     assert (stored["offset_x"], stored["offset_y"], stored["offset_z"]) == (0, -2, 0)
     assert "bearing" not in stored
 
@@ -355,11 +341,9 @@ def test_the_turn_engine_survives_what_used_to_wedge_it():
                 {"dest_x": 3}):
         action = "move" if "dest_x" in bad else "set_pod_task"
         assert "error" in queue_command("U_P1", oid, "at_turn", action, bad, turn=0)
-    conn = get_connection()
-    before = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
-    conn.close()
+    with connection() as conn:
+        before = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
     end_of_turn()
-    conn = get_connection()
-    after = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
-    conn.close()
+    with connection() as conn:
+        after = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
     assert after == before + 1

@@ -1,4 +1,4 @@
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from xsettlers_mcp.tools.sector_tools import (
     show_sector_neighborhood, show_neighborhood_resources,
     UNKNOWN_CELL, SEEN_CELL, EMPTY_CELL, MAX_NEIGHBORHOOD_RADIUS, RICHEST_ROWS,
@@ -133,24 +133,21 @@ def test_show_sector_neighborhood_is_a_pure_view():
     """Looking at a map must not be what creates it -- no sector rows, no
     confidence changes. reveal_sector() stays the only writer."""
     pid, sid, oid = _home()
-    conn = get_connection()
-    before = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
-              conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
-              conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
-    conn.close()
+    with connection() as conn:
+        before = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
+                  conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
+                  conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
     show_sector_neighborhood("U_P1", org_id=oid)
-    conn = get_connection()
-    after = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
-             conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
-             conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
-    conn.close()
+    with connection() as conn:
+        after = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
+                 conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
+                 conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
     assert before == after
 
 def test_show_sector_neighborhood_rejects_in_transit_org():
     pid, sid, oid = _home()
-    conn = get_connection()
-    conn.execute("UPDATE organizations SET sector_id=-1 WHERE id=?", (oid,))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE organizations SET sector_id=-1 WHERE id=?", (oid,))
     assert "error" in show_sector_neighborhood("U_P1", org_id=oid)
 
 def test_show_sector_neighborhood_rejects_missing_center_and_bad_radius():
@@ -334,24 +331,21 @@ def test_resource_map_accepts_explicit_coordinates():
 def test_resource_map_is_a_pure_view():
     """Looking at what's nearby must not be what reveals it."""
     pid, sid, oid = _home()
-    conn = get_connection()
-    before = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
-              conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
-              conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
-    conn.close()
+    with connection() as conn:
+        before = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
+                  conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
+                  conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
     show_neighborhood_resources("U_P1", org_id=oid)
-    conn = get_connection()
-    after = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
-             conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
-             conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
-    conn.close()
+    with connection() as conn:
+        after = (conn.execute("SELECT COUNT(*) n FROM sectors").fetchone()["n"],
+                 conn.execute("SELECT COUNT(*) n FROM player_sectors").fetchone()["n"],
+                 conn.execute("SELECT SUM(confidence) s FROM player_sectors").fetchone()["s"])
     assert before == after
 
 def test_resource_map_rejects_in_transit_org():
     pid, sid, oid = _home()
-    conn = get_connection()
-    conn.execute("UPDATE organizations SET sector_id=-1 WHERE id=?", (oid,))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE organizations SET sector_id=-1 WHERE id=?", (oid,))
     assert "error" in show_neighborhood_resources("U_P1", org_id=oid)
 
 def test_resource_map_rejects_missing_center_and_bad_radius():

@@ -8,7 +8,7 @@ test here is the one that matters, since three separate copies of this formula
 agreeing by coincidence is exactly the situation the module was extracted to
 end.
 """
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from engine.scoring import score_for, player_standings, SCORED_RESOURCES
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
 
@@ -61,9 +61,8 @@ def test_player_standings_ranks_by_weighted_score_not_raw_total():
     """P1 holds 80 raw units to P2's 20, but all of it is energy (weight 0),
     so P2 wins. This is the whole reason score and total are separate fields."""
     p1, p2 = _two_players()
-    conn = get_connection()
-    standings = player_standings(conn.cursor(), WEIGHTS)
-    conn.close()
+    with connection() as conn:
+        standings = player_standings(conn.cursor(), WEIGHTS)
     by_player = {s["player_id"]: s for s in standings}
     assert by_player[p1]["score"] == 0
     assert by_player[p2]["score"] == 30      # 10*1 food + 10*2 goods
@@ -98,9 +97,8 @@ def test_player_standings_sums_across_every_org_and_pod():
     for _ in range(2):
         oid = seed_ship(pid, sid, name=f"Ship{_}")
         seed_pod(oid, task="produce_goods", storage_capacity=50.0, storage_current=10.0)
-    conn = get_connection()
-    standings = player_standings(conn.cursor(), WEIGHTS)
-    conn.close()
+    with connection() as conn:
+        standings = player_standings(conn.cursor(), WEIGHTS)
     assert len(standings) == 1
     assert standings[0]["goods"] == 20       # both orgs, both pods
     assert standings[0]["capacity"] == 100
@@ -111,9 +109,8 @@ def test_player_standings_includes_a_player_holding_nothing():
     """A player with no orgs at all must still appear -- vanishing from the
     scoreboard is not the same as scoring zero."""
     seed_player(email="empty@t.com", player_token="U_E", display_name="Empty")
-    conn = get_connection()
-    standings = player_standings(conn.cursor(), WEIGHTS)
-    conn.close()
+    with connection() as conn:
+        standings = player_standings(conn.cursor(), WEIGHTS)
     assert len(standings) == 1
     row = standings[0]
     assert row["score"] == 0 and row["total"] == 0 and row["capacity"] == 0
@@ -127,9 +124,8 @@ def test_player_standings_returns_unrounded_values():
     sid = seed_sector()
     oid = seed_ship(pid, sid)
     seed_pod(oid, task="produce_goods", storage_capacity=100.0, storage_current=1.125)
-    conn = get_connection()
-    standings = player_standings(conn.cursor(), WEIGHTS)
-    conn.close()
+    with connection() as conn:
+        standings = player_standings(conn.cursor(), WEIGHTS)
     assert standings[0]["goods"] == 1.125
     assert standings[0]["score"] == 2.25
 
@@ -154,11 +150,10 @@ def test_all_three_consumers_report_the_same_score():
 
     live = next(s for s in show_game_status("U_P1")["standings"] if s["player_id"] == pid)
     final = next(s for s in _calculate_final_scores() if s["player_id"] == pid)
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT payload FROM events WHERE event_type='turn.snapshot' AND subject_id=?",
-        (pid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT payload FROM events WHERE event_type='turn.snapshot' AND subject_id=?",
+            (pid,)).fetchone()
     ledger = json.loads(row["payload"])
 
     assert live["score"] == final["score"] == ledger["score"]

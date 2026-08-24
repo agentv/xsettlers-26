@@ -1,5 +1,5 @@
 import json
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from db.sectors import (MIN_SECTOR_ENERGY, MAX_SECTOR_ENERGY, CONFIDENCE_DECAY_PER_TURN,
                         TURNS_TO_BLINK_OUT)
 from engine.turn import (end_of_turn, check_consensus_acceleration,
@@ -35,11 +35,10 @@ def test_snapshot_holdings_writes_turn_snapshot_event_with_waste_and_score():
     seed_pod(oid, task="produce_energy", storage_capacity=10.0, storage_current=10.0)
     seed_pod(oid, task="produce_food", storage_capacity=10.0, storage_current=10.0)
     end_of_turn()
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT payload FROM events WHERE event_type='turn.snapshot' AND turn=0 AND subject_id=?",
-        (pid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT payload FROM events WHERE event_type='turn.snapshot' AND turn=0 AND subject_id=?",
+            (pid,)).fetchone()
     payload = json.loads(row["payload"])
     assert payload["energy"] == 38.0
     assert payload["food"] == 2.0
@@ -54,9 +53,8 @@ def test_get_next_tick_at_none_until_clock_has_run():
     value, which a caller can't tell apart from a paused clock without also
     checking the server is actually alive (see scripts/status.py)."""
     assert get_next_tick_at() is None
-    conn = get_connection()
-    conn.execute("UPDATE game_state SET next_tick_at=? WHERE id=1", ("2026-01-01T00:00:00.000Z",))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE game_state SET next_tick_at=? WHERE id=1", ("2026-01-01T00:00:00.000Z",))
     assert get_next_tick_at() == "2026-01-01T00:00:00.000Z"
 
 def test_show_game_status_countdown_is_dashes_when_clock_has_never_run():
@@ -74,10 +72,9 @@ def test_show_game_status_countdown_formats_mmss_from_next_tick_at():
     from xsettlers_mcp.tools.organization_reports import show_game_status
     seed_player()
     future = datetime.now(timezone.utc) + timedelta(minutes=4, seconds=30)
-    conn = get_connection()
-    conn.execute("UPDATE game_state SET next_tick_at=? WHERE id=1",
-                (future.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE game_state SET next_tick_at=? WHERE id=1",
+                    (future.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",))
     status = show_game_status("U_P1")
     assert status["next_tick_countdown"] in ("04:30", "04:29")  # clock-skew tolerant
 
@@ -107,9 +104,8 @@ def test_turn_resets_end_turn_declared():
     conn = get_connection()
     conn.execute("UPDATE players SET end_turn_declared=1"); conn.commit(); conn.close()
     end_of_turn()
-    conn = get_connection()
-    assert conn.execute("SELECT end_turn_declared FROM players").fetchone()[0] == 0
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT end_turn_declared FROM players").fetchone()[0] == 0
 
 def test_consensus_fires_when_all_declared():
     seed_player()
@@ -182,10 +178,9 @@ def test_blinked_out_sector_leaves_the_map_but_keeps_its_row():
     assert not any(s["id"] == remembered for s in get_sector_map("U_P1"))
     neighborhood = show_sector_neighborhood("U_P1", org_id=oid, radius=3)
     assert not any(s["id"] == remembered for s in neighborhood["sectors"])
-    conn = get_connection()
-    assert conn.execute("SELECT COUNT(*) n FROM player_sectors WHERE sector_id=?",
-                        (remembered,)).fetchone()["n"] == 1
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT COUNT(*) n FROM player_sectors WHERE sector_id=?",
+                            (remembered,)).fetchone()["n"] == 1
 
 def test_fog_does_not_decay_a_sector_you_occupy():
     pid = seed_player()
@@ -211,10 +206,9 @@ def test_final_scores_are_recorded_as_an_event_not_just_printed():
     the whistle, not something recomputed later."""
     from engine.turn import get_final_scores, FINAL_SCORES_EVENT
     _play_to_game_over()
-    conn = get_connection()
-    row = conn.execute("SELECT payload FROM events WHERE event_type=?",
-                       (FINAL_SCORES_EVENT,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT payload FROM events WHERE event_type=?",
+                           (FINAL_SCORES_EVENT,)).fetchone()
     assert row is not None
     final = get_final_scores()
     assert final["winners"] == ["Player One"]
@@ -248,10 +242,9 @@ def test_final_scores_are_written_once():
     from engine.turn import FINAL_SCORES_EVENT
     _play_to_game_over()
     end_of_turn(); end_of_turn()          # no-ops past the limit
-    conn = get_connection()
-    n = conn.execute("SELECT COUNT(*) n FROM events WHERE event_type=?",
-                     (FINAL_SCORES_EVENT,)).fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        n = conn.execute("SELECT COUNT(*) n FROM events WHERE event_type=?",
+                         (FINAL_SCORES_EVENT,)).fetchone()["n"]
     assert n == 1
 
 def test_get_final_scores_is_none_before_game_over():

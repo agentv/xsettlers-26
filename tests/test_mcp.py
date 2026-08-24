@@ -1,4 +1,4 @@
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from xsettlers_mcp.tools.player_tools import get_player_state, declare_end_turn, rescind_end_turn
 from tests.conftest import seed_player
 
@@ -23,15 +23,13 @@ def test_get_player_state_unknown_user():
 
 def test_declare_and_rescind_end_turn():
     declare_end_turn("U_TEST_001")
-    conn = get_connection()
-    assert conn.execute("SELECT end_turn_declared FROM players WHERE player_token='U_TEST_001'"
-                        ).fetchone()[0] == 1
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT end_turn_declared FROM players WHERE player_token='U_TEST_001'"
+                            ).fetchone()[0] == 1
     rescind_end_turn("U_TEST_001")
-    conn = get_connection()
-    assert conn.execute("SELECT end_turn_declared FROM players WHERE player_token='U_TEST_001'"
-                        ).fetchone()[0] == 0
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT end_turn_declared FROM players WHERE player_token='U_TEST_001'"
+                            ).fetchone()[0] == 0
 
 # --- MCP dispatch serializes as JSON (see xsettlers_mcp/server.py) ---
 

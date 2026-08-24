@@ -8,7 +8,7 @@ validation, the decide hook). This file is about whether the strategies in
 config/npc_strategies/ actually play.
 """
 import json
-from db.connection import get_connection
+from db.connection import connection
 from npc.profiles import assign_npc_profile
 from npc.strategies import run_npc_decisions
 from engine.turn import end_of_turn
@@ -18,18 +18,16 @@ def _seed_fleet(player_id, sector_id, n=8):
     return [seed_ship(player_id, sector_id, name=f"Ship-{i}") for i in range(n)]
 
 def _memory(player_id):
-    conn = get_connection()
-    row = conn.execute("SELECT memory FROM npc_profiles WHERE player_id=?", (player_id,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT memory FROM npc_profiles WHERE player_id=?", (player_id,)).fetchone()
     return json.loads(row["memory"])
 
 def _orgs(player_id):
-    conn = get_connection()
-    rows = {r["id"]: dict(r) for r in conn.execute(
-        """SELECT id, sector_id, mission, is_mobile,
-                  scan_offset_x, scan_offset_y, scan_offset_z
-           FROM organizations WHERE player_id=?""", (player_id,)).fetchall()}
-    conn.close()
+    with connection() as conn:
+        rows = {r["id"]: dict(r) for r in conn.execute(
+            """SELECT id, sector_id, mission, is_mobile,
+                      scan_offset_x, scan_offset_y, scan_offset_z
+               FROM organizations WHERE player_id=?""", (player_id,)).fetchall()}
     return rows
 
 # Aim is always the "X2" bearing (distance 2, SCAN_RANGE's max), decoupled
@@ -46,11 +44,10 @@ def test_assign_npc_profile_sets_flag_and_creates_row():
     pid = seed_player()
     result = assign_npc_profile(pid, "fan_out", config={"jump_range_per_turn": 2})
     assert result == {"ok": True, "player_id": pid, "strategy_name": "fan_out"}
-    conn = get_connection()
-    player = conn.execute("SELECT is_npc FROM players WHERE id=?", (pid,)).fetchone()
-    profile = conn.execute("SELECT strategy_name, config, memory FROM npc_profiles WHERE player_id=?",
-                           (pid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        player = conn.execute("SELECT is_npc FROM players WHERE id=?", (pid,)).fetchone()
+        profile = conn.execute("SELECT strategy_name, config, memory FROM npc_profiles WHERE player_id=?",
+                               (pid,)).fetchone()
     assert player["is_npc"] == 1
     assert profile["strategy_name"] == "fan_out"
     assert json.loads(profile["config"]) == {"jump_range_per_turn": 2}
@@ -62,15 +59,13 @@ def test_assign_npc_profile_reassignment_resets_memory():
     would start the new strategy partway through steps it never had."""
     pid = seed_player()
     assign_npc_profile(pid, "fan_out")
-    conn = get_connection()
-    conn.execute("UPDATE npc_profiles SET memory=? WHERE player_id=?",
-                 (json.dumps({"pc": 3, "bindings": {"target": {"x": 1}}}), pid))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE npc_profiles SET memory=? WHERE player_id=?",
+                     (json.dumps({"pc": 3, "bindings": {"target": {"x": 1}}}), pid))
     assign_npc_profile(pid, "turtle")
-    conn = get_connection()
-    profile = conn.execute("SELECT strategy_name, memory FROM npc_profiles WHERE player_id=?",
-                           (pid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        profile = conn.execute("SELECT strategy_name, memory FROM npc_profiles WHERE player_id=?",
+                               (pid,)).fetchone()
     assert profile["strategy_name"] == "turtle"
     assert json.loads(profile["memory"]) == {}
 
@@ -78,9 +73,8 @@ def test_assign_npc_profile_refuses_a_strategy_the_library_does_not_have():
     pid = seed_player()
     err = assign_npc_profile(pid, "does_not_exist")
     assert "Unknown strategy" in err["error"]
-    conn = get_connection()
-    row = conn.execute("SELECT COUNT(*) AS n FROM npc_profiles WHERE player_id=?", (pid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM npc_profiles WHERE player_id=?", (pid,)).fetchone()
     assert row["n"] == 0, "nothing is written when the reference does not resolve"
 
 def test_run_npc_decisions_noop_for_non_npc_players():
@@ -88,9 +82,8 @@ def test_run_npc_decisions_noop_for_non_npc_players():
     sid = seed_sector(25, 25, 0)
     seed_ship(pid, sid)
     run_npc_decisions()  # no npc_profiles row for this player -- must not raise or act
-    conn = get_connection()
-    org = conn.execute("SELECT sector_id FROM organizations WHERE player_id=?", (pid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT sector_id FROM organizations WHERE player_id=?", (pid,)).fetchone()
     assert org["sector_id"] == sid
 
 
@@ -150,10 +143,9 @@ def test_frontier_redirects_after_landing():
     assign_npc_profile(pid, "frontier_map_stay_frosty")
 
     def _org():
-        conn = get_connection()
-        row = conn.execute("SELECT sector_id, mission FROM organizations WHERE id=?",
-                           (ship_id,)).fetchone()
-        conn.close()
+        with connection() as conn:
+            row = conn.execute("SELECT sector_id, mission FROM organizations WHERE id=?",
+                               (ship_id,)).fetchone()
         return row
 
     end_of_turn()                        # opening dispatch
@@ -208,12 +200,11 @@ def test_fan_out_commits_to_the_revealed_sector_once_scan_resolves():
     memory = _memory(pid)
     assert memory["bindings"]["target"]["x"] == 25
     assert memory["bindings"]["target"]["y"] == 21   # home(25,25) - 2 scout - 2 aim, north is -y
-    conn = get_connection()
-    org = conn.execute("SELECT sector_id, mission FROM organizations WHERE id=?",
-                       (ship_id,)).fetchone()
-    aq = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?",
-                      (ship_id,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        org = conn.execute("SELECT sector_id, mission FROM organizations WHERE id=?",
+                           (ship_id,)).fetchone()
+        aq = conn.execute("SELECT dest_x,dest_y,dest_z FROM arrival_queue WHERE org_id=?",
+                          (ship_id,)).fetchone()
     assert org["sector_id"] == -1 and org["mission"] == "move"
     assert (aq["dest_x"], aq["dest_y"], aq["dest_z"]) == (25, 21, 0)
 
@@ -244,10 +235,9 @@ def test_fan_out_converges_whole_fleet_on_the_richest_scouted_sector():
     assert (target["x"], target["y"], target["z"]) == (25, 29, 0)
     assert target["energy_capacity"] == 900.0
 
-    conn = get_connection()
-    dests = conn.execute("""SELECT dest_x, dest_y, dest_z FROM arrival_queue
-        WHERE org_id IN ({})""".format(",".join("?" * len(ship_ids))), ship_ids).fetchall()
-    conn.close()
+    with connection() as conn:
+        dests = conn.execute("""SELECT dest_x, dest_y, dest_z FROM arrival_queue
+            WHERE org_id IN ({})""".format(",".join("?" * len(ship_ids))), ship_ids).fetchall()
     assert len(dests) == 8
     assert all((d["dest_x"], d["dest_y"], d["dest_z"]) == (25, 29, 0) for d in dests)
 
@@ -264,13 +254,12 @@ def test_fan_out_holds_the_fleet_until_every_scan_is_in():
 
     # Resolve only the first scout's aim.
     revealed = seed_sector(25, 21, 0, energy=600.0)
-    conn = get_connection()
-    conn.execute("""UPDATE organizations SET sector_id=(SELECT id FROM sectors
-                    WHERE coord_x=25 AND coord_y=23 AND coord_z=0), mission='idle'
-                    WHERE id=?""", (ship_ids[0],))
-    conn.execute("INSERT OR REPLACE INTO player_sectors (player_id, sector_id, confidence) "
-                 "VALUES (?,?,100)", (pid, revealed))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("""UPDATE organizations SET sector_id=(SELECT id FROM sectors
+                        WHERE coord_x=25 AND coord_y=23 AND coord_z=0), mission='idle'
+                        WHERE id=?""", (ship_ids[0],))
+        conn.execute("INSERT OR REPLACE INTO player_sectors (player_id, sector_id, confidence) "
+                     "VALUES (?,?,100)", (pid, revealed))
 
     run_npc_decisions()
     memory = _memory(pid)

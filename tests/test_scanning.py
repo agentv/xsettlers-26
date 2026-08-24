@@ -10,7 +10,7 @@ file that never get read together.
 """
 import json
 import pytest
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from db.sectors import CONFIDENCE_DECAY_PER_TURN
 from engine.bearings import SCAN_RANGE, get_scan_range
 from engine.turn import end_of_turn
@@ -43,21 +43,19 @@ def _scanner_with_stock(offset=(5, 0, 0), as_pod=False):
 
 
 def _alert_rows():
-    conn = get_connection()
-    rows = [dict(r) for r in conn.execute(
-        """SELECT subject_id, subject_type, actor_id, payload FROM events
-           WHERE event_type='alert.scan_out_of_range' ORDER BY id""").fetchall()]
-    conn.close()
+    with connection() as conn:
+        rows = [dict(r) for r in conn.execute(
+            """SELECT subject_id, subject_type, actor_id, payload FROM events
+               WHERE event_type='alert.scan_out_of_range' ORDER BY id""").fetchall()]
     for r in rows:
         r["payload"] = json.loads(r["payload"])
     return rows
 
 
 def _sector_exists(x, y, z):
-    conn = get_connection()
-    row = conn.execute("SELECT id FROM sectors WHERE coord_x=? AND coord_y=? AND coord_z=?",
-                       (x, y, z)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT id FROM sectors WHERE coord_x=? AND coord_y=? AND coord_z=?",
+                           (x, y, z)).fetchone()
     return row is not None
 
 
@@ -67,10 +65,9 @@ def test_set_pod_task_scan_stores_its_aim_as_an_offset():
     result = set_pod_task("U_P1", pod, "scan", bearing="NE")
     assert result["bearing"] == "NE"
     assert (result["offset_x"], result["offset_y"], result["offset_z"]) == (1, -1, 0)
-    conn = get_connection()
-    params = json.loads(conn.execute("SELECT task_params FROM pods WHERE id=?",
-                                     (pod,)).fetchone()["task_params"])
-    conn.close()
+    with connection() as conn:
+        params = json.loads(conn.execute("SELECT task_params FROM pods WHERE id=?",
+                                         (pod,)).fetchone()["task_params"])
     # Stored relative, not as the absolute (5,3,0) it currently points at.
     assert params == {"offset_x": 1, "offset_y": -1, "offset_z": 0}
 
@@ -131,10 +128,9 @@ def test_set_pod_scan_bearing_clears_when_given_nothing():
     pod = seed_pod(oid, task="scan")
     set_pod_scan_bearing("U_P1", pod, "N")
     assert set_pod_scan_bearing("U_P1", pod)["cleared"] is True
-    conn = get_connection()
-    assert conn.execute("SELECT task_params FROM pods WHERE id=?",
-                        (pod,)).fetchone()["task_params"] is None
-    conn.close()
+    with connection() as conn:
+        assert conn.execute("SELECT task_params FROM pods WHERE id=?",
+                            (pod,)).fetchone()["task_params"] is None
 
 def test_aim_is_rejected_on_a_non_scan_task():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
@@ -145,10 +141,9 @@ def test_set_org_scan_target_reports_range_and_persists():
     pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
     result = set_org_scan_bearing("U_P1", oid, "NE")
     assert result["in_range"] is True and result["scan_range"] == SCAN_RANGE
-    conn = get_connection()
-    row = conn.execute("SELECT scan_offset_x,scan_offset_y,scan_offset_z FROM organizations WHERE id=?",
-                       (oid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT scan_offset_x,scan_offset_y,scan_offset_z FROM organizations WHERE id=?",
+                           (oid,)).fetchone()
     assert (row["scan_offset_x"], row["scan_offset_y"], row["scan_offset_z"]) == (1, -1, 0)
 
 def test_org_scan_reveals_its_target_without_any_scan_pod():
@@ -158,10 +153,9 @@ def test_org_scan_reveals_its_target_without_any_scan_pod():
     seed_pod(oid, task="produce_energy", storage_current=100.0)   # scanning costs energy
     set_org_scan_bearing("U_P1", oid, "E2")
     end_of_turn()
-    conn = get_connection()
-    revealed = conn.execute(
-        "SELECT id FROM sectors WHERE coord_x=2 AND coord_y=0 AND coord_z=0").fetchone()
-    conn.close()
+    with connection() as conn:
+        revealed = conn.execute(
+            "SELECT id FROM sectors WHERE coord_x=2 AND coord_y=0 AND coord_z=0").fetchone()
     assert revealed is not None
 
 def test_org_scan_costs_food_like_a_scan_pod():
@@ -169,28 +163,23 @@ def test_org_scan_costs_food_like_a_scan_pod():
     recipe, so any food drawn this turn is org upkeep plus the innate scan."""
     pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
     pod = seed_pod(oid, task="idle")
-    conn = get_connection()
-    conn.execute("UPDATE pods SET food_stored=100.0, energy_stored=100.0 WHERE id=?", (pod,))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE pods SET food_stored=100.0, energy_stored=100.0 WHERE id=?", (pod,))
 
-    conn = get_connection()
-    baseline_before = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?",
-                                   (oid,)).fetchone()["s"]
-    conn.close()
+    with connection() as conn:
+        baseline_before = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?",
+                                       (oid,)).fetchone()["s"]
     end_of_turn()                       # upkeep only, no scan target set yet
-    conn = get_connection()
-    upkeep_only = baseline_before - conn.execute(
-        "SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
-    conn.close()
+    with connection() as conn:
+        upkeep_only = baseline_before - conn.execute(
+            "SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
 
     set_org_scan_bearing("U_P1", oid, "E")
-    conn = get_connection()
-    before = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
-    conn.close()
+    with connection() as conn:
+        before = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
     end_of_turn()
-    conn = get_connection()
-    after = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
-    conn.close()
+    with connection() as conn:
+        after = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (oid,)).fetchone()["s"]
     scan_turn_cost = before - after
     assert scan_turn_cost > upkeep_only          # the scan cost something on top of upkeep
     assert scan_turn_cost == upkeep_only + 1.0   # exactly one scan pod's food
@@ -201,9 +190,8 @@ def test_org_scan_rejects_an_out_of_range_aim_outright():
     pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
     result = set_org_scan_bearing("U_P1", oid, offset_x=SCAN_RANGE + 4, offset_y=0, offset_z=0)
     assert "error" in result and result["in_range"] is False
-    conn = get_connection()
-    row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
     assert row["scan_offset_x"] is None      # nothing was written
 
 def test_scan_aim_is_relative_and_survives_a_move():
@@ -216,11 +204,10 @@ def test_scan_aim_is_relative_and_survives_a_move():
     end_of_turn()
     confirm_move("U_P1", oid, 5, 0, 0, jump_range_per_turn=5)
     end_of_turn(); end_of_turn()                    # arrives at (5,0,0)
-    conn = get_connection()
-    here = conn.execute("SELECT coord_x FROM sectors s JOIN organizations o ON o.sector_id=s.id "
-                        "WHERE o.id=?", (oid,)).fetchone()
-    revealed = conn.execute("SELECT id FROM sectors WHERE coord_x=6 AND coord_y=0").fetchone()
-    conn.close()
+    with connection() as conn:
+        here = conn.execute("SELECT coord_x FROM sectors s JOIN organizations o ON o.sector_id=s.id "
+                            "WHERE o.id=?", (oid,)).fetchone()
+        revealed = conn.execute("SELECT id FROM sectors WHERE coord_x=6 AND coord_y=0").fetchone()
     assert here["coord_x"] == 5
     assert revealed is not None                     # now scanning (6,0,0), no re-aiming
 
@@ -230,9 +217,8 @@ def test_org_scan_target_persists_across_turns():
     seed_pod(oid, task="produce_food", storage_current=100.0)
     set_org_scan_bearing("U_P1", oid, "E")
     end_of_turn(); end_of_turn()
-    conn = get_connection()
-    row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
     assert row["scan_offset_x"] == 1
 
 def test_set_org_scan_target_clears_when_given_no_coordinates():
@@ -240,9 +226,8 @@ def test_set_org_scan_target_clears_when_given_no_coordinates():
     set_org_scan_bearing("U_P1", oid, "E")
     result = set_org_scan_bearing("U_P1", oid)
     assert result["cleared"] is True
-    conn = get_connection()
-    row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("SELECT scan_offset_x FROM organizations WHERE id=?", (oid,)).fetchone()
     assert row["scan_offset_x"] is None
 
 def test_show_organization_reports_no_scanners_when_none_are_active():
@@ -320,11 +305,10 @@ def test_scan_out_of_range_aim_is_rejected_at_set_time():
     result = set_pod_task("U_P1", pod, "scan", offset_x=out_of_range, offset_y=0, offset_z=0)
     assert "error" in result and result["in_range"] is False
     end_of_turn()
-    conn = get_connection()
-    sector = conn.execute(
-        "SELECT id FROM sectors WHERE coord_x=? AND coord_y=0 AND coord_z=0",
-        (out_of_range,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        sector = conn.execute(
+            "SELECT id FROM sectors WHERE coord_x=? AND coord_y=0 AND coord_z=0",
+            (out_of_range,)).fetchone()
     assert sector is None
 
 def test_rescanning_known_sector_refreshes_confidence_without_altering_resources():
@@ -351,11 +335,10 @@ def test_rescanning_known_sector_refreshes_confidence_without_altering_resources
     set_pod_task("U_P1", pod, "scan", bearing="E")  # re-scan same target
     end_of_turn()
 
-    conn = get_connection()
-    resector = conn.execute("SELECT energy_capacity FROM sectors WHERE id=?", (sector["id"],)).fetchone()
-    ps = conn.execute("SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",
-                      (pid, sector["id"])).fetchone()
-    conn.close()
+    with connection() as conn:
+        resector = conn.execute("SELECT energy_capacity FROM sectors WHERE id=?", (sector["id"],)).fetchone()
+        ps = conn.execute("SELECT confidence FROM player_sectors WHERE player_id=? AND sector_id=?",
+                          (pid, sector["id"])).fetchone()
     assert resector["energy_capacity"] == original_capacity  # not re-randomized
     # stamped back to 100 by the re-scan, then decays once more within this
     # same end_of_turn() pass since the org still doesn't occupy it
@@ -375,10 +358,9 @@ def test_scan_in_transit_still_costs_food_but_reveals_nothing():
     set_pod_task("U_P1", pod, "scan", bearing="E")
     confirm_move("U_P1", sid, 4, 0, 0)          # in transit at end of turn
     end_of_turn()
-    conn = get_connection()
-    food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (sid,)).fetchone()["s"]
-    revealed = conn.execute("SELECT COUNT(*) n FROM sectors WHERE id != -1").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        food = conn.execute("SELECT SUM(food_stored) s FROM pods WHERE org_id=?", (sid,)).fetchone()["s"]
+        revealed = conn.execute("SELECT COUNT(*) n FROM sectors WHERE id != -1").fetchone()["n"]
     assert food < 100.0        # paid for it
     assert revealed == 1       # only the origin sector -- nothing was scanned
 def test_org_scan_out_of_range_alerts_and_reveals_nothing():
@@ -414,15 +396,13 @@ def test_out_of_range_scan_still_pays_its_cost():
     """Cost is charged before the range check -- an overreaching scanner
     wastes its food and energy exactly like an unaimed one does."""
     _, oid, pod = _scanner_with_stock()
-    conn = get_connection()
-    before = conn.execute("SELECT food_stored, energy_stored FROM pods WHERE id=?",
-                          (pod,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        before = conn.execute("SELECT food_stored, energy_stored FROM pods WHERE id=?",
+                              (pod,)).fetchone()
     end_of_turn()
-    conn = get_connection()
-    after = conn.execute("SELECT food_stored, energy_stored FROM pods WHERE id=?",
-                         (pod,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        after = conn.execute("SELECT food_stored, energy_stored FROM pods WHERE id=?",
+                             (pod,)).fetchone()
     # upkeep (5 food, 3 energy) + scan (1 food, 2 energy)
     assert before["food_stored"] - after["food_stored"] == 6.0
     assert before["energy_stored"] - after["energy_stored"] == 5.0
@@ -463,10 +443,9 @@ def test_scan_records_a_sighting_of_a_rival_in_the_scanned_sector():
     rival_ship = seed_ship(rival, target, name="Quarry")
     _scan_east_from("U_WATCH", watcher_ship)
 
-    conn = get_connection()
-    rows = conn.execute("SELECT * FROM org_sightings WHERE observer_id=?",
-                        (watcher,)).fetchall()
-    conn.close()
+    with connection() as conn:
+        rows = conn.execute("SELECT * FROM org_sightings WHERE observer_id=?",
+                            (watcher,)).fetchall()
     assert len(rows) == 1
     assert rows[0]["org_id"] == rival_ship
     assert rows[0]["owner_id"] == rival
@@ -483,9 +462,8 @@ def test_a_scan_does_not_sight_your_own_organizations():
     seed_ship(watcher, target, name="Mine")
     _scan_east_from("U_WATCH", watcher_ship)
 
-    conn = get_connection()
-    n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
     assert n == 0
 
 
@@ -500,14 +478,13 @@ def test_a_sighting_is_dated_and_survives_the_rival_moving_on():
     rival_ship = seed_ship(rival, target, name="Quarry")
     _scan_east_from("U_WATCH", watcher_ship)
 
-    conn = get_connection()
-    seen_turn = conn.execute("SELECT seen_at_turn FROM org_sightings WHERE org_id=?",
-                             (rival_ship,)).fetchone()["seen_at_turn"]
-    conn.execute("UPDATE organizations SET sector_id=? WHERE id=?", (elsewhere, rival_ship))
-    conn.commit()
-    row = conn.execute("SELECT sector_id, seen_at_turn FROM org_sightings WHERE org_id=?",
-                       (rival_ship,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        seen_turn = conn.execute("SELECT seen_at_turn FROM org_sightings WHERE org_id=?",
+                                 (rival_ship,)).fetchone()["seen_at_turn"]
+        conn.execute("UPDATE organizations SET sector_id=? WHERE id=?", (elsewhere, rival_ship))
+        conn.commit()
+        row = conn.execute("SELECT sector_id, seen_at_turn FROM org_sightings WHERE org_id=?",
+                           (rival_ship,)).fetchone()
     assert row["sector_id"] == target        # where it was seen, not where it is
     assert row["seen_at_turn"] == seen_turn
 
@@ -522,9 +499,8 @@ def test_re_sighting_moves_the_record_rather_than_appending_to_it():
     _scan_east_from("U_WATCH", watcher_ship)
     end_of_turn()   # the aim persists, so it scans the same sector again
 
-    conn = get_connection()
-    rows = conn.execute("SELECT * FROM org_sightings WHERE org_id=?", (rival_ship,)).fetchall()
-    conn.close()
+    with connection() as conn:
+        rows = conn.execute("SELECT * FROM org_sightings WHERE org_id=?", (rival_ship,)).fetchall()
     assert len(rows) == 1
     assert rows[0]["seen_at_turn"] >= 1     # updated to the later look
 
@@ -539,10 +515,9 @@ def test_scan_contact_event_names_what_was_detected():
     rival_ship = seed_ship(rival, target, name="Quarry")
     _scan_east_from("U_WATCH", watcher_ship)
 
-    conn = get_connection()
-    row = conn.execute("""SELECT payload FROM events WHERE event_type='scan.contact'
-                          AND actor_id=?""", (watcher,)).fetchone()
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("""SELECT payload FROM events WHERE event_type='scan.contact'
+                              AND actor_id=?""", (watcher,)).fetchone()
     assert row is not None
     payload = json.loads(row["payload"])
     assert payload["target_x"] == 2 and payload["target_y"] == 0
@@ -569,9 +544,8 @@ def test_a_lowered_threshold_lets_some_organizations_go_unnoticed(monkeypatch):
     seed_ship(rival, target, name="Quarry")
     _scan_east_from("U_WATCH", watcher_ship)
 
-    conn = get_connection()
-    n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
     assert n == 0
 
 
@@ -593,9 +567,8 @@ def test_a_look_that_finds_nothing_clears_what_you_believed_was_there():
     conn.commit(); conn.close()
     end_of_turn()
 
-    conn = get_connection()
-    n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        n = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
     assert n == 0
 
 
@@ -616,10 +589,9 @@ def test_a_sighting_leaves_the_map_when_its_sector_blinks_out():
         return {(s["coord_x"], s["coord_y"]): s["cell"] for s in view["sectors"]}
 
     assert cells().get((2, 0)) == "r"
-    conn = get_connection()
-    conn.execute("""UPDATE player_sectors SET confidence=0
-                    WHERE player_id=? AND sector_id=?""", (watcher, target))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("""UPDATE player_sectors SET confidence=0
+                        WHERE player_id=? AND sector_id=?""", (watcher, target))
     assert (2, 0) not in cells()      # blinked out, intel included
 
 
@@ -635,12 +607,11 @@ def test_a_scan_never_misses_the_sector_itself_only_its_occupants(monkeypatch):
     seed_ship(rival, seed_sector(2, 0, 0), name="Unseen")
     _scan_east_from("U_WATCH", watcher_ship)
 
-    conn = get_connection()
-    row = conn.execute("""SELECT s.energy_capacity, ps.confidence
-        FROM sectors s JOIN player_sectors ps ON ps.sector_id = s.id
-        WHERE s.coord_x=2 AND s.coord_y=0 AND ps.player_id=?""", (watcher,)).fetchone()
-    sighted = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        row = conn.execute("""SELECT s.energy_capacity, ps.confidence
+            FROM sectors s JOIN player_sectors ps ON ps.sector_id = s.id
+            WHERE s.coord_x=2 AND s.coord_y=0 AND ps.player_id=?""", (watcher,)).fetchone()
+        sighted = conn.execute("SELECT COUNT(*) AS n FROM org_sightings").fetchone()["n"]
     assert row is not None                 # the sector came back
     assert row["energy_capacity"] > 0      # with its resources
     # Stamped 100 by the reveal, then decayed once by this same turn's
@@ -767,11 +738,10 @@ def test_an_org_in_transit_covers_nothing():
     pid = seed_player()
     _scanner_at(pid, (0, 0, 0), (1, 0, 0), name="Anchor")
     in_transit = seed_ship(pid, -1, name="Voyager")
-    conn = get_connection()
-    conn.execute("""UPDATE organizations
-        SET scan_offset_x=0, scan_offset_y=-1, scan_offset_z=0 WHERE id=?""",
-        (in_transit,))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("""UPDATE organizations
+            SET scan_offset_x=0, scan_offset_y=-1, scan_offset_z=0 WHERE id=?""",
+            (in_transit,))
 
     view = show_sector_neighborhood("U_P1", center_x=0, center_y=0, center_z=0)
     assert [a["org_name"] for a in view["scan_aims"]] == ["Anchor"]

@@ -10,7 +10,7 @@ validator accepts and the interpreter implements.
 import json
 import pytest
 
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from npc import decide
 from npc.library import load_strategies, strategy_names
 from npc.profiles import assign_npc_profile
@@ -302,20 +302,18 @@ def test_a_decision_cannot_see_a_sector_the_player_has_not_scanned():
     home = seed_sector(0, 0, 0, energy=50)
     rich = seed_sector(0, -2, 0, energy=999)
     ship = seed_ship(player_id, home, name="Scout")
-    conn = get_connection()
-    conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2,
-                    scan_offset_z=0 WHERE id=?""", (ship,))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2,
+                        scan_offset_z=0 WHERE id=?""", (ship,))
 
     # Aimed at the rich sector, but nothing has been revealed there yet.
     assert decide._scan_targets(player_id) == []
     assert decide._all_scans_resolved(player_id) is False
 
     # Once the scan resolves, the same sector becomes a candidate.
-    conn = get_connection()
-    conn.execute("INSERT INTO player_sectors (player_id, sector_id, confidence) VALUES (?,?,100)",
-                 (player_id, rich))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("INSERT INTO player_sectors (player_id, sector_id, confidence) VALUES (?,?,100)",
+                     (player_id, rich))
     assert decide._all_scans_resolved(player_id) is True
     assert decide._scan_targets(player_id) == [
         {"x": 0, "y": -2, "z": 0, "energy_capacity": 999}]
@@ -328,12 +326,11 @@ def test_a_blinked_out_sector_stops_being_a_candidate():
     home = seed_sector(0, 0, 0, energy=50)
     seen = seed_sector(2, 0, 0, energy=400)
     ship = seed_ship(player_id, home, name="Scout")
-    conn = get_connection()
-    conn.execute("""UPDATE organizations SET scan_offset_x=2, scan_offset_y=0,
-                    scan_offset_z=0 WHERE id=?""", (ship,))
-    conn.execute("INSERT INTO player_sectors (player_id, sector_id, confidence) VALUES (?,?,0)",
-                 (player_id, seen))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("""UPDATE organizations SET scan_offset_x=2, scan_offset_y=0,
+                        scan_offset_z=0 WHERE id=?""", (ship,))
+        conn.execute("INSERT INTO player_sectors (player_id, sector_id, confidence) VALUES (?,?,0)",
+                     (player_id, seen))
     assert decide._scan_targets(player_id) == []
 
 
@@ -344,14 +341,12 @@ def test_duplicate_findings_are_one_candidate():
     found = seed_sector(0, -2, 0, energy=700)
     for i in range(2):
         ship = seed_ship(player_id, home, name=f"Scout-{i}")
-        conn = get_connection()
-        conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2,
-                        scan_offset_z=0 WHERE id=?""", (ship,))
-        conn.commit(); conn.close()
-    conn = get_connection()
-    conn.execute("INSERT INTO player_sectors (player_id, sector_id, confidence) VALUES (?,?,100)",
-                 (player_id, found))
-    conn.commit(); conn.close()
+        with connection() as conn:
+            conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2,
+                            scan_offset_z=0 WHERE id=?""", (ship,))
+    with connection() as conn:
+        conn.execute("INSERT INTO player_sectors (player_id, sector_id, confidence) VALUES (?,?,100)",
+                     (player_id, found))
     assert len(decide._scan_targets(player_id)) == 1
 
 
@@ -363,10 +358,9 @@ def test_a_gate_that_has_not_opened_leaves_the_counter_where_it_is():
     player_id = seed_player("wait@test", "Waiter")
     home = seed_sector(0, 0, 0, energy=50)
     ship = seed_ship(player_id, home, name="Scout")
-    conn = get_connection()
-    conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2,
-                    scan_offset_z=0 WHERE id=?""", (ship,))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2,
+                        scan_offset_z=0 WHERE id=?""", (ship,))
 
     document = {"steps": [{"decide": {
         "await": "all_scans_resolved", "from": "scan_targets",
@@ -409,8 +403,7 @@ def test_run_npc_decisions_skips_a_profile_naming_a_missing_strategy():
     including the humans."""
     player_id = seed_player("gone@test", "Gone")
     assign_npc_profile(player_id, "turtle")
-    conn = get_connection()
-    conn.execute("UPDATE npc_profiles SET strategy_name='removed_last_week' WHERE player_id=?",
-                 (player_id,))
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("UPDATE npc_profiles SET strategy_name='removed_last_week' WHERE player_id=?",
+                     (player_id,))
     run_npc_decisions()   # must not raise

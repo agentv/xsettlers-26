@@ -1,10 +1,9 @@
-from db.connection import get_connection
+from db.connection import connection
 from xsettlers_mcp.game_select import list_scenarios, get_active_game, select_scenario
 
 def _clear_active_game():
-    conn = get_connection()
-    conn.execute("DELETE FROM games")
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("DELETE FROM games")
 
 def test_list_scenarios_finds_game0():
     scenarios = list_scenarios()
@@ -50,9 +49,8 @@ def test_select_scenario_bootstraps_a_solo_game_with_one_player():
     _clear_active_game()
     result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game_solo")
     assert result["ok"] is True
-    conn = get_connection()
-    players = conn.execute("SELECT display_name FROM players").fetchall()
-    conn.close()
+    with connection() as conn:
+        players = conn.execute("SELECT display_name FROM players").fetchall()
     assert [p["display_name"] for p in players] == ["Vincent"]
 
 def test_get_active_game_none_before_selection():
@@ -77,9 +75,8 @@ def test_select_scenario_bootstraps_and_activates():
     active = get_active_game()
     assert active["scenario_name"] == "game0"
     # Roster players now exist in the DB, seeded by bootstrap_game()
-    conn = get_connection()
-    count = conn.execute("SELECT COUNT(*) FROM players").fetchone()[0]
-    conn.close()
+    with connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM players").fetchone()[0]
     assert count == 2  # Vincent + Player Two, per game_config.yaml
 
 def test_select_scenario_idempotent_same_scenario():

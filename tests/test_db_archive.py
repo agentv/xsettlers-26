@@ -1,13 +1,12 @@
 import os
-from db.connection import get_connection
+from db.connection import connection, get_connection
 from db.archive import archive_active_database
 
 def test_archive_moves_the_file_and_leaves_a_working_schema_behind():
     db_path = os.environ["DB_PATH"]
-    conn = get_connection()
-    conn.execute("INSERT INTO players (email,display_name,player_token) "
-                 "VALUES ('a@test.com','A','tok-a')")
-    conn.commit(); conn.close()
+    with connection() as conn:
+        conn.execute("INSERT INTO players (email,display_name,player_token) "
+                     "VALUES ('a@test.com','A','tok-a')")
 
     archived = archive_active_database()
 
@@ -41,7 +40,6 @@ def test_archived_live_path_accepts_a_new_bootstrap_without_a_restart():
     # bootstrap_game() assumes init_schema() already ran -- exactly what
     # archive_active_database() just did against the fresh DB_PATH.
     bootstrap_game(scenario_file="config/game_solo.yaml", scenario_name="game_solo")
-    conn = get_connection()
-    n = conn.execute("SELECT COUNT(*) AS n FROM players").fetchone()["n"]
-    conn.close()
+    with connection() as conn:
+        n = conn.execute("SELECT COUNT(*) AS n FROM players").fetchone()["n"]
     assert n >= 1

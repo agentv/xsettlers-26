@@ -117,7 +117,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 
 **POC active tasks:** `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. All other entries above are recognized in the data model but are not instantiated in any current game instance.
 
-**Platform note:** The stack is **Python · SpatiaLite · MCP SDK**, served over streamable HTTP to any MCP-speaking client — identity and transport are both client-agnostic (see [Overview](#overview)), not Slack-specific. See [MCP Server Layer Design](mcp_server_layer_design.md).
+**Platform note:** The stack is **Python · SpatiaLite · MCP SDK**, served over streamable HTTP to any MCP-speaking client — identity and transport are both client-agnostic (see [Overview](#overview)), not Slack-specific.
 
 ---
 

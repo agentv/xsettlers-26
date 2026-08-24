@@ -1,7 +1,5 @@
 # XSettlers — UI & Rendering Design
 
-**Scope:** Defines how game state is translated into player-facing output. Contains visibility rules, view model schemas, scan action design, and rendering contracts for debug and player modes. No DB schema here — see [Data Model & Storage Design](data_model_and_storage_design.md). No tool implementations here — see the MCP Tools Scaffold source in `xsettlers_mcp/tools/`.
-
 ---
 
 # Visibility Rules
@@ -27,178 +25,11 @@ These are the four authoritative rules governing what a player can see. All view
 
 ## Scan resolution
 
-**Location:** aiming in `xsettlers_mcp/tools/organization_tools.py`, range and
-bearings in `xsettlers_mcp/tools/sector_tools.py`, resolution in `engine/turn.py`.
-
 **Scan range:** Fixed at 2 sectors (Euclidean distance ≤ 2), derived from `get_scan_range(org_id)`. At range 1 a Euclidean radius reaches only the 4 orthogonal neighbours (a diagonal is √2 ≈ 1.41 > 1), which reads as broken; range 2 reaches 12 sectors.
 
 **A scan reveals only its target sector.** No halo, no ring — range governs reach, not breadth. A radius-5 halo was considered and rejected as making scanning too cheap for the value it returns.
 
 > **Future hook — scan range from the pods aboard:** Scan range will eventually be derived from an org's pods rather than a constant, and `get_scan_range(org_id)` will query the pod table. Note this is about pods *on the scan task*, not a `sensor` pod type — pods have no type (see [Product Requirements](product_requirements.md)), so range would come from how many crews are aimed at the problem. Do NOT hard-code the number at the call site — always call `get_scan_range()`.
-
-**Flow:**
-
-1. Validate that `target_sector_id` is within `get_scan_range(org_id)` of the org's current sector. Return error if not.
-2. Write-ahead: log `sector.scanned` event BEFORE mutating state.
-3. Upsert `player_sectors` row: `(player_id, target_sector_id, confidence=100)`.
-4. Query for rival orgs in the scanned sector. For each found, write an `alert.rival_detected` event.
-5. Return the full sector view model for the scanned sector, plus an `alerts` list (may be empty).
-
-**Event types introduced:**
-
-* `sector.scanned` — player delta; payload: `{ org_id, sector_id, scan_range_used }`
-* `alert.rival_detected` — engine delta; payload: `{ scanning_org_id, rival_org_id, sector_id }`
-
-## `get_scan_range(org_id) -> int`
-
-**Location:** `xsettlers_mcp/tools/sector_tools.py`
-
-```python
-SCAN_RANGE = 2
-
-def get_scan_range(org_id: int) -> int:
-    """
-    Returns the scan range for an org.
-    POC: always returns SCAN_RANGE, ignoring the org.
-    Future: query pods for sensor type and sum range contributions.
-    """
-    return SCAN_RANGE
-```
-
----
-
-# View Modes
-
-Two modes. One view model builder per subject type. Renderers are separate and consume the view model dict.
-
-## Debug / Designer View
-
-* Unfiltered. Full DB fidelity.
-* Shows all orgs in a sector regardless of ownership or fog state.
-* Shows raw confidence scores, all resource levels, transit ETAs, pod internals.
-* Used during development and troubleshooting.
-* Natural renderer: CLI (`views/cli_renderer.py`).
-
-## Player View
-
-* Filtered by `player_id` and confidence.
-* Sectors with confidence = 0 are invisible.
-* Own orgs: full detail.
-* Rival orgs: presence indicated if in a currently visible sector; no internal detail.
-* Resource levels in unoccupied sectors reflect the last scan, not current state.
-* Natural renderer: an MCP tool response (`views/render.py` today; a richer `views/slack_renderer.py` remains design).
-
----
-
-# View Model Schemas
-
-Each `build_*_view()` function returns a plain dict. The renderer decides how to format it.
-
-## Ship View — `build_ship_view(org_id, player_id=None)`
-
-```python
-{
-  "org_id": int,
-  "name": str,
-  "org_type": "ship",
-  "status": "docked" | "in_transit",       # docked = sector_id != -1
-  "sector_id": int | None,                  # None if in transit
-  "sector_coords": [x, y, z] | None,        # None if in transit
-  "dest_sector_id": int | None,             # set if in_transit
-  "arrival_turn": int | None,               # set if in_transit
-  "mission": str,
-  "pods": [
-    {
-      "pod_id": int,
-      "task": str,
-      "storage_current": float,
-      "storage_capacity": float,
-      "energy_consumption": float,
-      "food_consumption": float
-    }
-  ],
-  # Debug-only fields (omitted in player view):
-  "_debug": {
-    "player_id": int,
-    "is_mobile": int,
-    "mission_params": str | None
-  }
-}
-```
-
-> **Implemented starting point, ahead of the view-model layer below:** the
-> `build_ship_view` architecture on this page is still design, not code — no
-> `build_*_view()` function exists. `views/` itself does now exist, but holds
-> only `render.py` (`render_status()` + `render_map()`), which renders tool
-> responses directly off their `display` hints rather than off a view model.
-> In the meantime, `show_organization`
-> (`xsettlers_mcp/tools/organization_tools.py`) already returns a locked,
-> ready-to-render cargo table via its `display` block: one row per task
-> (not per pod) with columns `Task, Count, Energy, Food, Goods, Capacity`,
-> Capacity shown as `current/total` (e.g. `"200/200"`), plus a header line
-> (`"<name> — at (x,y,z), <mission>"`). This is a deliberate MVP baseline,
-> not a final design — expect it to change once the card/renderer
-> architecture below is actually built.
-
-## Colony View — `build_colony_view(org_id, player_id=None)`
-
-```python
-{
-  "org_id": int,
-  "name": str,
-  "org_type": "colony",
-  "sector_id": int,
-  "sector_coords": [x, y, z],
-  "mission": str,
-  "pods": [
-    {
-      "pod_id": int,
-      "task": str,
-      "storage_current": float,
-      "storage_capacity": float,
-      "production_per_turn": float,           # from engine/production.py
-      "energy_consumption": float,
-      "food_consumption": float
-    }
-  ],
-  # Debug-only:
-  "_debug": {
-    "player_id": int,
-    "mission_params": str | None
-  }
-}
-```
-
-## Sector Focal Point View — `build_sector_view(sector_id, player_id=None)`
-
-```python
-{
-  "sector_id": int,
-  "coords": [x, y, z],
-  "confidence": int,                          # 0–100; None in debug mode (unfiltered)
-  "is_occupied_by_player": bool,               # True if player has an org here
-  "energy_capacity": float,                    # the only sector-sourced resource
-  "own_orgs": [                                 # orgs belonging to this player
-    { "org_id": int, "name": str, "org_type": str, "mission": str }
-  ],
-  "rival_orgs": [                               # only shown if confidence > 0 and rival present
-    { "org_id": int, "presence": True }         # player view: presence only, no detail
-    # debug view: full org dict
-  ],
-  "neighbors": [                                # sectors within scan range 1
-    { "sector_id": int, "coords": [x, y, z], "confidence": int | None }
-  ],
-  "alerts": [                                    # active unacknowledged alerts for this sector
-    { "event_type": str, "payload": dict, "turn": int }
-  ],
-  # Debug-only:
-  "_debug": {
-    "all_orgs": [ ... ]                          # unfiltered org list
-  }
-}
-```
-
----
 
 # Neighborhood Map — built
 
@@ -208,11 +39,6 @@ and `render_map()` (`views/render.py`) draws it.
 
 ## Why the server pre-renders the grid
 
-`xsettlers_mcp/server.py` returns `str(fn(**arguments))` — the raw dict goes
-over the wire and the *client* decides how to draw it. That is fine for tables:
-an LLM renders a list of row-dicts consistently enough. It is not fine for a
-map. Ask three clients to draw a grid from a sector list and you get three
-different grids, and on a phone the failure mode is a wall of coordinates.
 
 So the tool ships a finished grid inside `display`, alongside the structured
 cells — the same move `show_organization` makes with its locked cargo-table
@@ -274,39 +100,6 @@ with no renderer changes.
 
 ---
 
-# Rendering Contract
-
-The view model layer is **renderer-agnostic**. Each renderer receives a view model dict and formats it independently.
-
-## CLI Debug Renderer — `views/cli_renderer.py`
-
-```python
-def render_ship(view: dict) -> str: ...
-def render_colony(view: dict) -> str: ...
-def render_sector(view: dict) -> str: ...
-```
-
-* Plain text tables, monospace alignment.
-* Shows `_debug` fields.
-* No fog filtering — confidence shown as raw number.
-* Suitable for `python -m views.cli_renderer --sector 3` style invocation.
-
-## Slack Player Renderer — `views/slack_renderer.py`
-
-```python
-def render_ship(view: dict) -> str: ...
-def render_colony(view: dict) -> str: ...
-def render_sector(view: dict) -> str: ...
-```
-
-* Emoji-annotated, human-readable Slack message text.
-* Omits `_debug` fields entirely.
-* Fog-aware: if confidence < 100, appends a staleness indicator (e.g. `:fog: Last seen: turn N`).
-* Alerts rendered as `:rotating_light: ALERT` blocks at the top of the sector view.
-* Designed to be returned directly from MCP tool responses.
-
----
-
 # Org Card — UI Spec
 
 ## Card Design
@@ -361,13 +154,8 @@ covered by `tests/test_sector_tools.py` and `tests/test_render.py`), scan range
 enforcement and confidence stamping at end-of-turn resolution
 (`tests/test_sector_tools.py`), and fog blink-out (`tests/test_turn.py`).
 
-* `views/cli_renderer.py` — implement all three render functions (ship, colony, sector)
-* `views/slack_renderer.py` — implement all three render functions
 * `views/html_renderer.py` — implement `render_org_card(view: dict) -> str` returning hydrated card HTML; consume adaptive card spec above
-* **Rival detection is not built.** `engine/turn.py`'s scan resolution still reads `# TODO: emit pod.scanned event; detect rivals` — no `alert.rival_detected` event is ever emitted, and there is no sighting history in the schema. Because rival positions can therefore only be read live from `organizations`, the neighborhood map restricts rival reporting to sectors at confidence 100 (see Cell vocabulary above). Real sighting storage would let rivals surface on decayed cells honestly, stamped with the turn they were last seen.
-* `tests/test_renderers.py` — cover the card/view-model renderers once they exist: debug view shows `_debug` fields; player view omits them; resource bar fill math correct
 * **Future:** variable `get_scan_range(org_id)` derived from the pods on the scan task — wire up when that is designed. Not a `sensor` pod type; pods have no type.
 * **Future:** SVG map renderer — `views/svg_renderer.py`; same view model contract, different output format
 * **Future:** whole-known-map view. `player_sectors` already *is* the global known-sectors store and `get_sector_map()` already reads it, and `render_map()` is written against a viewport (center + radius + known cells) rather than against "neighborhood" specifically — so the same renderer draws it. What is genuinely unbuilt is the width problem: `game0` puts home sectors 25 apart, so a full known-map bounding box exceeds what a markdown table shows readably on a phone. Needs downsampling or paging first.
 * **Future:** Column config persistence — save/load named column layouts per player
-* **TDD rule**: no new function without a corresponding test entry

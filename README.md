@@ -18,7 +18,7 @@ The game is played turn by turn, at each player's own pace. The turn resolves on
 
 XSettlers is an **MCP server**. It has no interface of its own — you play by pointing an MCP-speaking client at it and talking to the game through that client. Slack is the intended home, but nothing in the server is Slack-specific: any MCP client, `curl`, or another agent authenticates and plays identically.
 
-It serves MCP's streamable HTTP transport (`POST /mcp`, `GET /health`) and is deployed on Fly.io. See [MCP Server Layer Design](docs/mcp_server_layer_design.md) for hosting and transport detail, and `CLAUDE.md` for running it locally.
+It serves MCP's streamable HTTP transport (`POST /mcp`, `GET /health`) and is deployed on Fly.io. See `CLAUDE.md` for running it locally.
 
 ## Documentation
 
@@ -27,9 +27,7 @@ It serves MCP's streamable HTTP transport (`POST /mcp`, `GET /health`) and is de
 - [Player Guide](docs/player_guide.md) — start here if you just want to learn how to play
 - [Product Requirements](docs/product_requirements.md) — the same rules, precisely stated
 - [Data Model & Storage Design](docs/data_model_and_storage_design.md)
-- [MCP Server Layer Design](docs/mcp_server_layer_design.md) — hosting, transport, deployment
 - [UI & Rendering Design](docs/ui_and_rendering_design.md)
-- [Game Instance: MVP](docs/game_instance_mvp.md)
 - [Known TODOs](docs/TODO.md) — open work, and the design direction behind it
 - [Dev History](docs/dev_history.md) — settled decisions, findings from play, recovery pointers
 

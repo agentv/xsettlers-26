@@ -1,12 +1,32 @@
 from db.connection import get_connection
 
+
+def _drop_spatialite_triggers(cur):
+    """
+    Remove the triggers SpatiaLite's AddGeometryColumn left on `sectors`.
+
+    Only a database created before SpatiaLite was dropped has them, which
+    means a deployed volume rather than a fresh file. Two of them call
+    GeometryConstraints(), a function that no longer exists, so they fail
+    every INSERT into sectors -- including the sentinel row this function
+    inserts, which makes the failure a crash on boot rather than a bug that
+    waits for a reveal. The sectors.location column and spatial_ref_sys and
+    friends are inert once these are gone; VACUUM reclaims their ~7 MB.
+    """
+    cur.execute("""SELECT name FROM sqlite_master
+                   WHERE type='trigger' AND tbl_name='sectors'""")
+    for (name,) in cur.fetchall():
+        cur.execute(f'DROP TRIGGER IF EXISTS "{name}"')
+
+
 def init_schema():
     """Create all tables. Safe to run on an existing DB."""
     conn = get_connection()
     cur = conn.cursor()
-    # No migration step: the CREATE TABLE statements below are the whole
-    # schema. See docs/dev_history.md if a database older than the current
-    # shape ever turns up.
+    _drop_spatialite_triggers(cur)
+    # Otherwise no migration step: the CREATE TABLE statements below are the
+    # whole schema. See docs/dev_history.md if a database older than the
+    # current shape ever turns up.
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS players (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,

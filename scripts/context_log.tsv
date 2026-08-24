@@ -1,0 +1,3 @@
+date	label	floor	directed	ondemand
+2026-08-23	baseline (b029e29, pre-cleanup)	8569	22514	50779
+2026-08-23	after doc deletion pass	8509	22454	44268

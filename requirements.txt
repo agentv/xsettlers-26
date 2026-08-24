@@ -8,6 +8,9 @@
 mcp>=1.0.0,<2.0.0
 starlette
 uvicorn
+# Kept deliberately. The geometry layer is meant to be isolated behind one
+# module so the backend can be swapped for a real spatial store when this
+# needs to scale; sectors.coord_x/y/z stay the source of truth meanwhile.
 spatialite
 python-dotenv
 pyyaml

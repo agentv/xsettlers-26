@@ -28,7 +28,8 @@ It serves MCP's streamable HTTP transport (`POST /mcp`, `GET /health`) and is de
 - [Product Requirements](docs/product_requirements.md) — the same rules, precisely stated
 - [Data Model & Storage Design](docs/data_model_and_storage_design.md)
 - [UI & Rendering Design](docs/ui_and_rendering_design.md)
-- [Known TODOs](docs/TODO.md) — open work, and the design direction behind it
+- [Known TODOs](docs/TODO.md) — open work only
+- [Design Direction](docs/design_direction.md) — decided or explored, not built
 - [Dev History](docs/dev_history.md) — settled decisions, findings from play, recovery pointers
 
 ## Status

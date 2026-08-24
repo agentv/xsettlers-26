@@ -220,3 +220,7 @@ commit `14b5fa2` rather than rewriting them from memory.
 **Scenario names swapped once.** "Diaspora" is `config/game0.yaml` (ships
 only, no home colony); "Outbreak" is `config/game1.yaml` (colony + fleet).
 Anything written before that swap has them the other way round.
+
+## Rival detection (built 2026-08-18)
+
+~~`engine/turn.py` — **rival detection is unbuilt**~~ Built 2026-08-18. A scan now reveals the organizations standing in its target sector as well as the sector's own resources, each org rolling its own d6 detection check (`db/sightings.py`, threshold 6 of 6 — certain for now, and the die is rolled anyway so lowering it later changes odds without shifting a seeded run's roll sequence). Sightings land in the new `org_sightings` table, one row per (observer, org), upserted on re-sighting, and a `scan.contact` event names what was detected. Intel is per sector and ages on the ordinary fog-of-war schedule: sightings are read only through `player_sectors`, so they inherit the sector's confidence and blink out with it at 0, and a scan is authoritative for its sector — what it finds replaces what you believed, so an emptied sector stops reporting a ghost. `show_sector_neighborhood` distinguishes "R" (a rival there now, shown only where you stand) from "r" (one a scan saw there). **Still unbuilt: the `pod.scanned`/`org.scanned` events**, and no NPC strategy scans toward an opponent, so nothing in the library produces contact on its own — see the Crowd note under NPC strategies.

@@ -12,7 +12,7 @@ XSettlers is a multiplayer space strategy game, playable from any MCP-speaking c
 
 **The local package is `xsettlers_mcp/`, never `mcp/`.** That name collides with the third-party `mcp` SDK package `server.py` itself imports. `docs/dev_history.md` has the failure mode and why no test catches it.
 
-Documentation lives in `docs/` and is the source of truth for design: `docs/TODO.md` for what is in flight, `docs/dev_history.md` for settled decisions, play-testing findings and recovery pointers.
+Documentation lives in `docs/` and is the source of truth for design. Three files carry the load, and they are deliberately separate: `docs/TODO.md` is open work only, `docs/design_direction.md` is decided-or-explored design that is not built, and `docs/dev_history.md` holds settled decisions, play-testing findings and recovery pointers. Read the one that matches what you are doing rather than all three.
 
 ## Commands
 

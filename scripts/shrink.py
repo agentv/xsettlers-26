@@ -49,7 +49,11 @@ def measure(read) -> dict:
 
 class Tree:
     def paths(self):
-        out = subprocess.run(["git", "ls-files"], capture_output=True, text=True).stdout
+        # --others picks up new files that are not committed yet. Without it a
+        # pass that moves content into a NEW file scores as pure deletion.
+        out = subprocess.run(["git", "ls-files", "--cached", "--others",
+                              "--exclude-standard"],
+                             capture_output=True, text=True).stdout
         return [Path(l) for l in out.splitlines() if l]
     def text(self, p):
         try:

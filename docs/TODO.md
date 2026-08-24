@@ -367,11 +367,17 @@ room, is new.
 
 ## TDD rule (standing policy — not a task, keep applying it)
 
-* **No new function without a corresponding test entry.** `test_navigation.py`
-  and `test_organization.py` are the templates.
-* A new computed field on an *existing* API response gets a new assertion
-  appended to that response's existing test, not a new test function — reserve
-  new test functions for new functions, new branches, or new error paths.
+* **New behavior needs a test.** `test_navigation.py` and
+  `test_organization.py` are the templates.
+* **Relocated behavior does not.** A function extracted from existing call
+  sites without changing behavior is a relocation, not a new function: no new
+  test, no new test file. Its proof is that the callers' existing tests still
+  pass unchanged. The old rule taxed exactly the consolidation work it should
+  have encouraged — every extraction paid for a module *and* a test file while
+  the call sites shed two or three lines each.
+* A new computed field on an *existing* API response, or a new branch or error
+  path introduced during an extraction, gets an assertion appended to the test
+  that owns the subject — not a new test function and not a new file.
 
 ## Gateway / Player Onboarding
 

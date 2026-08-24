@@ -1,3 +1,10 @@
+"""
+Assigning a strategy document to an NPC player.
+
+Filed under npc/ rather than db/ because validating at assign time needs
+strategy.validate_strategy -- under db/ that import would drag the whole NPC
+layer back beneath the tool layer and close the cycle the layering forbids.
+"""
 import json
 from db.connection import connection
 from npc.library import get_strategy, strategy_names

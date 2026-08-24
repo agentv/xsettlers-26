@@ -4,15 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-XSettlers is a multiplayer space strategy game, playable from any MCP-speaking client. This repo is the Python MCP server: a client calls MCP tools with a player's token attached, tools query/mutate a SpatiaLite database, and a background clock resolves turns on a fixed interval. There is no separate web/API layer — `xsettlers_mcp/server.py` *is* the server, serving MCP's **streamable HTTP** transport (Starlette + uvicorn, `POST /mcp`, `GET /health`) so a network-hosted deployment (Fly.io) can be reached remotely. There is no stdio path: stdio only works for a client that spawns the process locally.
+XSettlers is a multiplayer space strategy game, playable from any MCP-speaking client. This repo is the Python MCP server: a client calls MCP tools with a player's token attached, tools query/mutate a SpatiaLite database, and a background clock resolves turns on a fixed interval. **There is no separate web/API layer** — `xsettlers_mcp/server.py` *is* the server, on MCP's streamable HTTP transport (Starlette + uvicorn, `POST /mcp`, `GET /health`) so a network-hosted deployment can be reached remotely. There is no stdio path; stdio only works for a client that spawns the process locally.
 
-**Identity is client-agnostic.** Every tool's first argument is `player_token` — an opaque per-player secret compared with `hmac.compare_digest` in `xsettlers_mcp/auth.py`, not a platform credential. Slack, curl, another LLM agent, or anything else that knows a valid token authenticates identically.
+**Identity is client-agnostic.** Every tool's first argument is `player_token` — an opaque per-player secret compared with `hmac.compare_digest` in `xsettlers_mcp/auth.py`, not a platform credential. Slack, curl, another LLM agent, or anything else holding a valid token authenticates identically.
 
-**`/mcp` has no perimeter auth — it is open to the internet**; access control rests entirely on `player_token`. See the SECURITY POSTURE comment in `xsettlers_mcp/server.py` and `docs/TODO.md` for why, and what's thin about it.
+**`/mcp` has no perimeter auth — it is open to the internet**; access control rests entirely on `player_token`. See the SECURITY POSTURE comment in `xsettlers_mcp/server.py` for why, and what is thin about it.
 
-**The local package is `xsettlers_mcp/`, never `mcp/`.** That name collides with the third-party `mcp` SDK package `server.py` itself imports. See `docs/dev_history.md` for the failure mode and why no test catches it.
+**The local package is `xsettlers_mcp/`, never `mcp/`.** That name collides with the third-party `mcp` SDK package `server.py` itself imports. `docs/dev_history.md` has the failure mode and why no test catches it.
 
-Documentation lives in `docs/` and is the source of truth for design. Read `docs/TODO.md` first when picking up work; `docs/dev_history.md` holds settled decisions, findings from play-testing, and recovery pointers.
+Documentation lives in `docs/` and is the source of truth for design: `docs/TODO.md` for what is in flight, `docs/dev_history.md` for settled decisions, play-testing findings and recovery pointers.
 
 ## Commands
 
@@ -35,27 +35,24 @@ pytest tests/test_navigation.py::test_confirm_move_parks_at_sentinel -v
 # These act on a LIVE server; game-design tooling lives in ../xsettlers-designer.
 scripts/clock.py freeze|unfreeze|status   # hold the background tick without stopping the server
 scripts/status.py game|fleet              # fixed-format status report
+
+# Score a cleanup. Both must improve, or the commit is not the cleanup it claims.
+scripts/shrink.py [ref]             # files / code / prose / doc lines
+scripts/shrink.py --context [ref]   # tokens a fresh session pays before any work
 ```
 
 The local `xsettlers.db` is scratch — safe to `rm` and restart clean.
 
-**Game-design tooling is a separate repo (`../xsettlers-designer`), not part of this codebase.** Strategy tournaments, fast-forwarded matchup simulation and analysis reports live there. The dependency points one way: the designer repo installs this one editable (`pip install -e ../xsettlers26` — that is what `pyproject.toml` here exists for) and drives `engine.turn.end_of_turn()` in-process, because there is no wire call for "resolve a turn now" and there should not be one. Nothing here imports it. Two consequences worth knowing before changing anything in `engine/`, `db/` or `npc/`: it is a real consumer of those modules, and `pyproject.toml`'s package list has to keep matching this repo's top-level packages. The Fly build ignores `pyproject.toml` entirely — the Dockerfile runs `pip install -r requirements.txt` and `COPY . .`, never `pip install .`.
+Requires **Python 3.12** (per the Dockerfile) with `sqlite3.Connection.enable_load_extension` and `mod_spatialite` (`brew install spatialite-tools`). `db/connection.get_connection()` loads the extension on every connection. Deploy target is Fly.io (`fly.toml`, `Dockerfile`), persistent volume at `/data`.
 
-**Running against GameHouse locally**: GameHouse is a sibling repo (`../gamehouse`), started from its own root with `DB_PATH=gamehouse.db PORT=8090 .venv/bin/python3 -m gamehouse_mcp.server` — port 8090 deliberately, since it collides with xsettlers on the default 8080. Registration between the two needs `GAMEHOUSE_URL=http://localhost:8090/mcp` and `XSETTLERS_PUBLIC_URL=http://localhost:8080/mcp` set when starting xsettlers; without them it silently no-ops by design (see `register_with_gamehouse`'s docstring).
+Config is env-driven (`.env.example`, via `python-dotenv`): `DB_PATH`, `GAME_CONFIG_PATH`, `CONFIDENCE_DECAY_PER_TURN`, `GAME_TICK_SECONDS`, `TURN_LIMIT`. **These env vars shadow `config/game_config.yaml`, whose `game:` block is largely inert** — the shadowed fields are kept deliberately for a precedence rule tracked in `docs/TODO.md`, so don't "clean them up", and check that something reads a field before changing its value there.
 
-**Traffic with GameHouse goes three ways, all in `xsettlers_mcp/gamehouse.py`.** `register_with_gamehouse()` publishes the lobby shape at startup (xsettlers as MCP *client*); `start_session()` receives a closed lobby (xsettlers as MCP *server*); `run_results_reporter()` hands the final scoreboard back at game over (client again), gathered in `server.py`'s `main()` alongside the clock.
+**Two sibling repos, neither imported here, both able to break from a change here.**
 
-The hand-back's score object is an **envelope plus an opaque payload** — `placement` (1 = best) and `score` are the only two fields GameHouse reads or ever needs interpreted; don't rename `placement`. It fires from a **poll, not a hook at game-over**, since both game-ending paths live in `engine/`, which may not import `xsettlers_mcp/`. See `docs/dev_history.md` for the reasoning behind both.
+- `../xsettlers-designer` runs tournaments and matchup simulation. It installs this repo editable (that is what `pyproject.toml` is for) and drives `engine.turn.end_of_turn()` in-process — so it is a **real consumer of `engine/`, `db/` and `npc/`**, and `pyproject.toml`'s package list has to keep matching this repo's top-level packages. The Fly build ignores `pyproject.toml` entirely.
+- `../gamehouse` exchanges traffic three ways, all in `xsettlers_mcp/gamehouse.py`, which documents the wire contract and the results envelope. To run the pair locally: start GameHouse from its own root on port 8090 (`DB_PATH=gamehouse.db PORT=8090 .venv/bin/python3 -m gamehouse_mcp.server`), and start xsettlers with `GAMEHOUSE_URL=http://localhost:8090/mcp` and `XSETTLERS_PUBLIC_URL=http://localhost:8080/mcp` — without both, registration silently no-ops by design.
 
 **Two things to check rather than assume**: run `fly status --app xsettlers` before trusting anything about what is deployed — the deployed commit has lagged `main` by whole branches. And re-read `../gamehouse/docs/data_model.md` before touching `xsettlers_mcp/gamehouse.py`; that wire contract is a fast-moving sibling project, not a stable external dependency, and it has changed without warning mid-session.
-
-**Requires a real Python (3.12, per the Dockerfile) with `sqlite3.Connection.enable_load_extension` and `mod_spatialite` installed** (`brew install spatialite-tools` on macOS). Every DB call goes through `db/connection.get_connection()`, which loads the `mod_spatialite` extension — this fails on Python builds without extension-loading support.
-
-Config is env-driven (see `.env.example`, loaded via `python-dotenv`): `DB_PATH`, `GAME_CONFIG_PATH`, `CONFIDENCE_DECAY_PER_TURN`, `GAME_TICK_SECONDS`, `TURN_LIMIT`.
-
-**Env vars shadow `config/game_config.yaml`, and most of that file's `game:` block is inert.** Only `max_players` (`config/loader.py`, `db/bootstrap.py`) and `score_weights` (`engine/turn.py`, `organization_reports.py`, both via `engine/scoring.py`) are actually read. `tick_seconds`, `turn_limit`, and `confidence_decay_per_turn` are each parsed into `GameSettings` and then ignored in favour of an env var — they are kept deliberately, reserved for the precedence rule (YAML as default, env as override) tracked in `docs/TODO.md`, so don't "clean them up". The trap is changing a value in the YAML and expecting it to take effect — check whether anything consumes the field first.
-
-Deploy target is Fly.io (`fly.toml`, `Dockerfile`) — persistent volume mounted at `/data` holds the SpatiaLite `.db` file.
 
 ## Architecture
 
@@ -88,29 +85,19 @@ db/                  connection, schema, sectors, orgs, events
 
 **Nothing in `engine/`, `db/`, `views/` or `config/` may import from `xsettlers_mcp/` or `npc/`.** There is exactly one exception, and it is a function-level import: `engine/turn.py`'s step 0 calls `npc.strategies.run_npc_decisions`, deferred to call time because a module-level import would close the loop `engine → npc → tools → engine`. Don't add a second such import.
 
-`engine/bearings.py` is why the scan vocabulary (`SCAN_RANGE`, `SCAN_BEARINGS`, `resolve_bearing`, `bearing_name`, `get_scan_range`) lives below both consumers rather than in `sector_tools.py`: the engine resolves scans and the tool layer displays them, so the compass belongs under both. It is a leaf module and should stay one.
+`views/` is a leaf and must stay one. A report (`xsettlers_mcp/tools/organization_reports.py`) owns its queries and decides which fields go in the `display` block; it does not format its own strings — that is `views/format.py`, laid out by `views/render.py`.
 
-`npc/` holds `strategy.py` (the document interpreter), `decide.py` (the gate/source/rank registries), `library.py` (the document library), `strategies.py` (the turn entry point) and `profiles.py` (assignment). `profiles.py` is there rather than under `db/` because validating a document at assign time needs `strategy.validate_strategy` — filed under `db/` it would drag the whole NPC layer back underneath the tool layer. `decide.py` is the only module that knows how to query the board on a strategy's behalf, which is what makes the fog-of-war guarantee structural rather than a convention.
-
-`views/` is a leaf: `format.py` turns one value into the string a player reads (`"E:20, F:20"`, `"P1-01"`, `"03:47"`), `render.py` lays those strings out as a markdown table or grid. Neither imports from `engine/`, `xsettlers_mcp/` or `npc/`. A report in `xsettlers_mcp/tools/organization_reports.py` owns the queries and decides which fields go in the `display` block; it does not do its own string formatting.
-
-`engine/scanning.py` owns everything about aiming — what a legal aim is, and both `apply_*` functions that write one. "Scanning is scanning, whoever carries the equipment" is a rule this codebase states repeatedly; it is implemented once, here, and resolved once in `engine/turn.py`'s `_resolve_scan`. Don't reintroduce a pod-specific copy.
-
-There is **no `gateway.py`** — no central pre-flight wrapper decides who may call what. Instead every gameplay tool carries the `@player_tool` decorator (`xsettlers_mcp/tools/session.py`), which resolves `player_token` against `players`, rejects an unknown token with "Player not found" before the tool body runs, and hands the tool an authenticated `PlayerSession` (open cursor + player row) so it never manages a connection itself. Before a scenario is selected `players` is empty, so every tool naturally rejects — that's the actual gate. `xsettlers_mcp/game_select.select_scenario()` (backed by `xsettlers_mcp/auth.authenticate()`) is the one real gatekeeping call. See `tests/test_gateway.py` for the end-to-end proof.
+There is **no `gateway.py`**. Every gameplay tool carries the `@player_tool` decorator (`xsettlers_mcp/tools/session.py`), which authenticates `player_token` and hands the tool an open `PlayerSession` so it never manages a connection itself; a tool cannot forget the check, because the raw token never reaches its body. `players` is empty until a scenario is selected, so every tool naturally rejects before bootstrap — that, not a wrapper, is the gate. `xsettlers_mcp/game_select.select_scenario()` is the one real gatekeeping call; `tests/test_gateway.py` is the end-to-end proof.
 
 Two tools call `PlayerSession.release()` to commit and close early before delegating to code that opens its own connection (`set_mission`→`confirm_move`, `declare_end_turn`→`end_of_turn()`); `db/connection.py` sets no busy_timeout, so a second writer fails immediately rather than waiting.
 
 ### Scenario selection & bootstrap
 
-The MVP runs **one shared game per deployed instance** (the `games` table is a `CHECK (id = 1)` singleton). Flow:
+The MVP runs **one shared game per deployed instance** (the `games` table is a `CHECK (id = 1)` singleton). `list_scenarios()` finds scenarios by globbing `config/game*.yaml`, excluding `game_config.yaml`; `select_scenario()` authenticates twice on purpose — identity first, then participation — so an unrecognized token learns nothing about which scenarios exist, and then calls `db/bootstrap.bootstrap_game()`. There is no default scenario, and switching once a game is active is rejected. All of it is in `xsettlers_mcp/game_select.py`.
 
-1. `list_scenarios(player_token)` (`xsettlers_mcp/game_select.py`) discovers scenarios by globbing `config/game*.yaml` (excluding `game_config.yaml`, which holds engine settings + the player directory, not a scenario). Given a token it returns only the scenarios that player is a *participant* in; an unrecognized token gets an empty list, not the library.
-2. `select_scenario(player_token, scenario_name)` authenticates twice, deliberately: once with no scenario (who are you? — resolves the token against the directory) and again with the chosen scenario file (may you play *this* game? — requires being a participant). Identity is checked first so an unrecognized token learns nothing about which scenarios exist. Then `db/bootstrap.bootstrap_game()` on first selection. Switching scenarios once a game is active is rejected.
-3. `bootstrap_game()` seeds sectors, players, starting ships + pods (from the scenario's `pods_per_ship` templates), and stamps home sectors visible at confidence 100. It requires a `scenario_file` — there is no default scenario.
+`engine/clock.run_clock()` ticks from server startup whether or not a scenario has been picked; `end_of_turn()` no-ops on an empty `games` table, so no turns are silently burned pre-selection.
 
-`engine/clock.run_clock()` starts ticking immediately at server startup regardless of whether a scenario has been picked; `engine/turn.end_of_turn()` no-ops if the `games` table is empty so no turns are silently burned pre-selection.
-
-**Design decision for future multi-game support**: one SQLite DB file per game instance, not a shared DB with a `game_id` column threaded through every table. A future lobby would just route a player to the right DB file rather than requiring changes to `organizations`/`pods`/`events`/etc. or any query in `engine/*` or `xsettlers_mcp/tools/*`.
+**Design decision for future multi-game support**: one SQLite DB file per game instance, not a shared DB with a `game_id` column threaded through every table. A future lobby routes a player to the right DB file, requiring no change to any table or to any query in `engine/*` or `xsettlers_mcp/tools/*`.
 
 ### Data model
 
@@ -144,48 +131,38 @@ The clock (`engine/clock.py`) calls `end_of_turn()` on a fixed interval (`GAME_T
 
 ### NPC strategies — data first, code only when it must be
 
-**An NPC is just a player row with `is_npc=1` plus an `npc_profiles` row**; strategies act by calling the same tool functions a human calls through MCP, so every ownership check works unmodified. `run_npc_decisions()` is step 0 of `end_of_turn()`, and completes before the turn's own transaction opens.
+**An NPC is just a player row with `is_npc=1` plus an `npc_profiles` row**; strategies act by calling the same tool functions a human calls through MCP, so every ownership check works unmodified. `run_npc_decisions()` is step 0 of `end_of_turn()` and completes before the turn's own transaction opens.
 
-**Every strategy is a document in `config/npc_strategies/*.yaml`. There is no Python-function strategy and no registry of them.** Adding a strategy is adding a file. A document is a list of steps walked by `npc/strategy.py`, with a program counter and bindings kept per player in `npc_profiles.memory`:
+**Every strategy is a document in `config/npc_strategies/*.yaml`. There is no Python-function strategy and no registry of them** — adding a strategy is adding a file. `npc/strategy.py` walks the document; `npc/decide.py` holds the four registries (gates, sources, rank fields, picks) a document may name. Both explain their own semantics.
 
-- **`order`** gives some ships one of the four actions in `engine/actions.py`, dispatched either immediately (`when: now`, through the ordinary `@player_tool` wrappers) or onto the ship's log.
-- **`decide`** is the hook for information that only exists mid-game: it evaluates a named gate, ranks a candidate set, and binds the winner to a name later steps substitute with `$name`. **A gate that hasn't opened is not an error** — the counter stays put and the step is retried next turn. That is how waiting is expressed; there is no wait verb.
+Three rules that reach outside those modules:
 
-**Conditions live in the interpreter, never in the ship's log** — `org_command_queue` stays one-shot and unconditional. See `npc/strategy.py`'s module docstring for why.
+- **Resist adding expressions to the vocabulary.** It grows by adding names to `npc/decide.py`'s registries. Staying inert data is what makes a strategy safe to accept from someone else, and what keeps fog of war structural — every source requires `confidence > 0`, so no document can name a sector its owner hasn't seen.
+- **Conditions live in the interpreter, never in the ship's log** — `org_command_queue` stays one-shot and unconditional.
+- **`npc/library.strategy_names()` is a cross-repo contract**: `xsettlers_mcp/gamehouse.py` validates rosters against it and `../xsettlers-designer`'s tournament runner plays it.
 
-**The vocabulary is deliberately tiny, and grows by adding names to `npc/decide.py`'s registries** — one gate (`all_scans_resolved`), one source (`scan_targets`), one rank field (`energy_capacity`), two picks. Combat will want a threat field and an "if attacked" gate; neither changes the shape of a document. Resist adding expressions: a document must stay inert data, because that is what makes it safe to accept a strategy someone else wrote, and what keeps fog of war structural — every source requires `confidence > 0`, so no document can name a sector its owner hasn't seen.
-
-`npc/library.strategy_names()` is what `xsettlers_mcp/gamehouse.py` validates rosters against and what `../xsettlers-designer`'s tournament runner plays, so it is a cross-repo contract, not just an internal one.
-
-Documents are validated at **assign** time (`validate_strategy()`, called by `assign_npc_profile()`), not when they run — the same reasoning behind `queue_command`'s up-front param validation, one level up: a document is authored by a person, eventually in a builder and eventually by a player trading one, so an error must reach them synchronously rather than three turns later inside a clock tick. A `$name` nothing binds is caught here too.
-
-The ship's log (`org_command_queue`, `engine/ship_log.py`) is what carries a scheduled order; its action whitelist is `{move, set_pod_task, colonize, aim_scan}`, each dispatching into an engine-layer `apply_*` helper (`engine/movement.py`, `engine/pod_tasking.py`, `engine/missions.py`, `engine/scanning.py`) rather than the self-connecting tool wrappers, which would deadlock inside the turn transaction. A `move` takes either absolute `dest_x/y/z` or **relative `d_x/d_y/d_z`**, resolved against the org's position at fire time — that's what makes a document portable between home sectors, and it's why the negative-coordinate guard lives at fire time for that form. `colonize` is the one action that can be *refused* rather than only succeeding or raising (a ship that can't pay when the order fires), which is why `alert.queued_command_refused` is a separate event type from `alert.queued_command_failed` — don't merge them.
+The ship's log (`org_command_queue`, `engine/ship_log.py`) carries scheduled orders. Its action whitelist is `{move, set_pod_task, colonize, aim_scan}`, each dispatching into an engine-layer `apply_*` helper rather than the self-connecting tool wrapper — **the wrapper would deadlock inside the turn transaction.**
 
 ### Config
 
 **This service is a library of games, not one game** — that shapes the whole config split.
 
-`config/game_config.yaml` holds engine-wide settings (tick interval, confidence decay, max players, turn limit, score weights) and the **player directory** — who exists on this service, one entry per person, one `player_token` each. It says nothing about who plays what, and carries no pointer to a scenario; which scenario runs is a runtime choice made through `select_scenario()`.
+`config/game_config.yaml` holds engine-wide settings and the **player directory**: who exists on this service, one `player_token` each. It says nothing about who plays what, and carries no pointer to a scenario. `config/game<N>.yaml` *is* a scenario — pod templates, `starting_fill`, an optional secret `map` block, and its own **`participants`** list naming directory players by email with each one's `home_sector`. Both files document their own fields.
 
-`config/game<N>.yaml` is a scenario: `name`/`description` (shown when choosing), `ships_per_player`, `pods_per_ship` templates, `home_colony`, `starting_fill` (what fraction of capacity every pod holds at bootstrap, 0.0–1.0, overridable per pod template — how rich a game begins is a scenario decision, not an engine constant; it defaults to 1.0 only for compatibility, and starting at capacity distorts the early economy, since a full fleet cannot accumulate and its production is pure waste), an optional **`map`** block (`hotspots:` placed by hand and/or a seeded `scatter:` rule — see the data model above; a scenario's map is secret by construction, so don't add a tool that reads it), and its own **`participants`** list — each entry naming a directory player by email plus that player's `home_sector` (and optional `is_npc`).
-
-`home_sector_energy` is 2200; **pod throughput, not the sector, is what actually limits a player** — see the `HOME_SECTOR_ENERGY` comment in `config/loader.py` for the arithmetic and `docs/TODO.md` for the design direction. **The length of the participants list is the scenario's player count**, so a solo game (`config/game_solo.yaml`) and a five-player game differ only in YAML; no code branches on player count. `max_players` is an engine ceiling, never a floor.
-
-`config/loader.py`'s `resolve_seats()` pairs each participant with their directory entry into a `Seat` (identity *and* starting position on one object), which is what `bootstrap_game()` iterates. Nothing downstream pairs two lists by index. A participant not in the directory raises at load time rather than silently seating fewer players.
-
-Adding a playable scenario is just adding a `config/game<N>.yaml` — no code change, no touching `game_config.yaml` unless the scenario needs a player the directory doesn't have yet.
-
-**Committed file, real credentials tension**: each directory entry's `player_token` is that player's actual auth credential (see above), but `game_config.yaml` is tracked in git and baked into the Docker image at build time. The committed values are intentionally obvious placeholders (`REPLACE_WITH_GENERATED_TOKEN_*`), not real secrets — this is unresolved for a real multi-player deployment (no mechanism exists to keep real tokens out of git while still letting `xsettlers_mcp/auth.py` read them at runtime). Don't commit real generated tokens into this file.
+- **The length of the participants list is the scenario's player count.** A solo game and a five-player game differ only in YAML; no code branches on player count. `max_players` is an engine ceiling, never a floor.
+- **Adding a playable scenario is adding a `config/game<N>.yaml`** — no code change, and no touching `game_config.yaml` unless the scenario needs a player the directory lacks.
+- `config/loader.py`'s `resolve_seats()` pairs each participant with their directory entry into one `Seat`. Nothing downstream pairs two lists by index.
+- **Don't commit real player tokens.** A directory entry's `player_token` is that player's actual auth credential, but this file is tracked in git and baked into the Docker image at build time. The committed values are deliberate placeholders (`REPLACE_WITH_GENERATED_TOKEN_*`); keeping real ones out of git while `xsettlers_mcp/auth.py` still reads them at runtime is unresolved.
 
 ### Testing conventions
 
-`tests/conftest.py` provides an autouse `fresh_db` fixture (fresh SpatiaLite file per test via `monkeypatch.setenv("DB_PATH", ...)`) plus seed helpers (`seed_player`, `seed_sector`, `seed_ship`, `seed_pod`, `seed_player_sector`). It also auto-seeds an active `games` row so most tests don't need to think about scenario selection — tests that specifically exercise the pre-selection state (`test_game_select.py`) must `DELETE FROM games` to opt back out.
+`tests/conftest.py` provides an autouse `fresh_db` fixture (a fresh DB file per test via `monkeypatch.setenv("DB_PATH", ...)`) plus seed helpers. It auto-seeds an active `games` row, so a test exercising the pre-selection state (`test_game_select.py`) must `DELETE FROM games` to opt back out.
 
-Per `docs/TODO.md`'s TDD rule: **no new function without a corresponding test entry** — `test_navigation.py` and `test_organization.py` are the templates to follow.
+**New behavior needs a test; relocated behavior does not.** A function extracted from existing call sites without changing behavior is a relocation — no new test, no new test file, and its proof is that the callers' existing tests still pass unchanged. Only a new branch or error path introduced during the extraction earns an assertion, appended to the file that owns the subject.
 
-**A test file follows a subject, not a module.** `test_scanning.py` covers aiming, legality and end-of-turn resolution together, because an org's sensors and a scan pod are supposed to behave identically and only a shared file proves it. `test_economy.py` covers the production pass and pooled-resource rules together, because production is prorated by what the pool can pay for. Put a new test where its subject lives; don't add it to whichever file happens to import the function.
+**A test file follows a subject, not a module.** `test_scanning.py` covers aiming, legality and end-of-turn resolution together, because an org's sensors and a scan pod are supposed to behave identically and only a shared file proves it. Put a new test where its subject lives, not in whichever file happens to import the function.
 
-`test_registry.py` is small but collects 88 of the suite's 526 tests — three parametrized sweeps over all 29 tools. That is one property asserted per tool, not redundancy, and it is what catches schema/signature drift. Leave it alone.
+`test_registry.py` is small but collects 88 of the suite's 526 tests — three parametrized sweeps over all 29 tools. That is one property per tool, not redundancy, and it is what catches schema/signature drift. Leave it alone.
 
 ## Writing comments and docs
 

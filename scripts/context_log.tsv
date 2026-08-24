@@ -2,3 +2,4 @@ date	label	floor	directed	ondemand
 2026-08-23	baseline (b029e29, pre-cleanup)	8569	22514	50779
 2026-08-23	after doc deletion pass	8509	22454	44268
 2026-08-23	CLAUDE.md data-model pilot	7339	21284	43098
+2026-08-23	CLAUDE.md full pass	5402	19459	41273

@@ -23,6 +23,7 @@ import xsettlers_mcp.tools.task_force_tools     # noqa: F401
 from xsettlers_mcp.gamehouse import register_with_gamehouse, run_results_reporter
 from xsettlers_mcp.tools.registry import TOOLS
 from db.schema import init_schema
+from views.svg_renderer import render_org_card_svg
 from engine.clock import run_clock
 from views.render import render_status
 
@@ -44,7 +45,10 @@ SERVER_INSTRUCTIONS = (
     "from the pre-rendered block if the player has explicitly asked for a "
     "different presentation than what was returned. If you want JSON with no "
     "markdown block at all (e.g. because you're only using the data internally and "
-    "showing nothing to the player), call the tool with response_format='data_only'."
+    "showing nothing to the player), call the tool with response_format='data_only'. "
+    "Some tools can also draw themselves: response_format='html_svg' returns the "
+    "JSON plus a complete SVG document rendered server-side, for a client that "
+    "can show a picture. Tools without a renderer fall back to markdown_view."
 )
 
 app = Server("xsettlers", instructions=SERVER_INSTRUCTIONS)
@@ -72,19 +76,45 @@ async def call_tool(name: str, arguments: dict):
     # Three values:
     #   markdown_view (default) -- JSON + markdown table, for a client showing both.
     #   data_only               -- JSON alone, for a client that renders its own view.
-    #   html_svg                -- reserved for a future rendered-graphics response;
-    #                              not built yet, so it's treated as markdown_view
-    #                              (JSON + markdown table) until it exists, same as
-    #                              any other value that isn't data_only.
+    #   html_svg                -- JSON + an SVG document, for the tools in
+    #                              SVG_RENDERERS. The server draws it; the client
+    #                              receives an inert asset and never executes
+    #                              anything. Asking for it on a tool with no
+    #                              renderer falls back to markdown_view -- the
+    #                              format is a request, not a promise.
     arguments = dict(arguments)
     response_format = arguments.pop("response_format", "markdown_view")
     result = fn(**arguments)
 
     if response_format == "data_only":
         return [types.TextContent(type="text", text=_as_json(result))]
+    renderer = SVG_RENDERERS.get(name) if response_format == "html_svg" else None
+    if renderer:
+        return [types.TextContent(type="text", text=_as_json(result)),
+                types.TextContent(type="text", text=renderer(result)),
+                types.TextContent(type="text", text=SVG_DIRECTIVE)]
     return [types.TextContent(type="text", text=_as_json(result)),
             types.TextContent(type="text", text=_as_markdown(result)),
             types.TextContent(type="text", text=RENDER_DIRECTIVE)]
+
+
+# Which tools can draw themselves. A tool earns an entry by having a renderer
+# that takes its result dict and returns a complete SVG document; everything
+# else falls back to the markdown table, so adding graphics to a tool is adding
+# a line here and nothing else.
+SVG_RENDERERS = {"show_organization": render_org_card_svg}
+
+
+# The SVG counterpart to RENDER_DIRECTIVE. An LLM client handed markup will
+# describe it unless told otherwise, and a description of a card is worth less
+# than the card.
+SVG_DIRECTIVE = (
+    "[The block above is a complete standalone SVG document. Present it to the "
+    "player as an image -- write it to a .svg file, embed it, or hand it to "
+    "whatever display surface you have. Do not read the markup aloud, describe "
+    "its contents, or transcribe it back as a table; the player asked for a "
+    "picture. The JSON block is for your own reasoning, as always.]"
+)
 
 
 # Reinforces SERVER_INSTRUCTIONS (sent once at initialize) on every single

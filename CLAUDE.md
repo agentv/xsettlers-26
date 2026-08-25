@@ -87,6 +87,8 @@ db/                  connection, schema, sectors, orgs, events
 
 `views/` is a leaf and must stay one. A report (`xsettlers_mcp/tools/organization_reports.py`) owns its queries and decides which fields go in the `display` block; it does not format its own strings — that is `views/format.py`, laid out by `views/render.py`.
 
+Graphics follow the same rule and add a second seam. `views/svg_renderer.py` splits into `layout_org_card(data) -> (marks, dims)`, which computes geometry as plain dicts with no markup in them, and `emit_svg(marks, dims) -> str`, which draws marks and knows nothing about cards. Keep that split: a rasterizer or an HTML card reuses one half without the other, and text escaping stays in one place. `response_format='html_svg'` on `call_tool()` returns the JSON plus a server-rendered SVG for any tool listed in `server.py`'s `SVG_RENDERERS`, and falls back to the markdown table for the rest — **the server draws; no client ever executes JavaScript**, which is what keeps the graphics client-agnostic.
+
 There is **no `gateway.py`**. Every gameplay tool carries the `@player_tool` decorator (`xsettlers_mcp/tools/session.py`), which authenticates `player_token` and hands the tool an open `PlayerSession` so it never manages a connection itself; a tool cannot forget the check, because the raw token never reaches its body. `players` is empty until a scenario is selected, so every tool naturally rejects before bootstrap — that, not a wrapper, is the gate. `xsettlers_mcp/game_select.select_scenario()` is the one real gatekeeping call; `tests/test_gateway.py` is the end-to-end proof.
 
 Two tools call `PlayerSession.release()` to commit and close early before delegating to code that opens its own connection (`set_mission`→`confirm_move`, `declare_end_turn`→`end_of_turn()`); `db/connection.py` sets no busy_timeout, so a second writer fails immediately rather than waiting.
@@ -120,7 +122,7 @@ The rules below bite from anywhere. Each carries its full reasoning at the point
 
 1. Reset `end_turn_declared` on all players
 2. Resolve arrivals from `arrival_queue` (ships land, mission resets to idle, destination sector stamped visible)
-3. Pod consumption (currently logged only, not yet deducted — no org-level resource pool exists yet) then production, then scan resolution (stationary orgs only — in-transit ships suppress scanning)
+3. Org upkeep, then per-pod consumption and production, then scan resolution (stationary orgs only — in-transit ships suppress scanning). Costs are drawn from the org's pooled stock across all its pods (`engine/org_resources.py`) and output is prorated to the fraction of input actually available, not gated all-or-nothing
 4. Colonization resolution — matured `colonize_complete` events flip `org_type` ship→colony; idempotent via the `org_type='ship'` filter (once flipped, it stops matching)
 5. Mission dispatch for `defend`/`attack` (currently stubs — `_handle_defend`/`_handle_attack` are no-ops)
 6. Fog-of-war decay for unoccupied sectors
@@ -162,7 +164,7 @@ The ship's log (`org_command_queue`, `engine/ship_log.py`) carries scheduled ord
 
 **A test file follows a subject, not a module.** `test_scanning.py` covers aiming, legality and end-of-turn resolution together, because an org's sensors and a scan pod are supposed to behave identically and only a shared file proves it. Put a new test where its subject lives, not in whichever file happens to import the function.
 
-`test_registry.py` is small but collects 88 of the suite's 526 tests — three parametrized sweeps over all 29 tools. That is one property per tool, not redundancy, and it is what catches schema/signature drift. Leave it alone.
+`test_registry.py` is small but collects 88 of the suite's 544 tests — three parametrized sweeps over all 29 tools. That is one property per tool, not redundancy, and it is what catches schema/signature drift. Leave it alone.
 
 ## Writing comments and docs
 

@@ -113,9 +113,8 @@ def test_call_tool_response_format_never_reaches_the_tool_function():
     assert len(content) == 1
 
 def test_call_tool_html_svg_falls_back_to_default_json_and_markdown():
-    # html_svg is reserved for a future rendered-graphics response and isn't
-    # built yet -- until it exists it's treated the same as markdown_view
-    # (JSON + markdown table), not given special handling.
+    # A tool with no entry in SVG_RENDERERS has nothing to draw, so html_svg
+    # gives back markdown_view (JSON + markdown table) rather than an error.
     import asyncio, json
     from xsettlers_mcp.server import call_tool
     content = asyncio.run(call_tool("get_player_state",
@@ -123,3 +122,34 @@ def test_call_tool_html_svg_falls_back_to_default_json_and_markdown():
     assert len(content) == 3
     assert json.loads(content[0].text)["player"]["email"] == "p1@test.com"
     assert content[1].text == "(no rows)"
+
+
+def test_call_tool_html_svg_draws_a_card_for_a_tool_that_can():
+    """show_organization has a renderer, so html_svg returns the JSON plus a
+    standalone SVG document instead of the markdown table."""
+    import asyncio, json, xml.etree.ElementTree as ET
+    from xsettlers_mcp.server import call_tool, SVG_DIRECTIVE
+    from tests.conftest import seed_sector, seed_ship, seed_pod
+    sid = seed_sector(); oid = seed_ship(1, sid); seed_pod(oid, task="produce_energy")
+
+    content = asyncio.run(call_tool("show_organization",
+                                    {"player_token": "U_TEST_001", "org_id": oid,
+                                     "response_format": "html_svg"}))
+    assert len(content) == 3
+    assert json.loads(content[0].text)["id"] == oid
+    assert ET.fromstring(content[1].text).tag.endswith("svg")
+    assert content[2].text == SVG_DIRECTIVE
+
+
+def test_call_tool_html_svg_still_carries_the_json_for_state_tracking():
+    """The picture replaces the markdown table, not the data -- a client still
+    needs org_id and friends to reason with."""
+    import asyncio, json
+    from xsettlers_mcp.server import call_tool
+    from tests.conftest import seed_sector, seed_ship, seed_pod
+    sid = seed_sector(); oid = seed_ship(1, sid); seed_pod(oid)
+
+    content = asyncio.run(call_tool("show_organization",
+                                    {"player_token": "U_TEST_001", "org_id": oid,
+                                     "response_format": "html_svg"}))
+    assert json.loads(content[0].text)["tasks"][0]["count"] == 1

@@ -106,17 +106,22 @@ with no renderer changes.
 
 Each organization (ship or colony) is represented as a **card** — a self-contained rectangular unit sized proportionally to a playing card.
 
-> **Adaptive sizing rule:** Cards are NOT fixed at a pixel dimension. Use `aspect-ratio: 5/7` with `min-width: 180px` and `max-width: 280px`. All internal spacing, font sizes, and bar heights use relative units (`rem`, `%`) so the card scales correctly across display sizes. The playing-card feel comes from the aspect ratio, not pixel counts.
+**Built** — `views/svg_renderer.py`, drawn from the dict `show_organization()` already returns. The card is 260px wide with a content-derived height; the `aspect-ratio: 5/7` playing-card proportion sketched earlier is not what shipped.
 
 **Card anatomy (top to bottom):**
 
-1. **Header** — org name, type icon (ship vs colony), status indicator dot (green = idle/docked, amber = in transit)
-2. **Location line** — sector coords `(x, y)` or `In Transit → (x, y)` with arrival turn
+1. **Header** — org name, type icon (chevron = ship, roofed block = colony), status dot (green = docked, amber = in transit)
+2. **Location line** — sector coords `(x, y, z)` or `in transit`
 3. **Mission line** — current mission string
-4. **Resource bars** — one bar per production task, colloquially `energy`, `factory`, `farm`. Each bar shows:
-    1. A fill bar representing `aggregate_storage_current / aggregate_storage_capacity` for the pods on that task
-    2. The numeric readout overlaid on the bar: e.g. `82 / 100`
-5. **Footer** — player owner identifier (debug view only)
+4. **Tasking bars** — one per task in `_TASK_ORDER`: idle, energy, food, goods, scan. Each shows pods on that task out of the org's *total* pod count, e.g. `2/6 pods`.
+5. **Storage line** — one composite bar: energy, food and goods as coloured segments of total capacity, the empty tail showing headroom, a right-aligned `used/capacity` readout, and a legend carrying the three figures plus `free N`
+6. **Scanner line** — bearings of any scanning pods, or `unaimed`
+
+Three decisions worth not re-opening:
+
+- **Every tasking bar draws whether or not a pod is on it.** Absent task groups read `0/N` rather than vanishing, so the card is a fixed shape a captain can compare against itself turn to turn, and only fills move. Task groups come from a `GROUP BY`, so the alternative made the card grow and shrink as pods retask.
+- **Idle leads, and turns `#ef4444` the moment a pod is on it.** The row is always present; the alarm colour is what appears, not the row.
+- **Storage is one bar, not one per resource.** An org already spends its pods as a single purse — `engine/org_resources.py` sums, drains and fills across all of them, so per-pod distribution cannot change an outcome. Three bars against a shared denominator could never read full (each resource is a fraction of the *whole* hold) and never showed headroom at all.
 
 ## Column Layout
 
@@ -156,6 +161,6 @@ enforcement and confidence stamping at end-of-turn resolution
 
 * `views/html_renderer.py` — implement `render_org_card(view: dict) -> str` returning hydrated card HTML; consume adaptive card spec above
 * **Future:** variable `get_scan_range(org_id)` derived from the pods on the scan task — wire up when that is designed. Not a `sensor` pod type; pods have no type.
-* **Future:** SVG map renderer — `views/svg_renderer.py`; same view model contract, different output format
+* **Future:** SVG *map* renderer. `views/svg_renderer.py` exists but draws org cards only; a map would reuse its `emit_svg` and add a layout
 * **Future:** whole-known-map view. `player_sectors` already *is* the global known-sectors store and `get_sector_map()` already reads it, and `render_map()` is written against a viewport (center + radius + known cells) rather than against "neighborhood" specifically — so the same renderer draws it. What is genuinely unbuilt is the width problem: `game0` puts home sectors 25 apart, so a full known-map bounding box exceeds what a markdown table shows readably on a phone. Needs downsampling or paging first.
 * **Future:** Column config persistence — save/load named column layouts per player

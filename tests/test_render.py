@@ -1,10 +1,13 @@
 import re
+import pytest
 
 from views.render import render_status, render_map
+from views.svg_renderer import (CARD_WIDTH, emit_svg,
+                                layout_org_card)
 from xsettlers_mcp.tools.organization_reports import (
     show_civilization_status, show_game_status, show_organization
 )
-from xsettlers_mcp.tools.organization_tools import set_org_scan_bearing
+from xsettlers_mcp.tools.organization_tools import set_org_scan_bearing, set_pod_task
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.sector_tools import (show_sector_neighborhood,
                                              show_neighborhood_resources,
@@ -316,3 +319,166 @@ def test_resource_grid_cells_are_all_one_width_so_the_decimals_line_up():
     body = [l for l in lines if l.startswith("| **")]
     assert len({len(l) for l in body}) == 1
     assert "2.20@" in body[4] and " 0.90" in body[4]
+
+
+# --- the org card: layout computes marks, emit_svg draws them ------------
+
+def _texts(marks):
+    return [m["s"] for m in marks if m["kind"] == "text"]
+
+
+def _card(oid):
+    return layout_org_card(show_organization("U_P1", oid))
+
+
+def test_card_layout_reads_tasking_and_storage_off_the_real_tool():
+    """Tasking counts pods against every pod; the storage line counts what is
+    held against every pod's capacity."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_capacity=100.0, storage_current=60.0)
+    seed_pod(oid, task="idle", storage_capacity=100.0)
+    marks, dims = _card(oid)
+
+    assert dims["width"] == CARD_WIDTH
+    assert "1/2 pods" in _texts(marks)        # one of two pods on energy
+    assert "0/2 pods" in _texts(marks)        # food, goods and scan, nobody on them
+    assert "60/200" in _texts(marks)          # held against total capacity
+    assert "free 140" in _texts(marks)
+
+
+def test_card_storage_counts_every_pod_not_just_the_matching_task():
+    """Storage is generic per pod and independent of task, so a pod holding
+    energy while tasked elsewhere still counts toward the energy segment."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_goods", storage_capacity=100.0)
+    seed_pod(oid, task="idle", storage_capacity=100.0, storage_current=40.0)
+    assert "40/200" in _texts(_card(oid)[0])
+
+
+def test_the_storage_line_segments_the_hold_by_resource():
+    """One bar, one segment per resource that has any, painted in category
+    order over a track whose empty tail is the headroom."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_capacity=100.0, storage_current=30.0)
+    seed_pod(oid, task="produce_food", storage_capacity=100.0, storage_current=50.0)
+    marks, _ = _card(oid)
+    drawn = [m for m in marks if m.get("fill") in
+             ("#3b82f6", "#4ade80", "#c2743a") and m["kind"] == "rect" and m["w"] > 0]
+
+    # Two tasking bars filled, plus two storage segments; goods has neither.
+    assert len(drawn) == 4
+    assert "80/200" in _texts(marks) and "free 120" in _texts(marks)
+    assert _texts(marks).count("0") == 1              # goods, in the legend
+
+
+def test_every_task_draws_whether_or_not_a_pod_is_on_it():
+    """Five bars, always, so the card keeps one shape a captain can compare
+    against itself turn to turn."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy")
+    labels = _texts(_card(oid)[0])
+
+    for label in ("Idle", "Energy", "Food", "Goods", "Scan"):
+        assert label in labels
+
+
+def test_retasking_a_pod_leaves_the_card_the_same_size():
+    """Every task has a row whether or not it is occupied, so moving a pod
+    between tasks moves a fill, never a row."""
+    pid = seed_player(); sid = seed_sector()
+    a = seed_ship(pid, sid); b = seed_ship(pid, sid, name="Other")
+    seed_pod(a, task="produce_energy"); seed_pod(a, task="produce_energy")
+    seed_pod(b, task="produce_energy"); seed_pod(b, task="idle")
+
+    assert _card(a)[1]["height"] == _card(b)[1]["height"]
+
+
+_ALARM = "#ef4444"
+
+
+def _index_of(marks, key, value):
+    """Where a mark first appears in the list -- how the ordering assertions
+    below read row order without going through the SVG."""
+    return next(i for i, m in enumerate(marks) if m.get(key) == value)
+
+
+def test_the_idle_row_leads_the_card_body():
+    """Idle pods are the row a captain has to act on, so the body opens with
+    them, ahead of the first producing task."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_capacity=100.0)
+    seed_pod(oid, task="idle", storage_capacity=100.0)
+    marks, _ = _card(oid)
+
+    assert _index_of(marks, "s", "Idle") < _index_of(marks, "s", "Energy")
+    assert _index_of(marks, "fill", _ALARM) < _index_of(marks, "s", "Energy")
+
+
+def test_the_idle_bar_is_an_alarm_color_and_scan_trails_the_producers():
+    """One alarm-colored bar, and the task order holds: idle first, scan last."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    pod = seed_pod(oid, task="produce_goods")
+    seed_pod(oid, task="idle")
+    set_pod_task("U_P1", pod, "scan", bearing="N")
+    marks, _ = _card(oid)
+    alarm = [m for m in marks if m.get("fill") == _ALARM]
+
+    assert len(alarm) == 1 and alarm[0]["kind"] == "rect"
+    assert _index_of(marks, "s", "Goods") < _index_of(marks, "s", "Scan")
+
+
+def test_an_idle_row_with_nobody_on_it_is_drawn_but_not_alarming():
+    """The row is always there -- the alarm colour is what appears, not the
+    row, so a captain reads the same card every turn."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_food", storage_capacity=100.0)
+    marks, _ = _card(oid)
+
+    assert "Idle" in _texts(marks)
+    assert not any(m.get("fill") == _ALARM for m in marks)
+    assert (_index_of(marks, "s", "Energy") < _index_of(marks, "s", "Food")
+            < _index_of(marks, "s", "Goods"))
+
+
+def test_card_marks_carry_no_markup():
+    """The whole point of the seam: layout emits geometry, never angle
+    brackets. Anything else could not feed a rasterizer or an HTML card."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_food", storage_capacity=100.0)
+    marks, _ = _card(oid)
+
+    assert marks and all(isinstance(m, dict) and "kind" in m for m in marks)
+    assert not any("<" in v for m in marks for v in m.values() if isinstance(v, str))
+
+
+def test_emit_svg_draws_a_parseable_document():
+    import xml.etree.ElementTree as ET
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_energy", storage_capacity=100.0)
+    marks, dims = _card(oid)
+    root = ET.fromstring(emit_svg(marks, dims))
+
+    assert root.tag.endswith("svg")
+    assert root.get("viewBox") == f"0 0 {CARD_WIDTH} {dims['height']}"
+    assert len(list(root.iter())) == len(marks) + 1     # every mark drawn once
+
+
+def test_emit_svg_escapes_text_so_a_ship_name_cannot_break_the_document():
+    import xml.etree.ElementTree as ET
+    marks = [{"kind": "text", "x": 0, "y": 0, "s": "<Bad & Ship>", "size": 12,
+              "fill": "#fff"}]
+    svg = emit_svg(marks, {"width": 10, "height": 10})
+    assert ET.fromstring(svg)[0].text == "<Bad & Ship>"
+
+
+def test_emit_svg_refuses_a_mark_it_cannot_draw():
+    """A typo in a layout should fail loudly, not silently drop a shape."""
+    with pytest.raises(ValueError):
+        emit_svg([{"kind": "hexagon"}], {"width": 10, "height": 10})
+
+
+def test_an_unowned_org_lays_out_as_an_error_card():
+    seed_player()
+    marks, dims = layout_org_card(show_organization("U_P1", 999))
+    assert dims["height"] == 100
+    assert len(_texts(marks)) == 1

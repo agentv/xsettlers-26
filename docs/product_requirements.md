@@ -149,7 +149,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 * **Bearings**: `N NE E SE S SW W NW` (distance 1 or √2) and `N2 E2 S2 W2` (distance 2) — the 12 names map exactly onto the 12 sectors reachable at range 2. Explicit `offset_x/y/z` is always available for anything the table doesn't name (including off-plane targets). **North is −y**, matching the neighborhood map's rendering; arbitrary but fixed.
 * An organization's own sensors and a scan pod's follow identical rules — same bearings, same cost, same range, same suppression in transit.
 * **A scan reveals the targeted sector only — no halo, no surrounding ring.** A radius-5 halo was considered and rejected. If scanning is to be a meaningful activity with a real cost, it must not also be cheap area coverage: one pod-turn plus its food buys one sector of knowledge, and the player chooses which. Range says how far you can *reach*; it does not widen what you *get*.
-* If the designated target sector is **out of range** at end-of-turn resolution, the scan does not execute and the player receives an alert. The food cost is still paid (see `docs/TODO.md`).
+* If the designated target sector is **out of range** at end-of-turn resolution, the scan does not execute and the player receives an alert. The food cost is still paid — costs are drawn before a reveal is attempted, deliberately (see `docs/dev_history.md`).
 * Ships in transit cannot scan — the reveal is suppressed for the duration of transit.
 * **Future:** range becomes variable per org once sensor pods exist. The `get_scan_range()` hook is already in place.
 

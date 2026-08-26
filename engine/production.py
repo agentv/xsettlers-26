@@ -117,6 +117,11 @@ def org_production(tasking: dict, in_transit: bool, org_type: str = "ship") -> d
         if not count:
             continue
         for resource, base_amount in outputs.items():
+            # A ship under way harvests no energy -- there is no sector to
+            # harvest from. Food and goods keep running and keep drawing
+            # energy to do it, so a long voyage burns down what it carried
+            # and can arrive unable to restart its own economy. That is the
+            # cost of moving, deliberately, not an oversight.
             amount = (0.0 if (resource == "energy" and in_transit)
                       else base_amount * count * multiplier)
             production[resource] = production.get(resource, 0.0) + amount

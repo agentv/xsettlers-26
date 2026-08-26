@@ -1,6 +1,7 @@
 """
 Task forces: a player-named, explicitly managed roster of that player's own
-ships. See docs/TODO.md's "Task forces" direction for the full design.
+ships. See docs/dev_history.md for the full design; docs/TODO.md carries what is
+still open (a set_pod_task fan-out).
 
 No new engine mechanics and no new turn-resolution step -- a stored roster
 (task_forces + organizations.task_force_id) plus a tool-layer wrapper over

@@ -159,6 +159,35 @@ vocabulary as machine-readable data (today: `ACTION_NAMES`, `TRIGGER_PHASES`,
 an authored document beyond dev/test assignment, and fleet-relative selectors —
 is scoped to that phase, not this one.
 
+**Energy production is suppressed in transit, and that is a cost of moving.**
+A ship under `mission='move'` reports `E:0` with its pod tasking unchanged,
+while food and goods keep running — and since both consume energy while energy
+consumes nothing, a long voyage burns down carried energy with no way to
+replenish it and can arrive unable to restart its own economy. Ruled deliberate,
+the same way the scan-in-transit cost was: moving is expensive, and a player
+learns that by paying for it. Not surfaced as a warning, and not spelled out in
+the player guide.
+
+**Task forces (built 2026-08-22).** A player-named, explicitly managed roster of
+a player's own ships — never colonies, and a ship belongs to at most one at a
+time, both enforced at the tool layer (`xsettlers_mcp/tools/task_force_tools.py`:
+`create_task_force`, `add_to_task_force`, `remove_from_task_force`,
+`disband_task_force`, `list_task_forces`). Storage is a `task_forces` table plus
+a nullable `organizations.task_force_id` — no new engine mechanics and no new
+turn-resolution step. There is no co-location requirement anywhere, by design.
+Membership changes only by direct action, with one automatic exception: a member
+that colonizes leaves, `task_force_id` cleared in the same statement
+`engine/turn.py`'s `_handle_colonize` uses to flip `org_type`, since a task force
+cannot hold anything but a ship.
+
+`order_task_force` fans a **mission** order out to every current member's own org
+id through `set_mission` itself — a fan-out, not a transaction, so every per-org
+lock `set_mission` already enforces applies per ship, and a member that cannot
+accept (in transit, mid-colonization) fails alone and reports why while the rest
+go through. Deliberately **scoped narrower than the original direction**: only
+`set_mission` is fanned. A `set_pod_task` fan-out is still open work — see
+`docs/TODO.md`.
+
 ## Findings from play
 
 **A tool declared in three places will eventually disagree.** Before the

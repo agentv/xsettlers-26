@@ -234,7 +234,7 @@ def init_schema():
         -- Ship's log: one-shot deferred commands attached to an org,
         -- resolved by engine/turn.py's dispatch_due_commands() at the same
         -- point arrivals resolve. Four fixed trigger primitives
-        -- (see docs/TODO.md) -- during_transit fires the instant the
+        -- during_transit fires the instant the
         -- in-transit flag is applied (event-triggered, dispatched instead
         -- from engine/movement.apply_confirm_move, not the resolve_turn
         -- sweep); before_arrival fires the same tick the in-transit flag is

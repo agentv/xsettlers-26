@@ -238,8 +238,7 @@ def end_of_turn():
     #    POD_CONSUMPTION_RECIPE), then scan resolution.
     #    Produce tasks run for all pods regardless of transit state, but
     #    produce_energy specifically can't harvest anything while in transit
-    #    (see below). Scan resolution runs only for stationary orgs (transit
-    #    suppresses scan). before_holdings/production/consumption feed the
+    #    (see below). Scanning in transit pays its cost and reveals nothing. before_holdings/production/consumption feed the
     #    turn.snapshot ledger (see _snapshot_holdings, step 6).
     before_holdings = _player_holdings(cur)
     production = collections.defaultdict(lambda: collections.defaultdict(float))
@@ -502,7 +501,7 @@ def _handle_colonize(cur, org, current_turn):
 
     Clears task_force_id in the same statement -- a task force cannot hold
     anything but a ship, so a member that colonizes leaves the moment
-    org_type flips (see docs/TODO.md's task-forces direction)."""
+    org_type flips (see docs/dev_history.md's task-forces entry)."""
     if org["org_type"] != "ship":
         return
     record_event_direct(cur, current_turn, "ship.colonized", subject_id=org["id"],

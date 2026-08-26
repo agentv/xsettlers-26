@@ -116,8 +116,8 @@ def apply_confirm_move(cur, org_id: int, player_id: int,
 
 def _dispatch_during_transit(cur, org_id: int, player_id: int, current_turn: int):
     """
-    Fires the instant this org enters transit -- the "during_transit" phase
-    (see docs/TODO.md), which is event-triggered on departure rather than
+    Fires the instant this org enters transit -- the "during_transit" phase,
+    which is event-triggered on departure rather than
     turn-based like before_arrival/after_arrival/at_turn, so it's dispatched
     here rather than through engine/turn.py's resolve_turn sweep
     (engine/ship_log.py's dispatch_due_commands). The only action this phase

@@ -78,18 +78,38 @@ _COLONY_ROOF = ((1, 7), (8, 1), (15, 7))
 _COLONY_BODY = (2, 7, 12, 8)      # x, y, w, h
 
 
-def _icon_marks(org_type: str, x: int, y: int, color: str) -> list:
-    """The org-type glyph, translated to (x, y). A ship is a chevron, a colony
-    a roofed block."""
+ICON_BOX = 16     # the box the outlines above are drawn on
+
+
+def icon_marks(org_type: str, x: float, y: float, color: str,
+               size: float = ICON_BOX) -> list:
+    """
+    The org-type glyph, its top-left at (x, y) and scaled to `size`. A ship is
+    a chevron, a colony a roofed block.
+
+    Public and sized because the neighborhood map draws the same two shapes at
+    8-18px for a lattice node. One ship outline, one colony outline, whoever is
+    drawing -- a shape duplicated per caller is a shape that drifts, and these
+    two carry meaning ("this is a colony") rather than decoration.
+    """
+    k = size / ICON_BOX
     if org_type == "ship":
         return [{"kind": "polygon", "fill": color,
-                 "points": [(x + px, y + py) for px, py in _SHIP_POINTS]}]
+                 "points": [(x + px * k, y + py * k) for px, py in _SHIP_POINTS]}]
     bx, by, bw, bh = _COLONY_BODY
     return [
-        {"kind": "rect", "x": x + bx, "y": y + by, "w": bw, "h": bh, "fill": color},
+        {"kind": "rect", "x": x + bx * k, "y": y + by * k,
+         "w": bw * k, "h": bh * k, "fill": color},
         {"kind": "polygon", "fill": color,
-         "points": [(x + px, y + py) for px, py in _COLONY_ROOF]},
+         "points": [(x + px * k, y + py * k) for px, py in _COLONY_ROOF]},
     ]
+
+
+def centered_icon_marks(org_type: str, cx: float, cy: float, size: float,
+                        color: str) -> list:
+    """icon_marks placed by its centre rather than its corner -- what a map
+    node wants, since a lattice knows where the middle of a cell is."""
+    return icon_marks(org_type, cx - size / 2, cy - size / 2, color, size)
 
 
 def _bar_marks(x: int, y: int, width: int, fraction: float, color: str,
@@ -224,7 +244,7 @@ def layout_org_card(data: dict) -> tuple:
     height = y + _FOOTER_PAD
     header = [
         _frame(height),
-        *_icon_marks(data.get("org_type"), _MARGIN, 20, _TEXT),
+        *icon_marks(data.get("org_type"), _MARGIN, 20, _TEXT),
         {"kind": "text", "x": _MARGIN + 22, "y": 32, "s": name, "size": 17,
          "weight": 700, "fill": _TEXT},
         {"kind": "circle", "cx": CARD_WIDTH - _MARGIN - 6, "cy": 26, "r": 6,

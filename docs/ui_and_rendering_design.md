@@ -98,6 +98,54 @@ dispatch is on the *shape* of the data, never on which tool produced it — same
 contract as the table path, so any future tool returning either shape renders
 with no renderer changes.
 
+## Graphic form — built
+
+`views/neighborhood.py` draws the same payload as SVG, registered in
+`server.py`'s `SVG_RENDERERS`. It does not replace the table: markdown is what
+a text client gets, and `response_format='html_svg'` is a request, not a
+promise.
+
+**Why the map looks the way it does is not documented here.** That is a design
+question and it lives in `../xsettlers-designer/docs/neighborhood_map_graphic.md`
+— the palette, the encodings, what a sigil means, why a rival cools. What
+follows is only the wiring.
+
+**One payload, three channels.** `show_sector_neighborhood(channel=...)` takes
+`occupancy`, `energy` or `scan` and echoes it into `display.channel`; the
+markdown table ignores it and always answers who-is-where. The sector rows
+already carry own counts, rival counts, energy capacity and scan aims
+together, so three views of one neighborhood is one call.
+
+**The channel is a tool argument, not a renderer argument**, and that is
+forced: `SVG_RENDERERS` maps a tool name to a callable taking the result dict
+and nothing else. A renderer that needed a second parameter could not be
+registered, so the channel travels in the payload like everything else.
+
+**`display.scales` carries the engine's own numbers** — sector energy floor and
+ceiling, confidence maximum and decay rate, and how many times a sighting is
+drawn before it blinks out. `views/` imports nothing outside the standard
+library, which is what lets a rasterizer or a Block Kit consumer use a layout
+without opening a database, so it cannot reach `db/sectors.py` for these. The
+renderer keeps module constants as fallbacks for a payload captured before the
+block existed; they are not a second source of truth, and a test asserts that
+moving a scale moves the map.
+
+**Three payload fields exist for this renderer** and are worth not removing:
+
+| field | why |
+|---|---|
+| `rival_ships` / `rival_colonies`, `sighted_ships` / `sighted_colonies` | a colony is a permanent hold and a ship is passing through; a bare count cannot say which is standing there |
+| `scan_aims[].origin_x/y/z` | otherwise every reader needs a copy of `SCAN_BEARINGS`, correct only while `SCAN_RANGE == 2` |
+| `display.channel`, `display.scales` | see above |
+
+**One glyph pair for the whole codebase.** `svg_renderer.icon_marks(org_type,
+x, y, color, size)` draws the ship chevron and the colony block for both the
+card and a map node. A shape duplicated per caller drifts, and these two carry
+meaning rather than decoration.
+
+**Assert on the mark list, never on an SVG string** — the same rule the card's
+tests follow, for the same reason.
+
 ---
 
 # Org Card — UI Spec
@@ -155,7 +203,8 @@ Example column configurations:
 
 Done, listed here only so they aren't re-opened: the neighborhood map and its
 renderer (`show_sector_neighborhood` + `views/render.py`'s `render_map()`,
-covered by `tests/test_sector_tools.py` and `tests/test_render.py`), scan range
+covered by `tests/test_sector_tools.py` and `tests/test_render.py`), its
+graphic form (`views/neighborhood.py`, `tests/test_render.py`), scan range
 enforcement and confidence stamping at end-of-turn resolution
 (`tests/test_sector_tools.py`), and fog blink-out (`tests/test_turn.py`).
 

@@ -23,6 +23,7 @@ import xsettlers_mcp.tools.task_force_tools     # noqa: F401
 from xsettlers_mcp.gamehouse import register_with_gamehouse, run_results_reporter
 from xsettlers_mcp.tools.registry import TOOLS
 from db.schema import init_schema
+from views.neighborhood import render_neighborhood_svg
 from views.svg_renderer import render_org_card_svg
 from engine.clock import run_clock
 from views.render import render_status
@@ -102,7 +103,8 @@ async def call_tool(name: str, arguments: dict):
 # that takes its result dict and returns a complete SVG document; everything
 # else falls back to the markdown table, so adding graphics to a tool is adding
 # a line here and nothing else.
-SVG_RENDERERS = {"show_organization": render_org_card_svg}
+SVG_RENDERERS = {"show_organization": render_org_card_svg,
+                 "show_sector_neighborhood": render_neighborhood_svg}
 
 
 # The SVG counterpart to RENDER_DIRECTIVE. An LLM client handed markup will

@@ -86,17 +86,37 @@ def record_sightings(cur, observer_id: int, sector_id: int, current_turn: int) -
     return seen
 
 
+# org_type -> the plural key it reports under, so a caller reads "colonies"
+# rather than assembling it from a column value.
+_TYPE_KEY = {"ship": "ships", "colony": "colonies"}
+
+
 def sightings_by_sector(cur, observer_id: int) -> dict:
     """
     This observer's remembered sightings, grouped by the sector they were made
-    in: {sector_id: {"count": n, "seen_at_turn": most recent}}.
+    in: {sector_id: {"count": n, "seen_at_turn": most recent, "ships": n,
+    "colonies": n}}.
 
     Keyed on where the org was seen, which is the only thing the observer
     actually knows. Callers read this through sectors they can still see, so a
     sighting inherits that sector's confidence and leaves the map with it.
+
+    Broken down by org_type as well as totalled, because what a rival has
+    standing somewhere is a different claim from how many: a colony is a
+    permanent hold on a sector and a ship is passing through. The column has
+    always been stored (see record_sightings); it used to be aggregated away
+    here, which left every reader unable to tell the two apart.
     """
-    return {row["sector_id"]: {"count": row["n"], "seen_at_turn": row["seen"]}
-            for row in cur.execute("""
-                SELECT sector_id, COUNT(*) AS n, MAX(seen_at_turn) AS seen
-                FROM org_sightings WHERE observer_id = ?
-                GROUP BY sector_id""", (observer_id,)).fetchall()}
+    out = {}
+    for row in cur.execute("""
+            SELECT sector_id, org_type, COUNT(*) AS n, MAX(seen_at_turn) AS seen
+            FROM org_sightings WHERE observer_id = ?
+            GROUP BY sector_id, org_type""", (observer_id,)).fetchall():
+        entry = out.setdefault(row["sector_id"], {
+            "count": 0, "seen_at_turn": row["seen"],
+            **{key: 0 for key in _TYPE_KEY.values()}})
+        entry["count"] += row["n"]
+        entry["seen_at_turn"] = max(entry["seen_at_turn"], row["seen"])
+        if row["org_type"] in _TYPE_KEY:
+            entry[_TYPE_KEY[row["org_type"]]] = row["n"]
+    return out

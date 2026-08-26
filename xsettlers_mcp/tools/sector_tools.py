@@ -1,10 +1,11 @@
 from xsettlers_mcp.tools.registry import mcp_tool
 from db.connection import get_connection
-from db.sectors import TURNS_TO_BLINK_OUT
+from db.sectors import (CONFIDENCE_DECAY_PER_TURN, MAX_SECTOR_ENERGY,
+                        MIN_SECTOR_ENERGY, TURNS_TO_BLINK_OUT)
 from db.sightings import sightings_by_sector
 from engine.scanning import aim_label, scanners_on
 from engine.turn import get_next_tick_at, TURN_LIMIT
-from views.format import in_thousands, turn_header
+from views.format import ENERGY_UNIT, in_thousands, turn_header
 from xsettlers_mcp.tools.session import player_tool
 
 # --- Neighborhood viewport ---------------------------------------------------
@@ -13,6 +14,19 @@ from xsettlers_mcp.tools.session import player_tool
 # a caller asking for a viewport whose cell count explodes the response.
 NEIGHBORHOOD_RADIUS = 4
 MAX_NEIGHBORHOOD_RADIUS = 10
+
+# Which question a graphic renderer should draw this payload as. The markdown
+# table ignores it entirely -- it has always answered "who is where" -- but one
+# payload carries everything all three need (own counts, rival counts, energy
+# capacity and scan aims all ride the same sector rows), so a client drawing
+# three views of one neighborhood makes one call rather than three.
+#
+# It is a tool argument rather than a renderer argument because server.py
+# dispatches SVG as renderer(result): a single-argument callable keyed by tool
+# name. The channel therefore has to arrive inside the result, and asking for
+# it alongside the radius is how a client already asks for everything else.
+NEIGHBORHOOD_CHANNELS = ("occupancy", "energy", "scan")
+DEFAULT_CHANNEL = "occupancy"
 
 # Cell vocabulary. Every marker is <= 3 characters so the grid stays narrow.
 UNKNOWN_CELL = "·"   # in range, never seen -- i.e. the scan-me list
@@ -195,12 +209,39 @@ def _scan_coverage(sess, cx: int, cy: int, cz: int, radius: int) -> tuple:
                           org["coord_z"] + dz)
             if tz != cz or (tx - cx) ** 2 + (ty - cy) ** 2 > r2:
                 continue
+            # The origin rides along with the target. A bearing alone forces
+            # the reader to own a copy of SCAN_BEARINGS to work out where the
+            # look came from, and that table is only correct while
+            # SCAN_RANGE == 2 (see engine/bearings.py).
             aim = {"org_id": org["id"], "org_name": org["name"],
                    "source": scanner["source"], "bearing": aim_label(scanner["offset"]),
+                   "origin_x": org["coord_x"], "origin_y": org["coord_y"],
+                   "origin_z": org["coord_z"],
                    "target_x": tx, "target_y": ty, "target_z": tz}
             aims.append(aim)
             by_coord.setdefault((tx, ty), []).append(aim)
     return by_coord, aims
+
+
+# The engine numbers a renderer needs to scale anything, handed over as data.
+#
+# views/ imports nothing but the standard library -- that is what lets a
+# rasterizer or a Block Kit consumer use a layout without opening a database --
+# so it cannot reach db/sectors.py for these. Restating them in the renderer
+# was the alternative, and it meant a map that lies the moment someone tunes
+# the die or the decay rate, with no test to catch it. Tuning those is exactly
+# what ../xsettlers-designer exists to do.
+#
+# CONFIDENCE_DECAY_PER_TURN is env-overridable, so `steps` is derived here
+# rather than assumed: it is how many times a sighting is drawn before its
+# sector blinks out.
+def _scales() -> dict:
+    return {
+        "energy": {"floor": MIN_SECTOR_ENERGY, "ceil": MAX_SECTOR_ENERGY,
+                   "unit": ENERGY_UNIT},
+        "confidence": {"max": 100, "decay_per_turn": CONFIDENCE_DECAY_PER_TURN,
+                       "steps": TURNS_TO_BLINK_OUT},
+    }
 
 
 def _turn_context(cur) -> tuple:
@@ -253,13 +294,17 @@ def get_sector_map(sess) -> list:
     "'·' for never seen, or blank for out of range), plus display.legend. "
     "A '>' suffix marks a sector your fleet is scanning this turn; scan_aims "
     "says which organization and bearing covers each. "
+    f"`channel` picks what a graphic client draws -- one of "
+    f"{', '.join(NEIGHBORHOOD_CHANNELS)}, default {DEFAULT_CHANNEL} -- and is "
+    "ignored by the markdown table, which always answers who-is-where. "
     "Pure view -- reveals nothing, costs nothing, changes no confidence.")
 @player_tool
 def show_sector_neighborhood(
         sess,
         org_id: int = None,
         center_x: int = None, center_y: int = None, center_z: int = None,
-        radius: int = NEIGHBORHOOD_RADIUS) -> dict:
+        radius: int = NEIGHBORHOOD_RADIUS,
+        channel: str = DEFAULT_CHANNEL) -> dict:
     """
     Render the neighborhood around a center point as a ready-to-draw grid,
     plus the underlying sector data.
@@ -276,6 +321,8 @@ def show_sector_neighborhood(
     with the turn the scan was made (see db/sightings.py)."""
     if radius < 1 or radius > MAX_NEIGHBORHOOD_RADIUS:
         return {"error": f"radius must be between 1 and {MAX_NEIGHBORHOOD_RADIUS}"}
+    if channel not in NEIGHBORHOOD_CHANNELS:
+        return {"error": f"channel must be one of {', '.join(NEIGHBORHOOD_CHANNELS)}"}
     cur = sess.cur
     player_id = sess.player_id
 
@@ -294,9 +341,15 @@ def show_sector_neighborhood(
     for row in cur.fetchall():
         entry = own.setdefault(row["sector_id"], {"ship": 0, "colony": 0})
         entry[row["org_type"]] = row["n"]
-    rivals = {row["sector_id"]: row["n"] for row in cur.execute(
-        """SELECT sector_id, COUNT(*) AS n FROM organizations
-           WHERE player_id != ? AND sector_id != -1 GROUP BY sector_id""", (player_id,)).fetchall()}
+    # Grouped by org_type, the same way the own-org query above is: a colony
+    # is a permanent hold on a sector and a ship is passing through, and a bare
+    # count cannot tell a reader which one is standing there.
+    rivals = {}
+    for row in cur.execute("""SELECT sector_id, org_type, COUNT(*) AS n
+        FROM organizations WHERE player_id != ? AND sector_id != -1
+        GROUP BY sector_id, org_type""", (player_id,)).fetchall():
+        entry = rivals.setdefault(row["sector_id"], {"ship": 0, "colony": 0})
+        entry[row["org_type"]] = row["n"]
 
     # Remembered sightings, for the sectors live occupancy does not cover.
     remembered = sightings_by_sector(cur, player_id)
@@ -309,11 +362,16 @@ def show_sector_neighborhood(
         s["own_ships"] = orgs.get("ship", 0)
         s["own_colonies"] = orgs.get("colony", 0)
         # See docstring: live rival positions are only honest where you're standing.
-        s["rival_orgs"] = rivals.get(s["id"], 0) if s["confidence"] >= 100 else 0
+        live = rivals.get(s["id"], {}) if s["confidence"] >= 100 else {}
+        s["rival_ships"] = live.get("ship", 0)
+        s["rival_colonies"] = live.get("colony", 0)
+        s["rival_orgs"] = s["rival_ships"] + s["rival_colonies"]
         # ...and a remembered sighting is only news where you are not, since
         # occupying the sector already reports the live truth about it.
         sighting = remembered.get(s["id"]) if s["confidence"] < 100 else None
         s["sighted_rivals"] = sighting["count"] if sighting else 0
+        s["sighted_ships"] = sighting["ships"] if sighting else 0
+        s["sighted_colonies"] = sighting["colonies"] if sighting else 0
         s["sighted_at_turn"] = sighting["seen_at_turn"] if sighting else None
         s["coords_display"] = f"({s['coord_x']},{s['coord_y']},{s['coord_z']})"
         # Rivals and confidence share a cell because neither means much alone.
@@ -376,6 +434,8 @@ def show_sector_neighborhood(
                          if current_turn is not None else ""),
             "grid": grid,
             "legend": legend,
+            "channel": channel,
+            "scales": _scales(),
             "rows_key": "highlights",
             # No resources column: this report is about who is where. What a
             # sector holds stays on every `sectors` row for a client that

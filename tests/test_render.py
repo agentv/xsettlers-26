@@ -4,6 +4,9 @@ import pytest
 from views.render import render_status, render_map
 from views.svg_renderer import (CARD_WIDTH, emit_svg,
                                 layout_org_card)
+from views.neighborhood import (TARGET_CELL, layout_neighborhood,
+                                render_neighborhood_svg)
+from db.sectors import MAX_SECTOR_ENERGY, MIN_SECTOR_ENERGY
 from xsettlers_mcp.tools.organization_reports import (
     show_civilization_status, show_game_status, show_organization
 )
@@ -13,7 +16,7 @@ from xsettlers_mcp.tools.sector_tools import (show_sector_neighborhood,
                                              show_neighborhood_resources,
                                              CELL_WIDTH)
 from tests.conftest import (
-    seed_player, seed_sector, seed_ship, seed_pod, seed_player_sector
+    _insert, seed_player, seed_sector, seed_ship, seed_pod, seed_player_sector
 )
 
 def _squash(text: str) -> str:
@@ -482,3 +485,156 @@ def test_an_unowned_org_lays_out_as_an_error_card():
     marks, dims = layout_org_card(show_organization("U_P1", 999))
     assert dims["height"] == 100
     assert len(_texts(marks)) == 1
+
+
+# --- Neighborhood map, graphic form -----------------------------------------
+# Assertions are on the mark list, never on an SVG string: marks are structured
+# and stable under float formatting, which is the same reason the org card's
+# tests above read that way.
+
+def _marks_of(data, channel=None, width=None):
+    marks, _dims = layout_neighborhood(data, channel, width)
+    return marks
+
+
+def _fills(marks, kind):
+    return [m["fill"] for m in marks if m["kind"] == kind]
+
+
+def _at_origin():
+    """A player standing at the origin, seeing one sector.
+
+    Distinct from _neighborhood() above, which centres at (25,25) for the
+    markdown tests -- the graphic assertions do coordinate arithmetic and read
+    better from zero."""
+    pid = seed_player()
+    home = seed_sector(0, 0, 0)
+    seed_player_sector(pid, home, 100)
+    oid = seed_ship(pid, home)
+    return pid, home, oid
+
+
+def test_layout_neighborhood_reads_the_channel_off_the_payload():
+    """server.py dispatches SVG as renderer(result) -- one argument -- so the
+    channel has to travel in the payload rather than as a parameter."""
+    pid, home, oid = _at_origin()
+    energy = show_sector_neighborhood("U_P1", org_id=oid, channel="energy")
+    assert energy["display"]["channel"] == "energy"
+    # The same dict drawn without an explicit channel picks up the payload's.
+    assert _marks_of(energy) == _marks_of(energy, "energy")
+    assert _marks_of(energy) != _marks_of(energy, "occupancy")
+
+
+def test_layout_neighborhood_scales_energy_from_the_payload_not_a_constant():
+    """The ramp's endpoints are db/sectors' business. views/ cannot import it,
+    so they arrive in display.scales -- and moving them has to move the map."""
+    pid, home, oid = _at_origin()
+    data = show_sector_neighborhood("U_P1", org_id=oid, channel="energy")
+    assert data["display"]["scales"]["energy"]["floor"] == MIN_SECTOR_ENERGY
+    assert data["display"]["scales"]["energy"]["ceil"] == MAX_SECTOR_ENERGY
+
+    # seed_sector's 50.0 sits below the real floor, so it clamps to the ramp's
+    # dimmest. Drop the floor beneath it and the same sector brightens.
+    dim = _fills(_marks_of(data), "circle")
+    data["display"]["scales"]["energy"] = {"floor": 0.0, "ceil": 100.0}
+    assert _fills(_marks_of(data), "circle") != dim
+
+
+def test_layout_neighborhood_survives_a_payload_with_no_scales_block():
+    """A captured JSON blob is a supported input to every renderer in views/,
+    so one written before display.scales existed still has to draw."""
+    pid, home, oid = _at_origin()
+    data = show_sector_neighborhood("U_P1", org_id=oid)
+    data["display"].pop("scales")
+    data["display"].pop("channel")
+    assert _marks_of(data)
+
+
+def test_neighborhood_rival_cools_as_its_sector_ages():
+    """Confidence decays until the sector blinks out, and the sigil carries
+    that -- so the same rival drawn at two confidences is two colours."""
+    pid, home, oid = _at_origin()
+    far = seed_sector(1, 0, 0)
+    rival = seed_player("rival@test.com", "U_P2", "Rival")
+    rival_org = seed_ship(rival, far)
+    _insert("""INSERT INTO org_sightings (observer_id, org_id, owner_id,
+               sector_id, org_type, seen_at_turn) VALUES (?,?,?,?,'ship',1)""",
+            (pid, rival_org, rival, far))
+
+    seed_player_sector(pid, far, 80)
+    hot = _marks_of(show_sector_neighborhood("U_P1", org_id=oid))
+    seed_player_sector(pid, far, 20)
+    cold = _marks_of(show_sector_neighborhood("U_P1", org_id=oid))
+    assert _fills(hot, "polygon") != _fills(cold, "polygon")
+
+
+def test_neighborhood_payload_breaks_rivals_down_by_org_type():
+    """A colony is a permanent hold and a ship is passing through; a bare count
+    cannot say which is standing there, and the map draws a different sigil."""
+    pid, home, oid = _at_origin()
+    far = seed_sector(1, 0, 0)
+    seed_player_sector(pid, far, 60)
+    rival = seed_player("rival@test.com", "U_P2", "Rival")
+    colony = _insert("""INSERT INTO organizations (org_type,name,player_id,sector_id,
+                        is_mobile,mission) VALUES ('colony','R1',?,?,0,'idle')""",
+                     (rival, far))
+    _insert("""INSERT INTO org_sightings (observer_id, org_id, owner_id,
+               sector_id, org_type, seen_at_turn) VALUES (?,?,?,?,'colony',1)""",
+            (pid, colony, rival, far))
+    row = next(s for s in show_sector_neighborhood("U_P1", org_id=oid)["sectors"]
+               if s["id"] == far)
+    assert (row["sighted_colonies"], row["sighted_ships"]) == (1, 0)
+    assert row["sighted_rivals"] == 1
+
+
+def test_neighborhood_scan_aims_carry_their_origin():
+    """A bearing alone would force every reader to own a copy of
+    SCAN_BEARINGS, which is only correct while SCAN_RANGE == 2."""
+    pid, home, oid = _at_origin()
+    set_org_scan_bearing("U_P1", org_id=oid, bearing="N")
+    aim = show_sector_neighborhood("U_P1", org_id=oid)["scan_aims"][0]
+    assert (aim["origin_x"], aim["origin_y"], aim["origin_z"]) == (0, 0, 0)
+    assert (aim["target_x"], aim["target_y"]) == (0, -1)
+
+
+def test_neighborhood_canvas_grows_with_the_radius():
+    """The cell is fixed and the canvas grows, so a wider screen asks for a
+    wider radius and gets more neighborhood rather than a bigger one."""
+    pid, home, oid = _at_origin()
+    widths = []
+    for radius in (2, 4, 8):
+        data = show_sector_neighborhood("U_P1", org_id=oid, radius=radius)
+        _marks, dims = layout_neighborhood(data)
+        widths.append(dims["width"])
+        assert dims["width"] == TARGET_CELL * (2 * radius + 1) + 2 * 16 + 20
+    assert widths == sorted(widths)
+
+
+def test_neighborhood_channels_share_one_height():
+    """Three views of one neighborhood have to be the same height, or a client
+    tabbing between them jumps."""
+    pid, home, oid = _at_origin()
+    data = show_sector_neighborhood("U_P1", org_id=oid)
+    heights = {ch: layout_neighborhood(data, ch)[1]["height"]
+               for ch in ("occupancy", "energy", "scan")}
+    assert len(set(heights.values())) == 1, heights
+
+
+def test_show_sector_neighborhood_rejects_an_unknown_channel():
+    pid, home, oid = _at_origin()
+    result = show_sector_neighborhood("U_P1", org_id=oid, channel="weather")
+    assert "error" in result
+
+
+def test_render_neighborhood_svg_is_a_single_argument_renderer():
+    """What SVG_RENDERERS requires of any tool that draws itself."""
+    pid, home, oid = _at_origin()
+    data = show_sector_neighborhood("U_P1", org_id=oid)
+    svg = render_neighborhood_svg(data)
+    assert svg.startswith("<svg") and svg.rstrip().endswith("</svg>")
+
+
+def test_neighborhood_error_payload_draws_a_card_not_a_crash():
+    marks, dims = layout_neighborhood({"error": "Organization not found"})
+    assert dims["width"] and dims["height"]
+    assert any(m["kind"] == "text" and "not found" in m["s"] for m in marks)

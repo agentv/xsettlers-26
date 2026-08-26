@@ -116,6 +116,49 @@ third-party `mcp` SDK it imports; the local package wins resolution
 process-wide, and the server self-imports instead of reaching the SDK. Nothing
 catches this in tests, because no test imports `mcp.server` directly.
 
+**A scan pays its cost in transit and reveals nothing, on purpose.** Only the
+reveal is suppressed while a ship sits at the sentinel sector; the recipe drain
+runs first and unconditionally, for a scan pod and an org's own sensors alike
+(`engine/turn.py` steps 3c/3d). A player who leaves a scanner deployed on a
+voyage wastes its upkeep, and standing the pod down before departure is the
+move. Deliberately **not** surfaced as a warning at `set_pod_task` time and not
+spelled out in `docs/player_guide.md` — the guide says a scan costs energy and
+food, and separately that a ship in transit will not report, and leaves the
+inference to the player. A warning would remove the trap that makes the lesson
+worth learning. `tests/test_scanning.py` pins the behavior.
+
+**Combat is post-MVP and is not tracked as open work.** `set_mission` refuses
+`defend`/`attack` outright (`UNIMPLEMENTED_MISSIONS`, "Weapons are inoperable"),
+so `engine/turn.py`'s `_handle_defend`/`_handle_attack` stubs are unreachable
+today. Both stubs and step 5's dispatch stay as the seam combat lands in, and
+both missions stay in `VALID_ORG_MISSIONS`: dropped from it, the rejection would
+enumerate the survivors and read as "this game has no combat", which is false.
+Building combat is deleting the refusal set and filling the stubs — well after
+the MVP, which is why it is here and not in `docs/TODO.md`.
+
+**No `models/` package until there is something to put in it.** CRUD lives in
+`xsettlers_mcp/tools/*.py`. Pulling it into a model layer is worth doing once
+the POC is stable, not before, so it is not open work.
+
+**The tick countdown is computed in two places on purpose.**
+`scripts/status.py`'s `_clock_status` and `views/format.py`'s `tick_countdown`
+both parse `next_tick_at` and `divmod` it (~5 lines each), and are deliberately
+not merged: they differ in what they can know. The CLI is its own process and
+can health-check the server to tell "paused" from "counting down"; the
+in-process one cannot, so a `None` there already means "not running". Both
+files comment on the relationship. Revisit only if a third caller appears — at
+which point the shared piece is the formatting, not the liveness judgement.
+
+**An NPC strategy *builder* is a later phase.** The format and its validator
+exist (`npc/strategy.validate_strategy`, run at assign time), and two properties
+already make authoring safe: a document carries no expressions, and every
+`decide` source is fog-limited. What a builder would additionally need — the
+vocabulary as machine-readable data (today: `ACTION_NAMES`, `TRIGGER_PHASES`,
+`ORDER_KEYS`, `DECIDE_KEYS`, and `npc/decide.py`'s
+`GATES`/`SOURCES`/`RANK_FIELDS`/`PICKS` plus module docstrings), a live path for
+an authored document beyond dev/test assignment, and fleet-relative selectors —
+is scoped to that phase, not this one.
+
 ## Findings from play
 
 **A tool declared in three places will eventually disagree.** Before the

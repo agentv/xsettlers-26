@@ -34,7 +34,7 @@ It serves MCP's streamable HTTP transport (`POST /mcp`, `GET /health`) and is de
 
 ## Status
 
-Playable end to end, solo or multiplayer, but pre-MVP. The significant gaps: combat is unimplemented (`defend`/`attack` are stubs), there is no way to build new ships or pods, sector richness varies but not by enough to change outcomes at a 20-turn horizon, and rival detection is not built. `docs/TODO.md` tracks each of these along with the design direction behind it.
+Playable end to end, solo or multiplayer, but pre-MVP. The significant gaps: there is no way to build new ships or pods, no way to move resources between organizations, and sector richness varies but not by enough to change outcomes at a 20-turn horizon. `docs/TODO.md` tracks the open ones. Combat is a separate matter — `defend`/`attack` are refused missions over unfilled stubs, deliberately post-MVP rather than outstanding work (`docs/dev_history.md`).
 
 **Security note:** `/mcp` has *no* perimeter authentication, and the player tokens in `config/game_config.yaml` are placeholders committed to this public repository. Anyone who knows the URL can play as anyone. That is a knowing tradeoff while the game holds nothing of value — read the SECURITY POSTURE comment in `xsettlers_mcp/server.py` before deploying anything you care about.
 

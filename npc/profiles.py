@@ -17,7 +17,7 @@ def assign_npc_profile(player_id: int, strategy_name: str, config: dict = None) 
     memory to {} -- memory holds a program counter and bindings into a
     specific document, so carrying it into a different one would leave the new
     strategy starting partway through steps it never had.
-    Dev/test-only: not exposed as an MCP tool (see docs/TODO.md).
+    Dev/test-only: not exposed as an MCP tool (see docs/dev_history.md).
 
     The strategy must exist and its document must be sound, both checked here,
     before anything is written. This is assignment-time validation for the

@@ -375,8 +375,10 @@ def test_scan_in_transit_still_costs_food_but_reveals_nothing():
     """Now that out-of-range aims are refused at set time, transit is the one
     remaining case where a scan pays and returns nothing: the reveal is
     suppressed while the ship has no position, but the food is still drawn.
-    Tracked as a known gap in docs/TODO.md -- pinned here so a fix to the
-    cost side is a deliberate change rather than an accident."""
+    That is the rule, not a gap -- a scanner left deployed on a voyage wastes
+    its upkeep, and standing the pod down before departure is the player's job.
+    Pinned here so making the cost conditional is a deliberate change rather
+    than an accident."""
     from xsettlers_mcp.tools.navigation_tools import confirm_move
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
     pod = seed_pod(sid, task="scan")

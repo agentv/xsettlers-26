@@ -303,14 +303,18 @@ def end_of_turn():
                         production[player_id][resource] += amount
 
         # 3c. Scan: costs food (see POD_CONSUMPTION_RECIPE) but produces no
-        #     output -- stationary orgs only (transit suppresses scan).
+        #     output. Transit suppresses the *reveal*, not the cost -- a
+        #     scanner left deployed on a voyage burns its upkeep and returns
+        #     nothing. That waste is the intended cost of not standing the
+        #     pod down before departure.
         elif task == "scan":
             org_id = pod["org_id"]
             ratio = _pay_for(cur, org_id, player_id, get_consumption_recipe(task),
                              consumption)
 
             # org_position returns None for an in-transit org (parked at the
-            # sentinel sector), which is what suppresses scanning in transit.
+            # sentinel sector), which is what suppresses the reveal. _pay_for
+            # has already run, so the food is gone either way.
             org = org_position(cur, org_id)
             if ratio > 0 and org:
                 params = json.loads(pod["task_params"] or "{}")
@@ -339,6 +343,7 @@ def end_of_turn():
         ratio = _pay_for(cur, org["id"], org["player_id"], scan_recipe, consumption)
         if ratio <= 0 or org["sector_id"] == -1:
             continue          # starved, or in transit: cost paid, no reveal
+                              # (deliberate -- see 3c)
         _resolve_scan(cur, current_turn, org["id"], org["player_id"],
             origin=(org["coord_x"], org["coord_y"], org["coord_z"]),
             offset=(org["dx"], org["dy"], org["dz"]),

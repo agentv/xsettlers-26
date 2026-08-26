@@ -116,7 +116,7 @@ The rules below bite from anywhere. Each carries its full reasoning at the point
 - **Every player-facing read filters `confidence > 0`.** `player_sectors` is the fog-of-war table; at confidence 0 a sector blinks out of the map entirely rather than showing as a stale ghost. The row is never deleted, so the filter is the only thing enforcing it (`db/sectors.py`).
 - **An aim is an offset from the scanner's own sector**, not absolute coordinates, so it survives a move (`engine/bearings.py`). Aiming is implemented once in `engine/scanning.py` and resolved once in `engine/turn.py`'s `_resolve_scan`, for an org's own sensors and a scan pod alike.
 - **`events` is a write-ahead log**, and `events.resolve_at_turn` is how anything deferred fires (`colonize_complete`, three turns after `set_mission('colonize', ...)`). Its snapshots are a ledger, not a recovery checkpoint — there is no replay.
-- **There is no `models/` package.** CRUD lives in `xsettlers_mcp/tools/*.py`; creating one is tracked in `docs/TODO.md`. Do it then, not before.
+- **There is no `models/` package.** CRUD lives in `xsettlers_mcp/tools/*.py`; pulling it into a model layer waits on the POC being stable (`docs/dev_history.md`). Do it then, not before.
 
 ### Turn resolution (`engine/turn.py`)
 
@@ -124,7 +124,7 @@ The rules below bite from anywhere. Each carries its full reasoning at the point
 
 1. Reset `end_turn_declared` on all players
 2. Resolve arrivals from `arrival_queue` (ships land, mission resets to idle, destination sector stamped visible)
-3. Org upkeep, then per-pod consumption and production, then scan resolution (stationary orgs only — in-transit ships suppress scanning). Costs are drawn from the org's pooled stock across all its pods (`engine/org_resources.py`) and output is prorated to the fraction of input actually available, not gated all-or-nothing
+3. Org upkeep, then per-pod consumption and production, then scan resolution (an in-transit ship still pays its scan cost; only the reveal is suppressed). Costs are drawn from the org's pooled stock across all its pods (`engine/org_resources.py`) and output is prorated to the fraction of input actually available, not gated all-or-nothing
 4. Colonization resolution — matured `colonize_complete` events flip `org_type` ship→colony; idempotent via the `org_type='ship'` filter (once flipped, it stops matching)
 5. Mission dispatch for `defend`/`attack` (currently stubs — `_handle_defend`/`_handle_attack` are no-ops)
 6. Fog-of-war decay for unoccupied sectors

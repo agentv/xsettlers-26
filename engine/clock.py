@@ -26,6 +26,18 @@ def _stamp_next_tick_at(seconds_remaining: int = TICK_SECONDS):
 def is_frozen() -> bool:
     return bool(read_value("SELECT frozen FROM game_state WHERE id=1"))
 
+def _game_is_active() -> bool:
+    """
+    Whether a scenario has been bootstrapped. The clock process runs from
+    server startup, but the turn interval does not start accumulating until
+    there is a game: otherwise turn 1 inherits whatever was left of the
+    window already in progress when the game was created, and a player can
+    lose most of their first turn to a countdown that started before they
+    existed. Read straight from `games` rather than through
+    xsettlers_mcp.game_select -- engine/ never imports upward.
+    """
+    return read_value("SELECT id FROM games WHERE id=1") is not None
+
 def freeze():
     _set_frozen(1)
 
@@ -47,9 +59,22 @@ async def run_clock():
     print(f"Game clock started. Tick interval: {TICK_SECONDS}s")
     elapsed = 0
     was_frozen = False
+    had_game = False
     _stamp_next_tick_at(TICK_SECONDS)
     while True:
         await asyncio.sleep(POLL_SECONDS)
+        # No game, no turns. end_of_turn() would no-op anyway, but letting
+        # elapsed run would carry a partial window into the game's first
+        # turn -- see _game_is_active.
+        if not _game_is_active():
+            elapsed = 0
+            had_game = False
+            continue
+        if not had_game:
+            print("Game bootstrapped — turn 1 begins now.")
+            elapsed = 0
+            _stamp_next_tick_at(TICK_SECONDS)
+        had_game = True
         if is_frozen():
             if not was_frozen:
                 print("Clock frozen.")

@@ -188,6 +188,29 @@ go through. Deliberately **scoped narrower than the original direction**: only
 `set_mission` is fanned. A `set_pod_task` fan-out is still open work — see
 `docs/TODO.md`.
 
+**Scenario selection belongs to GameHouse, and the list travels by push.** A
+Person picks a game *and* a scenario from GameHouse's `list_games()` before
+`join_lobby` is ever called (settled on GameHouse's side 2026-08-07,
+`../gamehouse/docs/data_model.md`); the choice reaches xsettlers as
+`start_session`'s `scenario_key`. The list gets there at **registration** —
+xsettlers announces its scenarios via `register_game`, GameHouse stores them in
+`game_scenario` and replaces them wholesale on the next registration. It is not
+a pull: GameHouse never interrogates this service for its catalogue, which is
+what lets it describe a game to a Person while that game is restarting, and what
+keeps lobby matching (on the (game, scenario) pair) reading from one local
+table. xsettlers' own `list_scenarios`/`select_scenario` stay live for direct,
+non-GameHouse play — the two identity paths do not meet.
+
+**The turn interval starts when the game does, not when the process does.**
+`run_clock()` runs from server startup, but a game is bootstrapped at an
+arbitrary moment inside a tick window. `end_of_turn()` no-ops without a `games`
+row, so no turns were ever *burned* pre-selection — but `elapsed` kept
+accumulating, so turn 1 inherited whatever was left of the window already
+running and could be seconds long at a 300s cadence. The clock now holds
+`elapsed` at zero until a game exists and restarts the window when one appears.
+`engine/clock.py` reads `games` directly rather than through
+`xsettlers_mcp.game_select`, since engine/ never imports upward.
+
 ## Findings from play
 
 **A tool declared in three places will eventually disagree.** Before the

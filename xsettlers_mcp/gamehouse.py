@@ -1,13 +1,17 @@
 """
 GameHouse handoff surface -- xsettlers' side of the wire mechanism in
-../gamehouse/docs/data_model.md. Scoped to Diaspora (config/game0.yaml) only
-for v1, registered with GameHouse as a scenario-less game (empty scenarios
-list) -- xsettlers has three scenarios, but the registration/lobby model
-only carries one lobby shape per registered game, and multi-scenario support
-on GameHouse's side is still unresolved. start_session's scenario_key is
-therefore always None in practice today; accepted and ignored rather than
-validated, with a note below for where real branching would go once
-multi-scenario support exists on both sides.
+../gamehouse/docs/data_model.md.
+
+Scenario selection belongs to GameHouse: a Person picks a game and a scenario
+from list_games() before join_lobby, and the choice arrives here as
+start_session's scenario_key. xsettlers' part is to publish the list at
+registration -- push, not pull; GameHouse stores it in game_scenario and never
+interrogates this service for it -- and to bootstrap whichever key comes back.
+
+Registration carries only one lobby shape for the whole game, so the published
+list is the scenarios that share it (see registrable_scenarios and the note by
+SCENARIO_FILE); a scenario sized differently stays unregistered rather than
+mis-lobbied.
 
 Two directions of traffic:
   - register_with_gamehouse(): xsettlers acts as an MCP CLIENT against
@@ -30,11 +34,20 @@ from db.archive import archive_active_database
 from engine.turn import get_final_scores
 from npc.profiles import assign_npc_profile
 from npc.strategies import strategy_names
-from xsettlers_mcp.game_select import get_active_game
+from xsettlers_mcp.game_select import get_active_game, list_scenarios
 
 SCENARIO_FILE = "config/game0.yaml"
 SCENARIO_NAME = "game0"
 GAME_NAME = "xsettlers26"
+
+# Registration carries ONE lobby shape for the whole game (GameHouse's `game`
+# row holds min_players/max_players/wait_window_seconds; `game_scenario` holds
+# only a scenario_key). A scenario whose own shape differs therefore cannot be
+# offered through GameHouse without mis-sizing its lobby, so it is left
+# unregistered -- GameHouse validates scenario_key against the registered list,
+# so an omitted scenario is simply not selectable rather than wrongly sized.
+# Lifting this needs min/max/wait to move onto game_scenario on GameHouse's
+# side; tracked in docs/TODO.md.
 VALID_KINDS = {"person", "npc"}
 
 # The results envelope: the two fields every game handing results to GameHouse
@@ -81,6 +94,10 @@ async def register_with_gamehouse() -> dict:
 
     sc = load_starting_configuration(SCENARIO_FILE)
     lobby = sc.lobby
+    scenario_keys, skipped = registrable_scenarios(lobby)
+    if skipped:
+        print(f"Not registering {sorted(skipped)} with GameHouse: lobby shape "
+              f"differs from {SCENARIO_NAME}'s and registration carries only one.")
     try:
         async with streamablehttp_client(gamehouse_url) as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -93,7 +110,7 @@ async def register_with_gamehouse() -> dict:
                     "wait_window_seconds": lobby.wait_window_seconds,
                     "npc_profile_schema": npc_profile_schema(),
                     "scoreboard_schema": scoreboard_schema(),
-                    "scenarios": [],
+                    "scenarios": scenario_keys,
                 })
     except Exception as exc:
         return {"ok": False, "error": f"register_game call to {gamehouse_url} failed: {exc}"}
@@ -156,6 +173,44 @@ def npc_profile_schema() -> dict:
     }
 
 
+def registrable_scenarios(lobby) -> tuple[list[str], list[str]]:
+    """
+    Splits the scenario library into what GameHouse can be offered and what it
+    cannot, against the single lobby shape this registration carries (see the
+    note by SCENARIO_FILE). Returns (keys, skipped), both sorted.
+
+    A scenario qualifies when its own derived min/max players and its authored
+    wait window all match. Nothing here is optional or fuzzy: a mismatched
+    scenario handed to GameHouse would be lobbied at the wrong size, which is
+    worse than being unavailable.
+    """
+    keys, skipped = [], []
+    for entry in list_scenarios():
+        other = load_starting_configuration(entry["file"]).lobby
+        target = (lobby.min_players, lobby.max_players, lobby.wait_window_seconds)
+        if (other.min_players, other.max_players, other.wait_window_seconds) == target:
+            keys.append(entry["scenario_name"])
+        else:
+            skipped.append(entry["scenario_name"])
+    return sorted(keys), sorted(skipped)
+
+def resolve_scenario(scenario_key: str | None) -> tuple[str, str] | None:
+    """
+    (file, name) for a scenario_key from GameHouse, or None if it names
+    nothing this service offers.
+
+    A None key means the game registered no scenarios -- or GameHouse is an
+    older build that never sent one -- and falls back to SCENARIO_FILE, which
+    is what every handoff resolved to before scenario selection moved to
+    lobby-join time.
+    """
+    if scenario_key is None:
+        return SCENARIO_FILE, SCENARIO_NAME
+    for entry in list_scenarios():
+        if entry["scenario_name"] == scenario_key:
+            return entry["file"], entry["scenario_name"]
+    return None
+
 def _validate_players(players: list, lobby) -> dict | None:
     """Returns an error dict if the players list is malformed, else None."""
     if not isinstance(players, list) or not players:
@@ -202,11 +257,13 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
     roster_override -- the shape db.bootstrap.bootstrap_game() already
     accepts -- rather than modifying bootstrap_game() itself.
 
-    scenario_key is accepted but not yet acted on: xsettlers registered with
-    an empty scenarios list (see register_with_gamehouse), so GameHouse will
-    only ever send None here today. Once xsettlers registers more than one
-    scenario, this is where scenario_key would pick which of
-    config/game*.yaml to bootstrap instead of the hardcoded SCENARIO_FILE.
+    scenario_key picks which of config/game*.yaml to bootstrap, chosen by the
+    Person at lobby-join time under GameHouse rather than in-game by a player
+    (../gamehouse/docs/data_model.md, settled 2026-08-07). None falls back to
+    SCENARIO_FILE. Every seating rule below then reads from the resolved
+    scenario, not from game0: the lobby size players are validated against and
+    the home sectors seats are dealt from both belong to the scenario actually
+    being played.
 
     person-kind player_ids are GameHouse's real person.id, trusted as-is
     (they arrived over the session-token-authenticated channel). npc-kind
@@ -215,7 +272,11 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
     players.email/display_name columns exist for the existing static-roster
     auth path, which a GameHouse-driven session has no use for beyond
     satisfying the schema."""
-    sc = load_starting_configuration(SCENARIO_FILE)
+    resolved = resolve_scenario(scenario_key)
+    if resolved is None:
+        return {"error": f"Unknown scenario_key '{scenario_key}'"}
+    scenario_file, scenario_name = resolved
+    sc = load_starting_configuration(scenario_file)
     err = _validate_players(players, sc.lobby)
     if err:
         return err
@@ -238,11 +299,11 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
         token = secrets.token_hex(16)
         email = f"gamehouse-{gh_id}@handoff"
         display_name = f"Player {gh_id}" if kind == "person" else str(gh_id)
-        # Home sectors taken positionally from game0.yaml's own authored
-        # participants -- reuses the scenario's spatial design (opposite
-        # corners) without a real email to match against. v1 simplification:
-        # doesn't generalize past however many participants game0.yaml
-        # itself declares (2 today, matching lobby.max_players).
+        # Home sectors taken positionally from the resolved scenario's own
+        # authored participants -- reuses its spatial design (opposite
+        # corners, in game0's case) without a real email to match against.
+        # Bounded by lobby.max_players, which is derived from that same
+        # participants list, so the index cannot run off the end.
         home_sector = sc.participants[i].home_sector
         roster_override.append({
             "email": email, "display_name": display_name, "player_token": token,
@@ -251,7 +312,7 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
         if kind == "person":
             generated_tokens[gh_id] = token
 
-    bootstrap_game(scenario_file=SCENARIO_FILE, scenario_name=SCENARIO_NAME,
+    bootstrap_game(scenario_file=scenario_file, scenario_name=scenario_name,
                    selected_by=session_token, roster_override=roster_override)
 
     conn = get_connection(); cur = conn.cursor()

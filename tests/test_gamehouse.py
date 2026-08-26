@@ -1,10 +1,10 @@
 """
-GameHouse handoff surface -- see xsettlers_mcp/gamehouse.py. Scoped to
-Diaspora (config/game0.yaml) only for v1, registered with GameHouse as a
-scenario-less game -- start_session's scenario_key is therefore always None
-in real traffic today, but accepted so a real call from GameHouse's
-push_start_session (which always sends the field) doesn't crash on an
-unexpected keyword argument.
+GameHouse handoff surface -- see xsettlers_mcp/gamehouse.py. Covers both
+directions: the scenario list xsettlers publishes at registration, and the
+start_session push GameHouse makes once a lobby closes, carrying the
+scenario_key the Person chose at join time. scenario_key=None remains valid
+and resolves to Diaspora (config/game0.yaml), which is what every handoff
+sent before scenario selection existed.
 """
 import json
 from db.connection import connection
@@ -359,3 +359,53 @@ def test_scoreboard_schema_declares_the_envelope_and_its_direction():
     # placement is direction-free (1 is best either way); score is not, which
     # is the whole reason direction is declared.
     assert schema["direction"] == "higher_is_better"
+
+# --- scenario selection: GameHouse picks, xsettlers bootstraps ---
+
+def test_registrable_scenarios_omits_a_differently_sized_lobby():
+    """Registration carries one lobby shape for the whole game, so a scenario
+    sized differently cannot be offered without being mis-lobbied. game_solo
+    is 1 player on a 0s wait window against Diaspora's 2 and 120s."""
+    from xsettlers_mcp.gamehouse import registrable_scenarios
+    from config.loader import load_starting_configuration
+    keys, skipped = registrable_scenarios(load_starting_configuration("config/game0.yaml").lobby)
+    assert "game0" in keys and "game1" in keys
+    assert skipped == ["game_solo"]
+    assert "game_solo" not in keys
+
+def test_resolve_scenario_maps_a_key_to_its_file():
+    from xsettlers_mcp.gamehouse import resolve_scenario
+    assert resolve_scenario("game1") == ("config/game1.yaml", "game1")
+    assert resolve_scenario(None) == ("config/game0.yaml", "game0")
+    assert resolve_scenario("no-such-scenario") is None
+
+def test_start_session_bootstraps_the_scenario_gamehouse_chose():
+    _clear_active_game()
+    result = start_session("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game1")
+    assert result["ok"] is True
+    with connection() as conn:
+        row = conn.execute("SELECT scenario_name, scenario_file FROM games WHERE id=1").fetchone()
+    assert row["scenario_name"] == "game1"
+    assert row["scenario_file"] == "config/game1.yaml"
+
+def test_start_session_seats_players_at_the_chosen_scenarios_home_sectors():
+    """Home sectors come from the resolved scenario's own participants, not
+    game0's -- the seating has to follow the map actually being played."""
+    from config.loader import load_starting_configuration
+    _clear_active_game()
+    start_session("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game1")
+    expected = [p.home_sector for p in load_starting_configuration("config/game1.yaml").participants]
+    with connection() as conn:
+        rows = conn.execute("""SELECT s.coord_x, s.coord_y, s.coord_z FROM players p
+            JOIN organizations o ON o.player_id = p.id
+            JOIN sectors s ON s.id = o.sector_id
+            GROUP BY p.id ORDER BY p.id""").fetchall()
+    seated = [(r["coord_x"], r["coord_y"], r["coord_z"]) for r in rows]
+    assert seated == [tuple(h) for h in expected]
+
+def test_start_session_rejects_an_unknown_scenario_key():
+    _clear_active_game()
+    result = start_session("tok-x", [_person(1), _npc("npc-1")], scenario_key="not-a-scenario")
+    assert "error" in result and "not-a-scenario" in result["error"]
+    with connection() as conn:
+        assert conn.execute("SELECT COUNT(*) n FROM games").fetchone()["n"] == 0

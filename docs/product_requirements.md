@@ -180,7 +180,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 
 This section is the canonical design-authority inventory of every action a player can take within a game session. For implementation signatures, see `xsettlers_mcp/tools/` (never `mcp/tools/` — that name collides with the third-party `mcp` SDK package).
 
-**Known gap, not yet reconciled:** this inventory predates several tools that now exist — `list_scenarios`, `select_scenario`, `get_player_state`, `get_sector`, `get_sector_map`, `show_civilization_status`, and `queue_command` (the ship's log — see `docs/TODO.md`'s "Design (Data Model canvas)" section) have no entries below. Left as a flagged gap rather than silently patched in, since closing it properly means either documenting each here or deciding this section's scope should narrow to something TODO.md/dev_history.md already cover better.
+**Known gap, not yet reconciled:** this inventory predates a good deal of what now exists. Fourteen of the registry's 29 tools have entries below; the fifteen without are the six task-force tools (`create_task_force`, `add_to_task_force`, `remove_from_task_force`, `disband_task_force`, `list_task_forces`, `order_task_force` — designed in `docs/dev_history.md`), scenario selection and session setup (`list_scenarios`, `select_scenario`, `start_session`, `set_display_name`), the read tools `get_player_state`, `get_sector`, `get_sector_map` and `show_civilization_status`, and `queue_command` (the ship's log, whose four trigger primitives are documented at `db/schema.py`'s `org_command_queue` definition). Left as a flagged gap rather than silently patched in, since closing it properly means either documenting each here or narrowing this section's scope to something `docs/dev_history.md` already covers better.
 
 ---
 
@@ -195,10 +195,6 @@ Assigns a mission to one of the player's organizations. Valid missions are: `idl
 Assigns a task to a pod belonging to the player's organization. Valid tasks: `idle`, `produce_energy`, `produce_food`, `produce_goods`, `scan`. Tasks take effect immediately and persist until changed. Pods continue running their task regardless of whether their parent ship is in transit (except `scan`, whose reveal is suppressed during transit, and `produce_energy`, which has no sector to draw from).
 
 For `task = scan`, an aim may optionally be supplied in the same call as either a compass `bearing` or an explicit `offset_x/y/z`. If omitted, the pod takes the scan task with no aim — `set_pod_scan_bearing` must follow before end of turn, or the pod pays its food cost and reveals nothing.
-
-### Set Pod Scan Bearing (`set_pod_scan_bearing`)
-
-Aims a pod already on the `scan` task. See [Scanning](#scanning) for the bearing vocabulary. An out-of-range aim is **rejected when set** rather than at resolution: an aim is an offset, so its range is fixed and cannot drift.
 
 ### Rename Organization (`rename_organization`)
 
@@ -226,13 +222,13 @@ Available while a ship is in transit. Rubber-bands the ship back to its `origin_
 
 ### Set Organization Scan Bearing (`set_org_scan_bearing`)
 
-Aims an organization's **own** sensors. Every ship and colony can scan one sector per turn on its own account — a ship's bridge, a colony's headquarters — without dedicating a pod to it. Identical in every rule to a scan pod: same food cost, same range, same transit suppression. An organization that also carries scan pods gets both, and each pays its own way.
+Aims an organization's **own** sensors. Every ship and colony can scan one sector per turn on its own account — a ship's bridge, a colony's headquarters — without dedicating a pod to it. Identical in every rule to a scan pod: same food cost, same range, and the same behavior in transit — the cost is paid, the reveal is suppressed. An organization that also carries scan pods gets both, and each pays its own way.
 
 ### Set Pod Scan Bearing (`set_pod_scan_bearing`)
 
 Aims a pod already on the `scan` task. Same vocabulary and same rules as the organization's own sensors.
 
-Both take either a compass `bearing` or an explicit `offset_x/y/z`, and passing neither clears the aim (and stops paying for it).
+Both take either a compass `bearing` or an explicit `offset_x/y/z`, and passing neither clears the aim (and stops paying for it). An out-of-range aim is **rejected when set** rather than at resolution: an aim is an offset, so its range is fixed and cannot drift.
 
 ---
 
@@ -311,7 +307,7 @@ Ownership-gated — only the calling player's data is returned. Lives in `organi
 
 What's actually built: every gameplay tool that has something worth displaying returns a `display` dict alongside its raw data — `rows_key`, `columns`, optional `header`/`column_labels`/`footer`, or `kind: "map"` for a grid (see `show_sector_neighborhood`). `views/render.py`'s `render_status()` (tables) and `render_map()` (grids) turn that into markdown, dispatching purely on the *shape* of the `display` block, never on which tool produced it — no per-tool-name branching, so any future tool returning either shape renders with zero changes here.
 
-The response itself is controlled by a `response_format` argument on every tool call (`xsettlers_mcp/server.py`'s `call_tool`, not a per-tool schema property): `markdown_view` (default) returns both the raw JSON and the rendered markdown; `data_only` returns JSON alone; `html_svg` is reserved for a future graphics response and currently falls back to `markdown_view`. Two additional mechanisms steer an LLM client toward actually displaying the rendered markdown rather than reconstructing its own from the JSON — an MCP `instructions` string sent once at session `initialize`, and a repeated directive block appended to every `markdown_view` response. Convention alone does not hold — a client left to its own devices rebuilds its own table from the JSON. See `docs/TODO.md`'s "default display" note if that's still there, or `xsettlers_mcp/server.py`'s `SERVER_INSTRUCTIONS`/`RENDER_DIRECTIVE` directly.
+The response itself is controlled by a `response_format` argument on every tool call (`xsettlers_mcp/server.py`'s `call_tool`, not a per-tool schema property): `markdown_view` (default) returns both the raw JSON and the rendered markdown; `data_only` returns JSON alone; `html_svg` returns the JSON plus a server-rendered SVG document for the tools listed in `server.py`'s `SVG_RENDERERS` (today `show_organization` alone), and falls back to `markdown_view` for the rest. **The server draws; no client ever executes JavaScript** — that is what keeps the graphics client-agnostic. Two additional mechanisms steer an LLM client toward actually displaying the rendered markdown rather than reconstructing its own from the JSON — an MCP `instructions` string sent once at session `initialize`, and a repeated directive block appended to every `markdown_view` response. Convention alone does not hold — a client left to its own devices rebuilds its own table from the JSON. See `xsettlers_mcp/server.py`'s `SERVER_INSTRUCTIONS`/`RENDER_DIRECTIVE`.
 
 There is no separate debug-vs-player view distinction at the rendering layer — every tool is already ownership-gated to the calling player at the data layer (ownership checks inline in each tool, not a rendering-time filter), so there's nothing left for a render step to additionally hide.
 

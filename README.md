@@ -29,7 +29,7 @@ It serves MCP's streamable HTTP transport (`POST /mcp`, `GET /health`) and is de
 - [Data Model & Storage Design](docs/data_model_and_storage_design.md)
 - [UI & Rendering Design](docs/ui_and_rendering_design.md)
 - [Known TODOs](docs/TODO.md) — open work only
-- [Design Direction](docs/design_direction.md) — decided or explored, not built
+- Design Direction — moved to `../xsettlers-designer/docs/design_direction.md`; game design lives in the designer repo
 - [Dev History](docs/dev_history.md) — settled decisions, findings from play, recovery pointers
 
 ## Status

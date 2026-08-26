@@ -19,7 +19,7 @@ DEFAULT_STARTING_FILL = 0.3
 # so this is written straight over whatever home rolled (db/bootstrap.py) --
 # home is not expressed as a hotspot even though the map layer could carry it.
 # Per-scenario by design. Pod throughput, not the sector, is what actually
-# limits a player; see docs/design_direction.md.
+# limits a player; see ../xsettlers-designer/docs/design_direction.md.
 #
 # NOT the "sentinel sector" (id = -1), the parking slot for ships in transit,
 # which must stay at 0 energy -- that zero is the entire mechanism

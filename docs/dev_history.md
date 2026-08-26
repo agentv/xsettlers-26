@@ -12,6 +12,12 @@ file holds only the things neither of them can tell you:
 If a fact is visible in the code, it does not belong here. See `docs/TODO.md`
 for what is still outstanding.
 
+**Consulted, not read.** Comments and docs point here by name when a rule needs
+its reasoning; that pointer is the way in. Reading this file front to back to
+get oriented means paying for every decision ever made in order to answer one
+question, which is why `scripts/shrink.py` counts it as on-demand rather than
+as something a session reads before starting.
+
 ## Decisions
 
 **One SQLite database per game instance**, not a shared database with a

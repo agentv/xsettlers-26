@@ -79,7 +79,10 @@ class Ref:
 #   ondemand + the rest of docs/, paid when a task touches them
 MEMORY_INDEX = Path.home() / ".claude/projects" / \
     "-Users-vincentlowe-Documents-src-xsettlers26/memory/MEMORY.md"
-DIRECTED = ("docs/TODO.md", "docs/dev_history.md")
+# What CLAUDE.md sends a session to read before starting work. dev_history.md
+# is deliberately NOT here: it is a lookup consulted from a pointer at the
+# point of use, not part of orientation, and a decision log only ever grows.
+DIRECTED = ("docs/TODO.md",)
 
 def est_tokens(text: str) -> int:
     """

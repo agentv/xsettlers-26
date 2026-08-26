@@ -211,6 +211,25 @@ running and could be seconds long at a 300s cadence. The clock now holds
 `engine/clock.py` reads `games` directly rather than through
 `xsettlers_mcp.game_select`, since engine/ never imports upward.
 
+**Lobby sizing moved onto the scenario in GameHouse (2026-08-26).** A
+`register_game` scenarios entry is now either a bare key or an object carrying
+that scenario's own `min_players`/`max_players`/`wait_window_seconds`, with the
+game-level numbers as the fallback; `gamehouse_mcp/registry.lobby_shape()`
+resolves the pair and every lobby decision reads through it. xsettlers publishes
+all four scenarios with their own sizing (`registered_scenarios()`), so Solo — 1
+player on a 0s window — is offerable alongside Diaspora's 2 for the first time.
+Before this, one registration carried one shape for the whole service and Solo
+had to be withheld rather than mis-lobbied. The bare-key form is unchanged, so
+neither side needed the other to deploy first.
+
+**The GameHouse duplicate-join crash is closed from both ends.** `join_lobby` is
+now idempotent per person upstream, so one Person retrying a join no longer
+fills two seats with one `player_id`. On this side `start_session` refuses a
+roster containing the same `player_id` twice instead of raising out of
+`bootstrap_game()` on `players.email`'s UNIQUE constraint — the synthesized
+`gamehouse-<id>@handoff` address is what collides, and an error GameHouse can
+read beats a traceback.
+
 ## Findings from play
 
 **A tool declared in three places will eventually disagree.** Before the

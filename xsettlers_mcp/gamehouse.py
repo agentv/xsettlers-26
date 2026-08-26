@@ -8,10 +8,10 @@ start_session's scenario_key. xsettlers' part is to publish the list at
 registration -- push, not pull; GameHouse stores it in game_scenario and never
 interrogates this service for it -- and to bootstrap whichever key comes back.
 
-Registration carries only one lobby shape for the whole game, so the published
-list is the scenarios that share it (see registrable_scenarios and the note by
-SCENARIO_FILE); a scenario sized differently stays unregistered rather than
-mis-lobbied.
+Every scenario is published with its own lobby sizing (see
+registered_scenarios), so a solo scenario and a two-player one can both be
+offered by the same service. The game-level min/max/wait in the same call stay
+as GameHouse's fallback for a scenario that declares none.
 
 Two directions of traffic:
   - register_with_gamehouse(): xsettlers acts as an MCP CLIENT against
@@ -40,14 +40,6 @@ SCENARIO_FILE = "config/game0.yaml"
 SCENARIO_NAME = "game0"
 GAME_NAME = "xsettlers26"
 
-# Registration carries ONE lobby shape for the whole game (GameHouse's `game`
-# row holds min_players/max_players/wait_window_seconds; `game_scenario` holds
-# only a scenario_key). A scenario whose own shape differs therefore cannot be
-# offered through GameHouse without mis-sizing its lobby, so it is left
-# unregistered -- GameHouse validates scenario_key against the registered list,
-# so an omitted scenario is simply not selectable rather than wrongly sized.
-# Lifting this needs min/max/wait to move onto game_scenario on GameHouse's
-# side; tracked in docs/TODO.md.
 VALID_KINDS = {"person", "npc"}
 
 # The results envelope: the two fields every game handing results to GameHouse
@@ -94,10 +86,6 @@ async def register_with_gamehouse() -> dict:
 
     sc = load_starting_configuration(SCENARIO_FILE)
     lobby = sc.lobby
-    scenario_keys, skipped = registrable_scenarios(lobby)
-    if skipped:
-        print(f"Not registering {sorted(skipped)} with GameHouse: lobby shape "
-              f"differs from {SCENARIO_NAME}'s and registration carries only one.")
     try:
         async with streamablehttp_client(gamehouse_url) as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -110,7 +98,7 @@ async def register_with_gamehouse() -> dict:
                     "wait_window_seconds": lobby.wait_window_seconds,
                     "npc_profile_schema": npc_profile_schema(),
                     "scoreboard_schema": scoreboard_schema(),
-                    "scenarios": scenario_keys,
+                    "scenarios": registered_scenarios(),
                 })
     except Exception as exc:
         return {"ok": False, "error": f"register_game call to {gamehouse_url} failed: {exc}"}
@@ -173,26 +161,25 @@ def npc_profile_schema() -> dict:
     }
 
 
-def registrable_scenarios(lobby) -> tuple[list[str], list[str]]:
+def registered_scenarios() -> list[dict]:
     """
-    Splits the scenario library into what GameHouse can be offered and what it
-    cannot, against the single lobby shape this registration carries (see the
-    note by SCENARIO_FILE). Returns (keys, skipped), both sorted.
+    The whole scenario library, each entry carrying its own lobby sizing.
 
-    A scenario qualifies when its own derived min/max players and its authored
-    wait window all match. Nothing here is optional or fuzzy: a mismatched
-    scenario handed to GameHouse would be lobbied at the wrong size, which is
-    worse than being unavailable.
+    Sizing travels per scenario because a scenario's player count is derived
+    from its own participants list -- Diaspora seats two, Solo seats one, and
+    GameHouse sizes each lobby from the entry rather than from one number for
+    the service (../gamehouse/docs/data_model.md, settled 2026-08-26).
     """
-    keys, skipped = [], []
+    entries = []
     for entry in list_scenarios():
-        other = load_starting_configuration(entry["file"]).lobby
-        target = (lobby.min_players, lobby.max_players, lobby.wait_window_seconds)
-        if (other.min_players, other.max_players, other.wait_window_seconds) == target:
-            keys.append(entry["scenario_name"])
-        else:
-            skipped.append(entry["scenario_name"])
-    return sorted(keys), sorted(skipped)
+        lobby = load_starting_configuration(entry["file"]).lobby
+        entries.append({
+            "scenario_key": entry["scenario_name"],
+            "min_players": lobby.min_players,
+            "max_players": lobby.max_players,
+            "wait_window_seconds": lobby.wait_window_seconds,
+        })
+    return entries
 
 def resolve_scenario(scenario_key: str | None) -> tuple[str, str] | None:
     """
@@ -218,6 +205,14 @@ def _validate_players(players: list, lobby) -> dict | None:
     if not (lobby.min_players <= len(players) <= lobby.max_players):
         return {"error": f"{SCENARIO_NAME} requires between {lobby.min_players} and "
                          f"{lobby.max_players} players, got {len(players)}"}
+    ids = [p.get("player_id") for p in players if isinstance(p, dict)]
+    duplicates = sorted({str(i) for i in ids if ids.count(i) > 1})
+    if duplicates:
+        # Seats are synthesized into players.email as gamehouse-<id>@handoff,
+        # which is UNIQUE -- two seats for one id would raise out of
+        # bootstrap_game() rather than returning. Refused here so a malformed
+        # roster comes back as an error GameHouse can read.
+        return {"error": f"Duplicate player_id in roster: {', '.join(duplicates)}"}
     for p in players:
         if "player_id" not in p or "kind" not in p:
             return {"error": "each player entry requires player_id and kind"}

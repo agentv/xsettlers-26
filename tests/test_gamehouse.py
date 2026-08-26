@@ -362,16 +362,16 @@ def test_scoreboard_schema_declares_the_envelope_and_its_direction():
 
 # --- scenario selection: GameHouse picks, xsettlers bootstraps ---
 
-def test_registrable_scenarios_omits_a_differently_sized_lobby():
-    """Registration carries one lobby shape for the whole game, so a scenario
-    sized differently cannot be offered without being mis-lobbied. game_solo
-    is 1 player on a 0s wait window against Diaspora's 2 and 120s."""
-    from xsettlers_mcp.gamehouse import registrable_scenarios
-    from config.loader import load_starting_configuration
-    keys, skipped = registrable_scenarios(load_starting_configuration("config/game0.yaml").lobby)
-    assert "game0" in keys and "game1" in keys
-    assert skipped == ["game_solo"]
-    assert "game_solo" not in keys
+def test_registered_scenarios_publishes_each_scenarios_own_sizing():
+    """GameHouse sizes each lobby from the entry, so a scenario's own player
+    count travels with it -- Diaspora seats 2 on a 120s window, Solo seats 1
+    on a 0s one, and both are offerable by the same service."""
+    from xsettlers_mcp.gamehouse import registered_scenarios
+    by_key = {e["scenario_key"]: e for e in registered_scenarios()}
+    assert by_key["game0"] == {"scenario_key": "game0", "min_players": 2,
+                               "max_players": 2, "wait_window_seconds": 120}
+    assert by_key["game_solo"] == {"scenario_key": "game_solo", "min_players": 1,
+                                   "max_players": 1, "wait_window_seconds": 0}
 
 def test_resolve_scenario_maps_a_key_to_its_file():
     from xsettlers_mcp.gamehouse import resolve_scenario
@@ -407,5 +407,16 @@ def test_start_session_rejects_an_unknown_scenario_key():
     _clear_active_game()
     result = start_session("tok-x", [_person(1), _npc("npc-1")], scenario_key="not-a-scenario")
     assert "error" in result and "not-a-scenario" in result["error"]
+    with connection() as conn:
+        assert conn.execute("SELECT COUNT(*) n FROM games").fetchone()["n"] == 0
+
+def test_start_session_refuses_a_roster_with_one_player_twice():
+    """Seat emails are synthesized from player_id and the column is UNIQUE, so
+    a duplicated id used to raise out of bootstrap instead of returning. The
+    lobby-side cause is fixed in GameHouse; this keeps the crash from being
+    the way we find out about the next one."""
+    _clear_active_game()
+    result = start_session("tok-dup", [_person(7), _person(7)])
+    assert "error" in result and "7" in result["error"]
     with connection() as conn:
         assert conn.execute("SELECT COUNT(*) n FROM games").fetchone()["n"] == 0

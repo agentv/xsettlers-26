@@ -334,6 +334,27 @@ class _Field:
     def bottom(self) -> float:
         return self.top + self.size
 
+    def cell_at(self, px: float, py: float):
+        """Which lattice cell a point on the canvas falls in."""
+        col = int((px - self.left) // self.cell)
+        row = int((py - self.top) // self.cell)
+        if not (0 <= col < len(self.x_labels) and 0 <= row < len(self.y_labels)):
+            return None
+        return (self.x_labels[col], self.y_labels[row])
+
+    @property
+    def void_cells(self) -> set:
+        """
+        Blank cells that fall *inside* the range disc.
+
+        Only the energy barrier produces these: a viewport near the origin has
+        cells within range that are nonetheless nothing at all. Empty away from
+        the origin, which is the common case and costs nothing there.
+        """
+        r2 = self.radius ** 2
+        return {(x, y) for (x, y) in self.blank
+                if (x - self.cx) ** 2 + (y - self.cy) ** 2 <= r2}
+
 
 def _starfield(field: _Field, seed: tuple) -> list:
     """
@@ -346,17 +367,25 @@ def _starfield(field: _Field, seed: tuple) -> list:
     turns "the blank corners trace the disc" (docs/ui_and_rendering_design.md)
     from a thing a player has to notice into a picture.
 
+    Near the origin the void reaches inside the disc. Cells past the energy
+    barrier hold nothing and can hold nothing, so by the same rule they take
+    stars too -- and that is the whole of how the barrier is drawn. No edge, no
+    label, no legend line: the sky simply comes further in than it should, and
+    a captain sitting near the origin can see that their neighborhood is the
+    wrong shape without being told why.
+
     Seeded off the centre coordinate, so the same neighborhood has the same
     sky every turn and the map does not shimmer between refreshes.
     """
     rng = random.Random(hash(seed) & 0xffffffff)
     mx, my = field.mid
     inner = field.disc_r + 3
+    void = field.void_cells
     marks = []
     for _ in range(70):
         x = field.left + rng.random() * field.size
         y = field.top + rng.random() * field.size
-        if (x - mx) ** 2 + (y - my) ** 2 <= inner ** 2:
+        if (x - mx) ** 2 + (y - my) ** 2 <= inner ** 2 and field.cell_at(x, y) not in void:
             continue
         shade = rng.random()
         marks.append({"kind": "circle", "cx": x, "cy": y,
@@ -373,13 +402,16 @@ def _axis_marks(field: _Field) -> list:
     size = 9 if field.cell >= 20 else 8
     marks = []
     for x in field.x_labels:
-        if (x - field.cx) % stride:
+        # No label on a coordinate that cannot exist. The axes are there so a
+        # coordinate can be read off and handed to preview_move; a negative one
+        # would be refused, and offering it is worse than offering nothing.
+        if x < 0 or (x - field.cx) % stride:
             continue
         px, _ = field.point(x, field.y_labels[0])
         marks.append(_text(px, field.top - 4, str(x), size,
                            _MUTED if x == field.cx else _AXIS, anchor="middle"))
     for y in field.y_labels:
-        if (y - field.cy) % stride:
+        if y < 0 or (y - field.cy) % stride:
             continue
         _, py = field.point(field.x_labels[0], y)
         marks.append(_text(_MARGIN + _Y_GUTTER - 5, py + 3, str(y), size,
@@ -408,6 +440,14 @@ def _ground_marks(field: _Field, seed: tuple) -> list:
         # metric changes to Chebyshev this becomes a square and says so.
         {"kind": "circle", "cx": mx, "cy": my, "r": field.disc_r + 1, "fill": _BORDER},
         {"kind": "circle", "cx": mx, "cy": my, "r": field.disc_r, "fill": _FIELD},
+        # Take the lit ground back out of any cell the barrier has cut off.
+        # The disc is one circle and the mark vocabulary has no way to subtract
+        # from it, so the void is painted back over. Nothing is emitted away
+        # from the origin, where void_cells is empty.
+        *[{"kind": "rect", "x": field.left + (x - field.x_labels[0]) * field.cell,
+           "y": field.top + (y - field.y_labels[0]) * field.cell,
+           "w": field.cell + 0.5, "h": field.cell + 0.5, "fill": _SPACE}
+          for (x, y) in sorted(field.void_cells)],
         *_axis_marks(field),
     ]
 

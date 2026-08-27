@@ -4,6 +4,8 @@
 
 XSettlers is a multiplayer, turn-based space strategy game played through any MCP-speaking client (Slack is the intended home, but nothing in the server is Slack-specific). Players manage organizations (ships and colonies) across a sector map, competing to expand territory, produce resources, and outlast rivals.
 
+**The game plays on a two-dimensional grid, and its coordinates are three-dimensional.** Sector coordinates and distance math are `(x, y, z)` throughout, and `z` is always `0`. That is a standing construct, not an oversight and not a gap waiting to be closed: the MVP will only ever be played on a plane, the third axis is carried anyway, and it stays carried until a later version redesigns around it. Do not remove `z` from a signature, a scenario, or a payload to tidy it away.
+
 ---
 
 # Players & Game Instance

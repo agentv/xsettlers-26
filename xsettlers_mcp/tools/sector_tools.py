@@ -140,6 +140,14 @@ def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict,
     the most actionable number on either map. Out of range renders blank
     rather than unknown: the two are different claims.
 
+    Cells past the energy barrier -- any negative coordinate, which is
+    unreachable by construction (see docs/product_requirements.md) -- render
+    blank, exactly as out-of-range cells do, and are not counted as unknown.
+    They are not somewhere you have failed to look; there is nothing there to
+    look at. Deliberately unlabelled: a viewport near the origin simply comes
+    out lopsided, and no legend explains why. Most play happens nowhere near
+    it, and the ragged disc is the whole of the telling.
+
     `aims` maps (x, y) to the scanners aimed there, and suffixes AIM_CELL onto
     whatever cell the report built. It is applied here rather than folded into
     the cell string because a scan is most often aimed at a sector nobody has
@@ -152,7 +160,7 @@ def _draw_grid(cx: int, cy: int, radius: int, by_coord: dict,
     for y in range(cy - radius, cy + radius + 1):
         cells = []
         for x in x_labels:
-            if (x - cx) ** 2 + (y - cy) ** 2 > r2:
+            if (x - cx) ** 2 + (y - cy) ** 2 > r2 or x < 0 or y < 0:
                 cells.append(EMPTY_CELL)
                 continue
             known = by_coord.get((x, y))

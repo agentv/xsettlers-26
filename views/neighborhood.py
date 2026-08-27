@@ -284,6 +284,15 @@ class _Field:
                  width: int = None, scales: dict = None):
         self.x_labels = [int(v) for v in grid["x_labels"]]
         self.y_labels = [int(r["label"]) for r in grid["rows"]]
+        # Which cells the lattice actually drew. Read, never re-derived: the
+        # tool decides what is in range, and it knows things this layer does
+        # not -- the energy barrier clips the disc at any negative coordinate,
+        # so a viewport near the origin is a quarter of a circle. A second
+        # Euclidean test here would draw sectors that are not there.
+        self.blank = {(x, int(row["label"]))
+                      for row in grid["rows"]
+                      for x, cell in zip(self.x_labels, row["cells"])
+                      if not cell.strip()}
         self.radius = radius
         self.cx, self.cy = center["x"], center["y"]
         self.left = _MARGIN + _Y_GUTTER
@@ -407,10 +416,9 @@ def _unknown_marks(field: _Field, known: set) -> list:
     """A dot for every in-range cell nobody has ever seen. Small and cool: it
     is an absence, and it must not out-shout a sector that is really there."""
     marks = []
-    r2 = field.radius ** 2
     for y in field.y_labels:
         for x in field.x_labels:
-            if (x - field.cx) ** 2 + (y - field.cy) ** 2 > r2 or (x, y) in known:
+            if (x, y) in field.blank or (x, y) in known:
                 continue
             px, py = field.point(x, y)
             marks.append({"kind": "circle", "cx": px, "cy": py,

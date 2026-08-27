@@ -698,14 +698,19 @@ def test_a_pods_scan_covers_a_sector_exactly_as_the_orgs_own_sensors_do(as_pod):
     cell it lands on and the reported bearing are identical either way. The
     target has never been seen, which is the ordinary case for a scan: the
     marker has to land on a cell the lattice synthesized, not on a sector row.
+
+    Sited clear of the origin on purpose. An aim into negative space still
+    resolves and still reports, but the grid draws nothing past the energy
+    barrier -- so a scanner parked at the origin would be testing the barrier
+    rather than the parity this is about.
     """
     pid = seed_player()
-    oid = _scanner_at(pid, (0, 0, 0), (1, -1, 0), as_pod=as_pod)   # NE
+    oid = _scanner_at(pid, (1, 1, 0), (1, -1, 0), as_pod=as_pod)   # NE -> (2,0,0)
     view = show_sector_neighborhood("U_P1", org_id=oid)
 
-    assert _grid_cell(view, 1, -1) == "·>"
+    assert _grid_cell(view, 2, 0) == "·>"
     assert [(a["bearing"], a["target_x"], a["target_y"]) for a in view["scan_aims"]] \
-        == [("NE", 1, -1)]
+        == [("NE", 2, 0)]
     assert AIM_LEGEND in view["display"]["legend"]
 
 
@@ -754,10 +759,41 @@ def test_two_scanners_on_one_sector_mark_it_once_and_both_are_listed():
 def test_a_coordinate_centred_map_shows_coverage_too():
     """Coverage is a property of the frame, not of how the frame was chosen."""
     pid = seed_player()
-    _scanner_at(pid, (0, 0, 0), (1, -1, 0))                               # NE
-    view = show_sector_neighborhood("U_P1", center_x=0, center_y=0, center_z=0)
+    _scanner_at(pid, (1, 1, 0), (1, -1, 0))                               # NE -> (2,0,0)
+    view = show_sector_neighborhood("U_P1", center_x=1, center_y=1, center_z=0)
 
-    assert (1, -1) in _covered(view)
+    assert (2, 0) in _covered(view)
+
+
+def test_the_grid_stops_at_the_energy_barrier():
+    """
+    Negative coordinates are unreachable by construction, so the viewport draws
+    nothing there and counts nothing there.
+
+    The alternative was what shipped first: a map centred on the origin
+    offering 49 cells in range, 32 of them past the barrier, all marked "in
+    range, never seen" -- and inflating unknown_in_range, which sector_tools
+    calls the most actionable number on either map, by two thirds with sectors
+    no scan can ever reach.
+
+    Nothing labels the edge. A viewport near the origin simply comes out
+    lopsided; most play happens nowhere near it, and the ragged disc is the
+    whole of the telling.
+    """
+    pid = seed_player()
+    ship = seed_ship(pid, seed_sector(0, 0, 0))
+    seed_player_sector(pid, seed_sector(0, 0, 0), 100)
+    view = show_sector_neighborhood("U_P1", org_id=ship)
+
+    rows = {int(r["label"]): r["cells"] for r in view["display"]["grid"]["rows"]}
+    labels = [int(x) for x in view["display"]["grid"]["x_labels"]]
+    for y, cells in rows.items():
+        for x, cell in zip(labels, cells):
+            if x < 0 or y < 0:
+                assert cell.strip() == "", f"({x},{y}) drew {cell!r} past the barrier"
+
+    # A quarter disc of radius 4: only x >= 0 and y >= 0 survive.
+    assert view["unknown_in_range"] == 16
 
 
 def test_an_org_in_transit_covers_nothing():

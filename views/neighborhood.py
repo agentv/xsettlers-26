@@ -343,54 +343,102 @@ class _Field:
         return (self.x_labels[col], self.y_labels[row])
 
     @property
-    def void_cells(self) -> set:
+    def barrier(self) -> tuple:
         """
-        Blank cells that fall *inside* the range disc.
+        Where the energy barrier cuts this viewport, as canvas coordinates:
+        (x_edge, y_edge). Everything left of x_edge and everything above
+        y_edge is outside the universe.
 
-        Only the energy barrier produces these: a viewport near the origin has
-        cells within range that are nonetheless nothing at all. Empty away from
-        the origin, which is the common case and costs nothing there.
+        Two straight edges rather than a set of cells. The barrier is defined
+        by the origin, so on a lattice it is exactly the axes -- painting it as
+        half-planes covers the disc's curved rim cleanly, where cell-shaped
+        patches left a lit crescent between the outermost patch and the ring.
+        None where the viewport does not reach the barrier at all, which is
+        every viewport more than a radius from the origin.
         """
-        r2 = self.radius ** 2
-        return {(x, y) for (x, y) in self.blank
-                if (x - self.cx) ** 2 + (y - self.cy) ** 2 <= r2}
+        x_edge = (self.left + (0 - self.x_labels[0]) * self.cell
+                  if self.x_labels[0] < 0 else None)
+        y_edge = (self.top + (0 - self.y_labels[0]) * self.cell
+                  if self.y_labels[0] < 0 else None)
+        return x_edge, y_edge
+
+    def in_void(self, px: float, py: float, margin: float = 1.0) -> bool:
+        """Whether a point on the canvas is somewhere no mark can ever go:
+        past the barrier, or outside the range disc."""
+        x_edge, y_edge = self.barrier
+        if x_edge is not None and px < x_edge:
+            return True
+        if y_edge is not None and py < y_edge:
+            return True
+        mx, my = self.mid
+        return (px - mx) ** 2 + (py - my) ** 2 > (self.disc_r + margin) ** 2
+
+
+def _barrier_marks(field: _Field) -> list:
+    """The void past the barrier, painted back over the lit disc."""
+    x_edge, y_edge = field.barrier
+    marks = []
+    if x_edge is not None:
+        marks.append({"kind": "rect", "x": field.left, "y": field.top,
+                      "w": x_edge - field.left, "h": field.size, "fill": _SPACE})
+    if y_edge is not None:
+        marks.append({"kind": "rect", "x": field.left, "y": field.top,
+                      "w": field.size, "h": y_edge - field.top, "fill": _SPACE})
+    return marks
+
+
+# One star per this much void, in square logical px. Tuned by eye against a
+# 34px cell: sparser and the void reads as a hole punched in the card, denser
+# and it competes with the sector dots it is supposed to sit behind.
+_STAR_AREA = 380.0
+
+# Mostly faint with a few bright ones -- an even brightness reads as texture,
+# not as sky. Brighter than a first pass had them: stars only ever land where a
+# sector dot cannot, so there is no adjacency to be confused by, and the first
+# attempt was so dark against the void that the clipped region read as a hole
+# punched in the card rather than as space.
+_STAR_SHADES = ("#333e60", "#333e60", "#44507a", "#44507a", "#5d6a99",
+                "#7c89b8", "#9aa6d0")
 
 
 def _starfield(field: _Field, seed: tuple) -> list:
     """
-    Stars, drawn only where the map carries no data: the corners of the
-    bounding square that fall outside the range disc.
+    Stars, drawn only where the map carries no data.
 
     On a map anything that looks like a mark is read as a mark, so scattering
-    dim dots among the sector nodes would be inventing sectors. Out beyond the
-    disc there is nothing to confuse them with, and filling that band is what
-    turns "the blank corners trace the disc" (docs/ui_and_rendering_design.md)
-    from a thing a player has to notice into a picture.
+    dim dots among the sector nodes would be inventing sectors. Two regions
+    carry nothing and can carry nothing: outside the range disc, and -- near
+    the origin -- past the energy barrier. The sky fills both, continuously,
+    so a clipped viewport reads as space reaching in rather than as a hole
+    punched in the card.
 
-    Near the origin the void reaches inside the disc. Cells past the energy
-    barrier hold nothing and can hold nothing, so by the same rule they take
-    stars too -- and that is the whole of how the barrier is drawn. No edge, no
-    label, no legend line: the sky simply comes further in than it should, and
-    a captain sitting near the origin can see that their neighborhood is the
-    wrong shape without being told why.
+    That is the whole of how the barrier is drawn. No edge, no label, no legend
+    line: the sky simply comes further in than it should, and a captain near
+    the origin sees their neighborhood is the wrong shape without being told
+    why.
 
-    Seeded off the centre coordinate, so the same neighborhood has the same
-    sky every turn and the map does not shimmer between refreshes.
+    Sampled on a jittered grid rather than at random, so density is even and
+    the same everywhere on every map -- pure random clumps, and a clump reads
+    as something. Seeded off the centre coordinate, so a neighborhood has the
+    same sky every turn and does not shimmer between refreshes.
     """
     rng = random.Random(hash(seed) & 0xffffffff)
-    mx, my = field.mid
-    inner = field.disc_r + 3
-    void = field.void_cells
+    step = _STAR_AREA ** 0.5
+    n = max(1, int(field.size / step))
+    step = field.size / n
     marks = []
-    for _ in range(70):
-        x = field.left + rng.random() * field.size
-        y = field.top + rng.random() * field.size
-        if (x - mx) ** 2 + (y - my) ** 2 <= inner ** 2 and field.cell_at(x, y) not in void:
-            continue
-        shade = rng.random()
-        marks.append({"kind": "circle", "cx": x, "cy": y,
-                      "r": 0.5 + shade * 1.0,
-                      "fill": _lerp_hex("#141a2c", "#4a5578", shade)})
+    for row in range(n + 1):
+        for col in range(n + 1):
+            x = field.left + (col + rng.random()) * step
+            y = field.top + (row + rng.random()) * step
+            if x > field.left + field.size or y > field.top + field.size:
+                continue
+            if not field.in_void(x, y):
+                continue
+            shade = rng.randrange(len(_STAR_SHADES))
+            marks.append({"kind": "circle", "cx": x, "cy": y,
+                          "r": 0.55 + shade * 0.17,
+                          "fill": _STAR_SHADES[shade]})
     return marks
 
 
@@ -427,27 +475,32 @@ def _axis_marks(field: _Field) -> list:
 
 
 def _ground_marks(field: _Field, seed: tuple) -> list:
-    """Everything under the data: the void, the range disc and its edge, the
-    stars in the corners, and the axes."""
+    """
+    Everything under the data: the void, the range disc, the stars and the axes.
+
+    Order is load-bearing. The void is established, the disc is laid on top of
+    it, the barrier takes the disc back off past the axes -- and only then the
+    stars, so that they fall on every part of the void including the part the
+    barrier just restored. Scattering them first put them under the barrier
+    rectangles, which is how the clipped region came out as a flat hole with
+    the sky visible only outside the ring.
+    """
     mx, my = field.mid
     return [
         {"kind": "rect", "x": field.left, "y": field.top, "w": field.size,
          "h": field.size, "fill": _SPACE},
-        *_starfield(field, seed),
         # The Euclidean radius, drawn. Distance is straight-line everywhere in
         # this game (docs/design_direction.md) and the markdown map can only
         # imply it with ragged corners; here it is a circle, and the day the
         # metric changes to Chebyshev this becomes a square and says so.
         {"kind": "circle", "cx": mx, "cy": my, "r": field.disc_r + 1, "fill": _BORDER},
         {"kind": "circle", "cx": mx, "cy": my, "r": field.disc_r, "fill": _FIELD},
-        # Take the lit ground back out of any cell the barrier has cut off.
-        # The disc is one circle and the mark vocabulary has no way to subtract
-        # from it, so the void is painted back over. Nothing is emitted away
-        # from the origin, where void_cells is empty.
-        *[{"kind": "rect", "x": field.left + (x - field.x_labels[0]) * field.cell,
-           "y": field.top + (y - field.y_labels[0]) * field.cell,
-           "w": field.cell + 0.5, "h": field.cell + 0.5, "fill": _SPACE}
-          for (x, y) in sorted(field.void_cells)],
+        # Take the lit ground back out past the barrier. The disc is one circle
+        # and the mark vocabulary cannot subtract from one, so the void is
+        # painted over it -- two rectangles, and none at all more than a radius
+        # from the origin.
+        *_barrier_marks(field),
+        *_starfield(field, seed),
         *_axis_marks(field),
     ]
 

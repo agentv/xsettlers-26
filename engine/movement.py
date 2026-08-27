@@ -82,7 +82,7 @@ def apply_confirm_move(cur, org_id: int, player_id: int,
     cur/transaction -- no connection management, no ownership check (the
     caller's job). Shared by xsettlers_mcp.tools.navigation_tools.confirm_move
     (thin wrapper: ownership check + its own connection/commit) and
-    engine/ship_log.py's before_arrival/after_arrival dispatch, which runs
+    engine/ship_log.py's upon_arrival dispatch, which runs
     inside engine/turn.py's own open transaction -- a second self-connecting
     call there would fail ("database is locked": db/connection.py sets no
     busy_timeout and uses the default rollback-journal isolation, so a second
@@ -109,16 +109,16 @@ def apply_confirm_move(cur, org_id: int, player_id: int,
     cur.execute("""INSERT OR REPLACE INTO arrival_queue
         (arrival_turn,org_id,dest_x,dest_y,dest_z,origin_sector_id) VALUES (?,?,?,?,?,?)""",
         (arrival_turn, org_id, dest_x, dest_y, dest_z, origin_sector_id))
-    _dispatch_during_transit(cur, org_id, player_id, current_turn)
+    _dispatch_upon_departure(cur, org_id, player_id, current_turn)
     return {"confirmed": True, "ship_id": org_id, "from_sector_id": origin_sector_id,
             "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z, "arrival_turn": arrival_turn,
             "turns_needed": turns_needed}
 
-def _dispatch_during_transit(cur, org_id: int, player_id: int, current_turn: int):
+def _dispatch_upon_departure(cur, org_id: int, player_id: int, current_turn: int):
     """
-    Fires the instant this org enters transit -- the "during_transit" phase,
+    Fires the instant this org enters transit -- the "upon_departure" phase,
     which is event-triggered on departure rather than
-    turn-based like before_arrival/after_arrival/at_turn, so it's dispatched
+    turn-based like upon_arrival/at_turn, so it's dispatched
     here rather than through engine/turn.py's resolve_turn sweep
     (engine/ship_log.py's dispatch_due_commands). The only action this phase
     supports is set_pod_task -- pod tasking is the one thing NOT locked by an
@@ -130,7 +130,7 @@ def _dispatch_during_transit(cur, org_id: int, player_id: int, current_turn: int
     """
     rows = cur.execute(
         """SELECT id,action,params FROM org_command_queue
-           WHERE org_id=? AND trigger_phase='during_transit'""", (org_id,)).fetchall()
+           WHERE org_id=? AND trigger_phase='upon_departure'""", (org_id,)).fetchall()
     for row in rows:
         if row["action"] == "set_pod_task":
             # Guarded for the same reason as engine/ship_log.py's sweep: a

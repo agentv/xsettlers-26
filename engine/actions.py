@@ -22,8 +22,13 @@ cover exactly these names, so a fifth action cannot be half-added.
 ACTION_NAMES = frozenset({"move", "set_pod_task", "colonize", "aim_scan"})
 
 # Entering transit locks an org's own mission entirely, but not its pods'
-# tasks -- which is the whole reason the during_transit phase exists, and why
+# tasks -- which is the whole reason the upon_departure phase exists, and why
 # it is the one phase with a narrower whitelist.
-DURING_TRANSIT_ACTIONS = frozenset({"set_pod_task"})
+UPON_DEPARTURE_ACTIONS = frozenset({"set_pod_task"})
 
-TRIGGER_PHASES = frozenset({"during_transit", "before_arrival", "after_arrival", "at_turn"})
+# Three moments, and they are the three a player actually names: getting
+# under way, landing, or a turn they pick themselves. An "one turn after
+# landing" phase was removed -- a caller who wants that knows the arrival
+# turn and can say at_turn, and every extra primitive is another word the
+# grammar has to teach.
+TRIGGER_PHASES = frozenset({"upon_departure", "upon_arrival", "at_turn"})

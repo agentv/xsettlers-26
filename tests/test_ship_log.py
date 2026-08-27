@@ -26,8 +26,19 @@ def test_queue_command_rejects_wrong_owner():
     sid = seed_sector(0, 0, 0)
     ship = seed_ship(p1, sid)
     confirm_move("U_P1", ship, 5, 0, 0, jump_range_per_turn=1)
-    result = queue_command("U_P2", ship, "before_arrival", "move", {"dest_x": 9, "dest_y": 0, "dest_z": 0})
+    result = queue_command("U_P2", ship, "upon_arrival", "move", {"dest_x": 9, "dest_y": 0, "dest_z": 0})
     assert "error" in result
+
+def test_after_arrival_is_no_longer_a_phase():
+    """Removed deliberately: anyone wanting "one turn after landing" knows the
+    arrival turn and can say at_turn. Asserted so the word cannot creep back."""
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(0, 0, 0))
+    confirm_move("U_P1", ship, 2, 0, 0, jump_range_per_turn=1)
+    result = queue_command("U_P1", ship, "after_arrival", "move",
+                           {"dest_x": 5, "dest_y": 0, "dest_z": 0})
+    assert "Invalid trigger_phase" in result["error"]
+
 
 def test_queue_command_rejects_invalid_trigger_phase():
     p1 = seed_player()
@@ -41,47 +52,31 @@ def test_queue_command_rejects_invalid_action():
     sid = seed_sector(0, 0, 0)
     ship = seed_ship(p1, sid)
     confirm_move("U_P1", ship, 5, 0, 0, jump_range_per_turn=1)
-    result = queue_command("U_P1", ship, "before_arrival", "cancel_move", {})
+    result = queue_command("U_P1", ship, "upon_arrival", "cancel_move", {})
     assert "Invalid action" in result["error"]
 
-def test_queue_command_requires_transit_for_before_arrival():
+def test_queue_command_requires_transit_for_upon_arrival():
     p1 = seed_player()
     sid = seed_sector(0, 0, 0)
     ship = seed_ship(p1, sid)  # stationary -- never moved
-    result = queue_command("U_P1", ship, "before_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
+    result = queue_command("U_P1", ship, "upon_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
     assert "in transit" in result["error"]
 
-def test_queue_command_requires_transit_for_after_arrival():
-    p1 = seed_player()
-    sid = seed_sector(0, 0, 0)
-    ship = seed_ship(p1, sid)
-    result = queue_command("U_P1", ship, "after_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
-    assert "in transit" in result["error"]
-
-def test_queue_command_computes_resolve_turn_for_before_arrival():
+def test_queue_command_computes_resolve_turn_for_upon_arrival():
     p1 = seed_player()
     sid = seed_sector(0, 0, 0)
     ship = seed_ship(p1, sid)
     move = confirm_move("U_P1", ship, 2, 0, 0, jump_range_per_turn=1)
-    result = queue_command("U_P1", ship, "before_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
+    result = queue_command("U_P1", ship, "upon_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
     assert result["ok"] is True
     assert result["resolve_turn"] == move["arrival_turn"]
 
-def test_queue_command_computes_resolve_turn_for_after_arrival():
-    p1 = seed_player()
-    sid = seed_sector(0, 0, 0)
-    ship = seed_ship(p1, sid)
-    move = confirm_move("U_P1", ship, 2, 0, 0, jump_range_per_turn=1)
-    result = queue_command("U_P1", ship, "after_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
-    assert result["ok"] is True
-    assert result["resolve_turn"] == move["arrival_turn"] + 1
-
-def test_before_arrival_fires_same_end_of_turn_call_that_lands_org():
+def test_upon_arrival_fires_same_end_of_turn_call_that_lands_org():
     p1 = seed_player()
     sid = seed_sector(0, 0, 0)
     ship = seed_ship(p1, sid)
     move = confirm_move("U_P1", ship, 2, 0, 0, jump_range_per_turn=1)  # arrival_turn = 0+2+1 = 3
-    queue_command("U_P1", ship, "before_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
+    queue_command("U_P1", ship, "upon_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
 
     for _ in range(3):  # turn 0->1->2->3: the third call is the one that lands arrival_turn=3
         end_of_turn()
@@ -94,54 +89,46 @@ def test_before_arrival_fires_same_end_of_turn_call_that_lands_org():
     assert (aq["dest_x"], aq["dest_y"], aq["dest_z"]) == (5, 0, 0)
     assert _queue_count() == 0  # one-shot: dispatched and deleted
 
-def test_after_arrival_does_not_fire_until_the_following_end_of_turn_call():
-    p1 = seed_player()
-    sid = seed_sector(0, 0, 0)
-    ship = seed_ship(p1, sid)
-    move = confirm_move("U_P1", ship, 2, 0, 0, jump_range_per_turn=1)  # arrival_turn = 3
-    queue_command("U_P1", ship, "after_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
-
-    for _ in range(3):  # the landing call -- after_arrival must NOT have fired yet
-        end_of_turn()
-    org = _org(ship)
-    assert org["sector_id"] != -1  # landed, not yet re-departed
-    assert org["mission"] == "idle"
-    assert _queue_count() == 1  # still pending
-
-    end_of_turn()  # one more pass: now it fires
-    org = _org(ship)
-    assert org["sector_id"] == -1
-    assert org["mission"] == "move"
-    assert _queue_count() == 0
-
 def test_dispatch_skips_when_org_mission_changed_before_trigger_fires():
+    """A queued order must not clobber orders the player has since given by hand.
+
+    Written against at_turn because that is now the only phase where a player
+    has a window to intervene. An upon_arrival order fires in the same
+    end_of_turn pass as the landing, and step 2's arrival UPDATE sets
+    mission='idle' immediately before dispatch -- so an arrival-relative
+    command always sees an idle org no matter what the player did, and this
+    guard is unreachable through it.
+    """
     p1 = seed_player()
     sid = seed_sector(0, 0, 0)
     ship = seed_ship(p1, sid)
-    confirm_move("U_P1", ship, 2, 0, 0, jump_range_per_turn=1)  # arrival_turn = 3
-    queue_command("U_P1", ship, "after_arrival", "move", {"dest_x": 5, "dest_y": 0, "dest_z": 0})
+    queued = queue_command("U_P1", ship, "at_turn", "move",
+                           {"dest_x": 5, "dest_y": 0, "dest_z": 0}, turn=2)
+    # Asserted, not assumed: a queue_command that started refusing this phase
+    # would leave every assertion below passing for the wrong reason.
+    assert queued["ok"] is True
+    assert _queue_count() == 1
 
-    for _ in range(3):
-        end_of_turn()  # lands at turn 3, mission='idle'
+    end_of_turn()
 
-    # Player manually gives the org new orders before after_arrival's turn 4 fires.
+    # Player gives the org new orders before the queued one comes due.
     with connection() as conn:
         conn.execute("UPDATE organizations SET mission='defend' WHERE id=?", (ship,))
 
-    end_of_turn()  # after_arrival is due now, but must not clobber the manual order
+    end_of_turn()  # the queued move is due now, and must not clobber
 
     org = _org(ship)
     assert org["mission"] == "defend"
-    assert org["sector_id"] != -1  # never re-departed
+    assert org["sector_id"] != -1  # never departed toward (5,0,0)
     assert _queue_count() == 0  # the stale row was still consumed, just not acted on
 
-def test_before_arrival_dispatches_set_pod_task():
+def test_upon_arrival_dispatches_set_pod_task():
     p1 = seed_player()
     sid = seed_sector(0, 0, 0)
     ship = seed_ship(p1, sid)
     pod = seed_pod(ship, task="produce_energy")
     confirm_move("U_P1", ship, 2, 0, 0, jump_range_per_turn=1)  # arrival_turn = 3
-    queue_command("U_P1", ship, "before_arrival", "set_pod_task",
+    queue_command("U_P1", ship, "upon_arrival", "set_pod_task",
                  {"pod_id": pod, "task": "produce_food"})
 
     for _ in range(3):
@@ -150,29 +137,12 @@ def test_before_arrival_dispatches_set_pod_task():
     assert _pod_task(pod) == "produce_food"
     assert _queue_count() == 0
 
-def test_after_arrival_dispatches_set_pod_task_one_turn_later():
+def test_upon_departure_dispatches_set_pod_task_the_instant_it_departs():
     p1 = seed_player()
     sid = seed_sector(0, 0, 0)
     ship = seed_ship(p1, sid)
     pod = seed_pod(ship, task="produce_energy")
-    confirm_move("U_P1", ship, 2, 0, 0, jump_range_per_turn=1)  # arrival_turn = 3
-    queue_command("U_P1", ship, "after_arrival", "set_pod_task",
-                 {"pod_id": pod, "task": "produce_goods"})
-
-    for _ in range(3):
-        end_of_turn()
-    assert _pod_task(pod) == "produce_energy"  # not yet -- landed this call, one more to go
-
-    end_of_turn()
-    assert _pod_task(pod) == "produce_goods"
-    assert _queue_count() == 0
-
-def test_during_transit_dispatches_set_pod_task_the_instant_it_departs():
-    p1 = seed_player()
-    sid = seed_sector(0, 0, 0)
-    ship = seed_ship(p1, sid)
-    pod = seed_pod(ship, task="produce_energy")
-    queue_command("U_P1", ship, "during_transit", "set_pod_task",
+    queue_command("U_P1", ship, "upon_departure", "set_pod_task",
                  {"pod_id": pod, "task": "scan"})
     assert _pod_task(pod) == "produce_energy"  # not yet -- org hasn't departed
 
@@ -181,11 +151,11 @@ def test_during_transit_dispatches_set_pod_task_the_instant_it_departs():
     assert _pod_task(pod) == "scan"  # fired synchronously, no end_of_turn() call needed
     assert _queue_count() == 0
 
-def test_during_transit_rejects_non_pod_task_actions():
+def test_upon_departure_rejects_non_pod_task_actions():
     p1 = seed_player()
     sid = seed_sector(0, 0, 0)
     ship = seed_ship(p1, sid)
-    result = queue_command("U_P1", ship, "during_transit", "move",
+    result = queue_command("U_P1", ship, "upon_departure", "move",
                            {"dest_x": 5, "dest_y": 0, "dest_z": 0})
     assert "error" in result
 
@@ -294,13 +264,13 @@ def test_a_bad_command_does_not_stop_another_players_turn_resolving():
     assert "KeyError" in _failure_alerts()[0]["payload"]["error"]
 
 
-def test_during_transit_dispatch_is_guarded_too():
+def test_upon_departure_dispatch_is_guarded_too():
     """This dispatcher runs from confirm_move as well as the turn engine, so an
     unguarded raise would fail a player's own move call, not just the tick."""
     pid = seed_player(); sid = seed_sector(energy=1000.0); oid = seed_ship(pid, sid)
     seed_pod(oid, task="produce_food", storage_capacity=100.0, storage_current=50.0)
     _inject_raw_command(oid, "set_pod_task", '{"task": "idle"}',   # no pod_id -> KeyError
-                        resolve_turn=None, trigger_phase="during_transit")
+                        resolve_turn=None, trigger_phase="upon_departure")
     result = confirm_move("U_P1", oid, 2, 0, 0)
     assert result.get("confirmed") is True, "the move itself must still succeed"
     assert _queue_count() == 0
@@ -337,9 +307,9 @@ def test_relative_move_resolves_against_position_at_fire_time():
     seed_sector(0, 0, 0); seed_sector(4, 0, 0)
     ship = seed_ship(p1, seed_sector(0, 0, 0))
     confirm_move("U_P1", ship, 4, 0, 0, jump_range_per_turn=4)  # arrival_turn = 0+1+1 = 2
-    queue_command("U_P1", ship, "after_arrival", "move", {"d_x": 3, "d_y": 0, "d_z": 0})
+    queue_command("U_P1", ship, "upon_arrival", "move", {"d_x": 3, "d_y": 0, "d_z": 0})
 
-    for _ in range(3):  # land at (4,0,0) on turn 2, then fire after_arrival on turn 3
+    for _ in range(2):  # lands at (4,0,0), and upon_arrival fires the same pass
         end_of_turn()
 
     with connection() as conn:

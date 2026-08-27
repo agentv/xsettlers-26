@@ -281,7 +281,7 @@ different order within the turn.
 **Retired rather than ported:** `burst_and_colonize` and `fan_out_consolidate`.
 Both are fixed openings, already analysed, and not interesting to play against.
 Retiring them also avoided the one thing the document model cannot express at
-bootstrap — an `after_arrival` order, which `queue_command` will only accept
+bootstrap — an arrival-relative order, which `queue_command` will only accept
 against a move already under way.
 
 **The game-design harness is a separate codebase** (`../xsettlers-designer`), and the

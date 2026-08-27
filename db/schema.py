@@ -234,21 +234,21 @@ def init_schema():
         -- Ship's log: one-shot deferred commands attached to an org,
         -- resolved by engine/turn.py's dispatch_due_commands() at the same
         -- point arrivals resolve. Four fixed trigger primitives
-        -- during_transit fires the instant the
+        -- upon_departure fires the instant the
         -- in-transit flag is applied (event-triggered, dispatched instead
         -- from engine/movement.apply_confirm_move, not the resolve_turn
-        -- sweep); before_arrival fires the same tick the in-transit flag is
-        -- removed; after_arrival fires exactly one end_of_turn() pass later;
+        -- sweep); upon_arrival fires the same tick the in-transit flag is
         -- at_turn fires at a caller-specified absolute turn, independent of
-        -- any move. resolve_turn is NULL for during_transit (event-hooked,
-        -- not turn-hooked); for before_arrival/after_arrival it's computed
+        -- any move. resolve_turn is NULL for upon_departure (event-hooked,
+        -- removed; resolve_turn is NULL for upon_departure (event-hooked,
+        -- not turn-hooked); for upon_arrival it's computed
         -- once at queue time from the org's current arrival_turn; for
         -- at_turn it's exactly the caller-supplied turn number.
         CREATE TABLE IF NOT EXISTS org_command_queue (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             org_id        INTEGER REFERENCES organizations(id),
             trigger_phase TEXT NOT NULL
-                          CHECK(trigger_phase IN ('during_transit','before_arrival','after_arrival','at_turn')),
+                          CHECK(trigger_phase IN ('upon_departure','upon_arrival','at_turn')),
             resolve_turn  INTEGER,
             action        TEXT NOT NULL,
             params        TEXT NOT NULL DEFAULT '{}',

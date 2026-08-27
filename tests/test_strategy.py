@@ -170,7 +170,7 @@ def test_at_turn_without_a_turn_number_is_rejected():
 
 def test_arrival_relative_step_without_a_preceding_move_is_rejected():
     err = validate_strategy({"steps": [{"order": {
-        "action": "move", "when": "after_arrival",
+        "action": "move", "when": "upon_arrival",
         "params": {"d_x": 0, "d_y": 1, "d_z": 0}}}]})
     assert "a move in progress" in err["error"]
 
@@ -178,13 +178,13 @@ def test_arrival_relative_step_without_a_preceding_move_is_rejected():
 def test_arrival_relative_step_is_accepted_after_a_now_move():
     assert validate_strategy({"steps": [
         {"order": {"action": "move", "params": {"d_x": 0, "d_y": 1, "d_z": 0}}},
-        {"order": {"action": "move", "when": "after_arrival",
+        {"order": {"action": "move", "when": "upon_arrival",
                    "params": {"d_x": 0, "d_y": 1, "d_z": 0}}}]}) is None
 
 
-def test_during_transit_only_accepts_set_pod_task():
+def test_upon_departure_only_accepts_set_pod_task():
     err = validate_strategy({"steps": [{"order": {
-        "action": "move", "when": "during_transit",
+        "action": "move", "when": "upon_departure",
         "params": {"d_x": 0, "d_y": 1, "d_z": 0}}}]})
     assert "only supports set_pod_task" in err["error"]
 

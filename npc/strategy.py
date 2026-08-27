@@ -28,7 +28,7 @@ one pass per turn.
 import json
 
 from db.connection import connection, read_all
-from engine.actions import ACTION_NAMES, DURING_TRANSIT_ACTIONS, TRIGGER_PHASES
+from engine.actions import ACTION_NAMES, UPON_DEPARTURE_ACTIONS, TRIGGER_PHASES
 from engine.movement import move_params_error, resolve_move_destination
 from npc import decide
 from xsettlers_mcp.tools.navigation_tools import confirm_move
@@ -40,7 +40,7 @@ DOCUMENT_KEYS = {"name", "description", "config", "loop", "steps"}
 ORDER_KEYS = {"ships", "when", "action", "params", "repeat_each"}
 DECIDE_KEYS = {"await", "from", "rank_by", "pick", "bind"}
 STEP_KINDS = {"order", "decide"}
-ARRIVAL_RELATIVE = {"before_arrival", "after_arrival"}
+ARRIVAL_RELATIVE = {"upon_arrival"}
 NO_POD_AT_INDEX = "org {org_id} has no pod at the requested index"
 
 
@@ -380,10 +380,10 @@ def _validate_order(order, where: str, bound: set, seen_now_move: bool) -> dict 
         phase = when
     else:
         return {"error": f"{where}: invalid 'when' value '{when}'. Valid: 'now', "
-                         f"'during_transit', 'before_arrival', 'after_arrival', "
+                         f"'upon_departure', 'upon_arrival', "
                          f"{{at_turn: N}}"}
-    if phase == "during_transit" and action not in DURING_TRANSIT_ACTIONS:
-        return {"error": f"{where}: 'during_transit' only supports set_pod_task -- "
+    if phase == "upon_departure" and action not in UPON_DEPARTURE_ACTIONS:
+        return {"error": f"{where}: 'upon_departure' only supports set_pod_task -- "
                          f"pod tasking is the one thing a departing org does not lock"}
     # An arrival-relative order can only be queued against a move already
     # under way (see queue_command), so a document that opens with one has

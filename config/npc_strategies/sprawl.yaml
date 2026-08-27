@@ -33,9 +33,11 @@ steps:
         - {d_x: -1, d_y: 1,  d_z: 0, jump_range_per_turn: 2}
         - {d_x: -1, d_y: -1, d_z: 0, jump_range_per_turn: 2}
   # Queued rather than ordered now: a ship in transit is locked, so a second
-  # immediate step would be refused ship by ship. after_arrival is the ship's
-  # log doing the waiting that the interpreter has no verb for.
+  # immediate step would be refused ship by ship. upon_arrival is the ship's
+  # log doing the waiting that the interpreter has no verb for -- it fires the
+  # tick the ship lands, after the arrival resolves and before production, so
+  # the colony is bought out of stock the fleet is already carrying.
   - order:
       ships: all
       action: colonize
-      when: after_arrival
+      when: upon_arrival

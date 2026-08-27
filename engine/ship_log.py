@@ -1,8 +1,8 @@
 """
-Ship's log: dispatch for org_command_queue's turn-based phases (before_arrival,
-after_arrival, at_turn), resolved by engine/turn.py at the same point arrivals
+Ship's log: dispatch for org_command_queue's turn-based phases (upon_arrival,
+at_turn), resolved by engine/turn.py at the same point arrivals
 resolve (see that module's step 2.5, dispatch_due_commands called right after
-arrival resolution and before production). during_transit is a distinct,
+arrival resolution and before production). upon_departure is a distinct,
 event-triggered phase -- not turn-based at all -- dispatched instead from
 inside engine/movement.apply_confirm_move at the point sector_id is set to
 -1 (this module isn't imported there, to avoid a movement<->ship_log
@@ -80,12 +80,11 @@ def dispatch_due_commands(cur, current_turn: int):
     """
     One unified sweep per end_of_turn() call: every org_command_queue row
     whose resolve_turn is due (same <=current_turn+1 threshold arrival_queue's
-    own query uses -- see engine/turn.py's step 2). Covers before_arrival
+    own query uses -- see engine/turn.py's step 2). Covers upon_arrival
     (resolve_turn == this turn's arrival_turn, dispatched right after that
     org's own arrival UPDATE lands, so a chained move sees the org's new
-    location) and after_arrival (resolve_turn == a prior turn's arrival_turn
-    + 1) with one query, with no per-org special-casing inside the
-    arrival-resolution loop.
+    location) and at_turn with one query, and with no per-org special-casing
+    inside the arrival-resolution loop.
     Skips actually dispatching (but still deletes the row -- one-shot, never
     re-fires) if the org no longer exists or its mission is no longer 'idle':
     a player who already gave the org new orders shouldn't have them

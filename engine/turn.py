@@ -224,9 +224,9 @@ def end_of_turn():
                            is_mobile=1 WHERE id=?""", (dest_sector_id,arrival["org_id"]))
     cur.execute("DELETE FROM arrival_queue WHERE arrival_turn<=?", (current_turn + 1,))
 
-    # 2.5. Ship's log: dispatch any due before_arrival/after_arrival queued
+    # 2.5. Ship's log: dispatch any due upon_arrival/at_turn queued
     #      commands (see engine/ship_log.py). Must run after the arrival loop
-    #      above (so a before_arrival chained move sees this org's just-landed
+    #      above (so a upon_arrival chained move sees this org's just-landed
     #      sector as its departure point) and before step 3's production pass
     #      (so if that chained move re-parks the org at the sentinel sector,
     #      this turn's production correctly shows zero energy for it -- same

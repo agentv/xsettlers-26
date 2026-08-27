@@ -103,7 +103,7 @@ def test_non_energy_production_continues_in_transit_if_input_available():
     """produce_goods isn't sector-sourced -- only its energy input cost matters,
     drawn from the org's own stock -- so it keeps producing in transit as long
     as that stock holds out. (produce_energy is different: see
-    test_energy_production_stops_during_transit below.)
+    test_energy_production_stops_upon_departure below.)
     """
     from xsettlers_mcp.tools.navigation_tools import confirm_move
     pid = seed_player(); oid = seed_sector(0,0,0)
@@ -146,7 +146,7 @@ def test_production_floors_at_zero_and_stops_once_depleted():
         pod_row = conn.execute("SELECT energy_stored FROM pods WHERE id=?", (pod,)).fetchone()
     assert pod_row["energy_stored"] == 0.0
 
-def test_energy_production_stops_during_transit():
+def test_energy_production_stops_upon_departure():
     """produce_energy harvests from the sector it's sitting in -- a ship in
     transit is parked at the sentinel sector (-1), which is permanently at
     0 capacity, so energy production is 0 while traveling regardless of how

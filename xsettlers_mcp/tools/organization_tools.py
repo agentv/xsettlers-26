@@ -5,7 +5,7 @@ from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED, POD_NOT_OWNE
 from engine.turn import get_current_turn
 from engine.missions import apply_colonize
 from engine.movement import move_params_error
-from engine.actions import ACTION_NAMES, DURING_TRANSIT_ACTIONS, TRIGGER_PHASES
+from engine.actions import ACTION_NAMES, UPON_DEPARTURE_ACTIONS, TRIGGER_PHASES
 from engine.pod_tasking import apply_set_pod_task
 from engine.scanning import (apply_set_org_scan_bearing, apply_set_pod_scan_bearing,
                              check_aim, check_range, is_aiming, resolve_aim,
@@ -153,7 +153,7 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     normalized, as (params, None) -- or (None, error) if the order could
     never work.
 
-    The dispatchers (engine/ship_log.py, engine/movement._dispatch_during_transit)
+    The dispatchers (engine/ship_log.py, engine/movement._dispatch_upon_departure)
     index straight into the stored params dict and hand it to helpers that do
     no ownership check and no task-validity check of their own, so this is
     where those checks live. Without them: a bad `task` string reaches the
@@ -218,14 +218,14 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
 @mcp_tool(
     "Queue a one-shot command for an organization, resolved automatically "
     "by the engine instead of you having to call the underlying tool again "
-    "by hand. Four trigger_phase values: 'during_transit' fires the instant "
+    "by hand. Three trigger_phase values: 'upon_departure' fires the instant "
     "this org next enters transit (only action='set_pod_task' is legal here "
     "-- pod tasking is the one thing not locked by a departing org); "
-    "'before_arrival' fires the same tick this org's current move resolves; "
-    "'after_arrival' fires exactly one turn later -- both require the org "
-    "to already be in transit; 'at_turn' fires at an explicit absolute turn "
-    "(pass `turn`), independent of any move, for orders that don't fit the "
-    "arrival-relative phases (e.g. \"on turn 7, jump somewhere else\"). "
+    "'upon_arrival' fires the same tick this org's current move resolves, "
+    "after the landing and before that turn's production, and requires the "
+    "org to already be in transit; 'at_turn' fires at an explicit absolute "
+    "turn (pass `turn`), independent of any move (e.g. \"on turn 7, jump "
+    "somewhere else\"). "
     "Action whitelist: 'move' (either dest_x/dest_y/dest_z absolute or "
     "d_x/d_y/d_z relative to wherever the org is when the order fires, "
     "never both, plus optional jump_range_per_turn); 'set_pod_task' "
@@ -235,28 +235,34 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     "cannot afford the energy by then); 'aim_scan' (optionally "
     "bearing/offset_x/y/z, same shape set_org_scan_bearing takes; pass none "
     "to clear the aim). If you give the org new orders before a "
-    "before_arrival/after_arrival/at_turn command fires, the queued one is "
+    "upon_arrival/at_turn command fires, the queued one is "
     "silently dropped rather than overriding your manual orders.")
 @player_tool
 def queue_command(sess, org_id: int, trigger_phase: str, action: str,
                   params: dict = None, turn: int = None) -> dict:
     """
     Queue a one-shot command for this org, resolved automatically by the
-    engine at whichever of four fixed primitives is named:
-      - 'during_transit': fires the instant this org enters transit --
+    engine at whichever of three fixed primitives is named.
+
+    Three, because these are the moments a player actually names: getting
+    under way, landing, or a turn they choose. A fourth phase fired one pass
+    after landing and was removed -- anyone wanting it knows the arrival turn
+    and can say at_turn, and an extra primitive is another word the grammar
+    has to teach for no reach it did not already have.
+      - 'upon_departure': fires the instant this org enters transit --
         event-triggered by the next confirm_move, not the turn sweep
         (engine.movement.apply_confirm_move). Only 'set_pod_task' is legal
         here; pod tasking is the one thing not locked by entering transit.
-      - 'before_arrival': fires the same tick this org's current move
-        resolves. Requires the org to already be in transit -- there must be
+      - 'upon_arrival': fires the same tick this org's current move
+        resolves -- after the arrival lands and before that turn's
+        production, so a retasked pod produces at its new task the turn it
+        gets there. Requires the org to already be in transit: there must be
         a pending arrival_queue row to anchor the resolve turn to.
-      - 'after_arrival': fires exactly one end_of_turn() pass later. Same
-        in-transit requirement as before_arrival.
       - 'at_turn': fires at an explicit absolute turn (the `turn` param,
         required for this phase only), independent of any move. No
         in-transit requirement.
 
-    Action whitelist, all valid for before_arrival/after_arrival/at_turn:
+    Action whitelist, all valid for upon_arrival/at_turn:
       - 'move' -- either dest_x/dest_y/dest_z or d_x/d_y/d_z (relative to
         wherever this org is standing when the order fires), never both,
         plus optional jump_range_per_turn.
@@ -275,8 +281,8 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
         return {"error": f"Invalid trigger_phase '{trigger_phase}'. Valid: {sorted(VALID_TRIGGER_PHASES)}"}
     if action not in ACTION_NAMES:
         return {"error": f"Invalid action '{action}'. Valid: {sorted(ACTION_NAMES)}"}
-    if trigger_phase == "during_transit" and action not in DURING_TRANSIT_ACTIONS:
-        return {"error": f"'during_transit' only supports: {sorted(DURING_TRANSIT_ACTIONS)}"}
+    if trigger_phase == "upon_departure" and action not in UPON_DEPARTURE_ACTIONS:
+        return {"error": f"'upon_departure' only supports: {sorted(UPON_DEPARTURE_ACTIONS)}"}
     if trigger_phase == "at_turn" and turn is None:
         return {"error": "'at_turn' requires a turn parameter (the absolute turn number to fire on)"}
     cur = sess.cur
@@ -292,16 +298,16 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
         return err
 
     resolve_turn = None
-    if trigger_phase in ("before_arrival", "after_arrival"):
+    if trigger_phase == "upon_arrival":
         cur.execute("SELECT arrival_turn FROM arrival_queue WHERE org_id=?", (org_id,))
         arrival = cur.fetchone()
         if not arrival:
             return {"error": f"'{trigger_phase}' requires the organization to currently be "
                              f"in transit (no pending arrival found)"}
-        resolve_turn = arrival["arrival_turn"] + (0 if trigger_phase == "before_arrival" else 1)
+        resolve_turn = arrival["arrival_turn"]
     elif trigger_phase == "at_turn":
         resolve_turn = turn
-    # during_transit: resolve_turn stays None -- dispatched by org_id+phase
+    # upon_departure: resolve_turn stays None -- dispatched by org_id+phase
     # lookup inside apply_confirm_move, not the resolve_turn sweep.
 
     current_turn = get_current_turn()

@@ -2,7 +2,7 @@
 
 # Overview
 
-XSettlers is a multiplayer, turn-based space strategy game played through any MCP-speaking client (Slack is the intended home, but nothing in the server is Slack-specific). Players manage organizations (ships and colonies) across a sector map, competing to expand territory, produce resources, and outlast rivals. The map is 3D-capable — sector coordinates and distance math are `(x, y, z)` throughout — but every shipped scenario places everything at `z = 0`; nothing currently plays in three dimensions, only supports it. `game_config.yaml`'s `dimensions: 2` field looks like it governs this but doesn't — it's parsed and never read anywhere in the codebase.
+XSettlers is a multiplayer, turn-based space strategy game played through any MCP-speaking client (Slack is the intended home, but nothing in the server is Slack-specific). Players manage organizations (ships and colonies) across a sector map, competing to expand territory, produce resources, and outlast rivals.
 
 ---
 
@@ -164,7 +164,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
     * **NPC decisions** — every `is_npc=1` player's registered strategy (see `npc/strategies.py`) acts, via the same tool functions a human player would call, before anything else this turn resolves
     * Player declarations reset
     * Arrivals processed
-    * **Ship's log dispatch** — any `queue_command`-deferred action due this turn (`before_arrival`/`after_arrival`/`at_turn`) fires here, right after arrivals so a chained action sees an org's just-landed state, and before production so a re-departing org's production is correctly suppressed that turn
+    * **Ship's log dispatch** — any `queue_command`-deferred action due this turn (`upon_arrival`/`at_turn`) fires here, right after arrivals so a chained action sees an org's just-landed state, and before production so a re-departing org's production is correctly suppressed that turn
     * Pod consumption then production (all pods: resources consumed first, then output produced; scan resolution for stationary orgs)
     * Colonization resolution (matured `colonize_complete` events flip `org_type` ship → colony)
     * Mission dispatch (`defend`/`attack` — still stubs, and unreachable while `set_mission` refuses both; the step is kept as the seam combat lands in)

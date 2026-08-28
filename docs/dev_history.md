@@ -236,6 +236,30 @@ roster containing the same `player_id` twice instead of raising out of
 `gamehouse-<id>@handoff` address is what collides, and an error GameHouse can
 read beats a traceback.
 
+**Person identity is GameHouse's job, and it is not OAuth (settled 2026-08-28,
+built there).** `docs/TODO.md` carried an open question — whether putting OAuth
+on this endpoint was xsettlers' work at all, or belonged to `../gamehouse`,
+which already owns Person-level identity. Answered: it was GameHouse's, and
+GameHouse built it. Its `start_game`/`join_lobby`/`lobby_status` used to trust
+a caller-supplied `person_id` as proof of identity, which `person.id` being a
+sequential `INTEGER PRIMARY KEY` made guessable; `lobby_status` was the sharp
+edge, since a closed lobby's response carries a live `session_token`. The fix
+is an opaque DB-backed bearer token minted by `verify_code()` and resolved
+server-side — the same pattern as their `login_code` and `session_token`.
+
+The part worth keeping: **the TODO said "OAuth" and was wrong about it.** What
+the gap actually needed was proof of identity, not a browser-redirect login,
+and the two are separable. Reach for the opaque-token-in-a-table pattern before
+reaching for OAuth on this side too.
+
+Nothing changed in `xsettlers_mcp/gamehouse.py`, and that is structural rather
+than lucky: all three calls we exchange with GameHouse are game-to-service or
+service-to-game (`register_game`, the `start_session` push, `report_results`),
+authenticated by the game-minted `session_token`. None of them ever took a
+Person's identity as an argument, so a change to how a *Person* proves who they
+are could not reach us. `report_results` still sends `players.gamehouse_person_id`
+as a payload field — that is a join key for the game journal, never a credential.
+
 **Resource transfer between organizations (built 2026-08-28).** `transfer_resources`
 queues a one-resource push from one of a player's organizations to another;
 `transfer_queue` holds it and `engine/transfers.py` resolves it one tick later,

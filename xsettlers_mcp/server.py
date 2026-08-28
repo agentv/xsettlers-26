@@ -180,9 +180,13 @@ async def health(request):
 #   2. There is no rate limiting, so nothing slows a caller down.
 #
 # Accepted knowingly: the game holds nothing of value and nobody knows it
-# exists. Both facts stop being true the moment either changes. Real hardening
-# means OAuth on this endpoint plus per-player tokens that live somewhere
-# other than git -- see docs/TODO.md.
+# exists. Both facts stop being true the moment either changes.
+#
+# Hardening means per-player tokens that live somewhere other than git, plus
+# expiry and revocation for them -- NOT OAuth. Proof of identity and a
+# browser-redirect login are separable, and the opaque-token-in-a-table
+# pattern is what ../gamehouse settled on for the same problem. See
+# docs/TODO.md.
 
 class _MCPASGIApp:
     """

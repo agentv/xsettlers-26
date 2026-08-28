@@ -31,9 +31,13 @@ for them there before proposing them as new.
 
 * [ ] Add a CI workflow (`.github/workflows/`) — planned before/around the first push upstream.
 
-* [ ] **`/mcp` is open, and `player_token` is the only access control** — one piece of work with two halves, neither started. Anyone who knows the URL can call any tool, and `player_token` only proves "caller knows this player's credential". Compounding it: the roster in `config/game_config.yaml` is committed to a **public** repository that also documents this server's URL, so the committed tokens must stay placeholders (`REPLACE_WITH_GENERATED_TOKEN_*`) — and there is no mechanism yet letting `xsettlers_mcp/auth.py` read real per-player secrets from outside git (analogous to `fly secrets` + a gitignored `.env`) while keeping the "roster is one YAML file" design. There is also no rate limiting.
+* [ ] **`/mcp` is open, and `player_token` is the only access control.** Anyone who knows the URL can call any tool, and `player_token` only proves "caller knows this player's credential" — it has no expiry and no revocation path. Compounding it: the roster in `config/game_config.yaml` is committed to a **public** repository that also documents this server's URL, so the committed tokens must stay placeholders (`REPLACE_WITH_GENERATED_TOKEN_*`) — and there is no mechanism yet letting `xsettlers_mcp/auth.py` read real per-player secrets from outside git (analogous to `fly secrets` + a gitignored `.env`) while keeping the "roster is one YAML file" design. There is also no rate limiting.
 
-  Accepted knowingly for now — the game holds nothing of value and is unadvertised — and it stops being acceptable the moment either fact changes. The fix is OAuth on the endpoint plus per-player secrets held outside git. **First question to settle: whether the OAuth half is xsettlers' job at all**, or belongs to `../gamehouse`, which already owns Person-level identity and would be the natural place for it. Decide that before building either half; the secrets-outside-git half is ours regardless.
+  Accepted knowingly for now — the game holds nothing of value and is unadvertised — and it stops being acceptable the moment either fact changes.
+
+  **The Person-identity half is settled and no longer ours** (2026-08-28). It belonged to `../gamehouse`, which owns Person-level identity, and GameHouse has built it: an opaque DB-backed bearer token minted by `verify_code()`, replacing the caller-supplied `person_id` its `start_game`/`join_lobby`/`lobby_status` used to trust. Deliberately **not OAuth and not a JWT** — what was needed was proof of identity, not a browser-redirect login, and the two are separable. See `docs/dev_history.md`; nothing on this side changed, because none of the three calls we exchange with GameHouse ever carried a Person's identity as an argument.
+
+  What remains here, unstarted: per-player secrets held outside git, expiry/revocation for `player_token`, and rate limiting. Whatever shape the first takes, GameHouse's opaque-token-in-a-table pattern is the precedent to follow rather than reaching for OAuth.
 
 ## GameHouse handoff
 

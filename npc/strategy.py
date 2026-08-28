@@ -267,8 +267,7 @@ def _now_move(player_token: str, org_id: int, params: dict):
         dest, err = resolve_move_destination(conn, org_id, params)
     if err:
         return {"error": err}
-    return confirm_move(player_token, org_id, dest[0], dest[1], dest[2],
-                        jump_range_per_turn=params.get("jump_range_per_turn", 1))
+    return confirm_move(player_token, org_id, dest[0], dest[1], dest[2])
 
 
 def _now_colonize(player_token: str, org_id: int, params: dict):

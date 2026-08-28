@@ -11,8 +11,6 @@
 # candidates -- scan_targets deduplicates by coordinate.
 name: fan_out
 description: Scatter, scan, then send the whole fleet to the richest sector anyone found.
-config:
-  jump_range_per_turn: 1
 steps:
   # Scout hop, one cardinal per ship, cycling N/S/E/W by fleet index.
   # North is -y (engine/bearings.py). Offsets are relative, so the same
@@ -21,10 +19,10 @@ steps:
       ships: all
       action: move
       params:
-        - {d_x: 0,  d_y: -2, d_z: 0, jump_range_per_turn: 1}
-        - {d_x: 0,  d_y: 2,  d_z: 0, jump_range_per_turn: 1}
-        - {d_x: 2,  d_y: 0,  d_z: 0, jump_range_per_turn: 1}
-        - {d_x: -2, d_y: 0,  d_z: 0, jump_range_per_turn: 1}
+        - {d_x: 0,  d_y: -2, d_z: 0}
+        - {d_x: 0,  d_y: 2,  d_z: 0}
+        - {d_x: 2,  d_y: 0,  d_z: 0}
+        - {d_x: -2, d_y: 0,  d_z: 0}
   # Scanner aimed further out the same way. The "X2" bearings are 2 sectors --
   # the maximum SCAN_RANGE allows. Aim distance is governed by scan range, not
   # by however far the scout hop happens to be.
@@ -48,4 +46,4 @@ steps:
   - order:
       ships: all
       action: move
-      params: {dest: $target, jump_range_per_turn: $jump_range_per_turn}
+      params: {dest: $target}

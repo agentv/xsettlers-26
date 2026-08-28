@@ -56,7 +56,7 @@ def test_parameters_defaulting_to_none_accept_an_explicit_null(name):
     once (see tests/test_gamehouse.py).
 
     Deliberately scoped to parameters whose default is None. A parameter with
-    a real default (radius, jump_range_per_turn) is optional but NOT nullable:
+    a real default (radius, confidence) is optional but NOT nullable:
     the function uses it in arithmetic and would raise on None, so the schema
     refusing null is the honest contract -- omit the field to get the default.
     """

@@ -97,7 +97,7 @@ def test_order_rejects_different_sectors():
 
 def test_order_rejects_giver_in_transit():
     _pid, giver, receiver = _two_ships_together()
-    confirm_move("U_P1", giver, 5, 0, 0, jump_range_per_turn=1)  # parks giver at -1
+    confirm_move("U_P1", giver, 5, 0, 0)  # parks giver at -1
     result = transfer_resources("U_P1", giver, receiver, "energy", 10)
     assert "in transit" in result["error"]
 
@@ -162,7 +162,7 @@ def test_overflow_is_destroyed_and_absent_from_the_turn_waste_figure():
 def test_no_transfer_when_the_two_move_apart_before_resolution():
     _pid, giver, receiver = _two_ships_together(energy_on_giver=50.0)
     transfer_resources("U_P1", giver, receiver, "energy", 30)
-    confirm_move("U_P1", receiver, 6, 0, 0, jump_range_per_turn=1)  # receiver leaves
+    confirm_move("U_P1", receiver, 6, 0, 0)  # receiver leaves
     end_of_turn()
     assert _org_energy(giver) == 50.0        # kept everything
     assert _resolved_event()["completed"] is False
@@ -222,7 +222,7 @@ def test_strategy_queues_a_transfer_for_when_the_hauler_reaches_the_hub():
     seed_pod(hub, storage_capacity=100.0)
     doc = {"steps": [
         {"order": {"ships": {"slice": [0, 1]}, "action": "move",
-                   "params": {"d_x": 1, "d_y": 0, "d_z": 0, "jump_range_per_turn": 1}}},
+                   "params": {"d_x": 1, "d_y": 0, "d_z": 0}}},
         {"order": {"ships": {"slice": [0, 1]}, "action": "transfer", "when": "upon_arrival",
                    "params": {"to_index": 1, "resource": "energy", "amount": 30}}},
     ]}
@@ -245,7 +245,7 @@ def test_strategy_validator_rejects_a_transfer_missing_its_amount():
 
 def test_queue_command_transfer_requires_target_resource_and_amount():
     _pid, giver, receiver = _two_ships_together()
-    confirm_move("U_P1", giver, 3, 0, 0, jump_range_per_turn=1)  # gives it a pending arrival
+    confirm_move("U_P1", giver, 3, 0, 0)  # gives it a pending arrival
     result = queue_command("U_P1", giver, "upon_arrival", "transfer",
                            {"to_org_id": receiver, "resource": "energy"})
     assert "amount" in result["error"]

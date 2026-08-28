@@ -1,7 +1,8 @@
 from xsettlers_mcp.tools.registry import mcp_tool
 from db.events import record_event
 from engine.turn import get_current_turn
-from engine.movement import apply_confirm_move, plan_move, NEGATIVE_DEST
+from engine.movement import (apply_confirm_move, plan_move, get_jump_range,
+                             NEGATIVE_DEST)
 from xsettlers_mcp.tools.session import player_tool
 
 NOT_MOVABLE = "Ship not found, not owned by player, or already in transit"
@@ -33,10 +34,12 @@ def _departable_ship(sess, ship_id: int, dest):
 
 
 @mcp_tool(
-    "Preview a move: calculate travel time without committing")
+    "Preview a move: calculate travel time without committing. You name a "
+    "destination, not a speed -- how fast the ship covers the distance is a "
+    "property of its hull.")
 @player_tool
 def preview_move(sess, ship_id: int,
-                 dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
+                 dest_x: int, dest_y: int, dest_z: int) -> dict:
     """
     Quote a move without committing to it: same ownership, mobility and
     destination checks confirm_move applies, then the travel cost it would
@@ -53,13 +56,16 @@ def preview_move(sess, ship_id: int,
     to where it started, having burned the turns for nothing.
 
     Destination is any coordinate triple -- sectors are lazily instantiated
-    (see db/sectors.py), so it need not exist yet.
+    (see db/sectors.py), so it need not exist yet. Travel time comes from the
+    hull's own speed (engine.movement.get_jump_range); a caller does not get
+    to name one.
     """
     ship, err = _departable_ship(sess, ship_id, (dest_x, dest_y, dest_z))
     if err:
         return err
     plan = plan_move((ship["coord_x"], ship["coord_y"], ship["coord_z"]),
-                     (dest_x, dest_y, dest_z), jump_range_per_turn, get_current_turn())
+                     (dest_x, dest_y, dest_z), get_jump_range(sess.cur, ship_id),
+                     get_current_turn())
     return {"preview": True, "ship_id": ship_id, "from_sector_id": ship["sector_id"],
             "dest_x": dest_x, "dest_y": dest_y, "dest_z": dest_z,
             "turns_needed": plan["turns_needed"], "arrival_turn": plan["arrival_turn"]}
@@ -68,7 +74,7 @@ def preview_move(sess, ship_id: int,
     "Commit a previewed move. Ship enters transit until arrival turn.")
 @player_tool
 def confirm_move(sess, ship_id: int,
-                 dest_x: int, dest_y: int, dest_z: int, jump_range_per_turn: int = 1) -> dict:
+                 dest_x: int, dest_y: int, dest_z: int) -> dict:
     """
     Commit a previewed move: validates ownership/mobility, then delegates the
     actual mutation (write-ahead event, park at sentinel sector, queue
@@ -83,7 +89,7 @@ def confirm_move(sess, ship_id: int,
     if err:
         return err
     return apply_confirm_move(sess.cur, ship_id, sess.player_id, dest_x, dest_y, dest_z,
-                              jump_range_per_turn, get_current_turn())
+                              get_current_turn())
 
 @mcp_tool(
     "Cancel a move in progress. Rubber-bands ship to origin sector.")

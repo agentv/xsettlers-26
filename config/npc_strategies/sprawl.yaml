@@ -13,25 +13,23 @@
 # that alone.
 name: sprawl
 description: Disperse one ship to each surrounding sector, colonizing on arrival.
-config:
-  jump_range_per_turn: 2
 steps:
-  # The eight sectors adjoining home in the z=0 plane. jump_range 2 covers the
-  # diagonals (distance 1.41) as well as the cardinals in a single turn, so
-  # every ship lands together and none of them is settling a turn behind the
-  # rest for a reason that has nothing to do with the strategy.
+  # The eight sectors adjoining home in the z=0 plane. A hull's speed of 2
+  # covers the diagonals (distance 1.41) as well as the cardinals in a single
+  # turn, so every ship lands together and none of them is settling a turn
+  # behind the rest for a reason that has nothing to do with the strategy.
   - order:
       ships: all
       action: move
       params:
-        - {d_x: 1,  d_y: 0,  d_z: 0, jump_range_per_turn: 2}
-        - {d_x: -1, d_y: 0,  d_z: 0, jump_range_per_turn: 2}
-        - {d_x: 0,  d_y: 1,  d_z: 0, jump_range_per_turn: 2}
-        - {d_x: 0,  d_y: -1, d_z: 0, jump_range_per_turn: 2}
-        - {d_x: 1,  d_y: 1,  d_z: 0, jump_range_per_turn: 2}
-        - {d_x: 1,  d_y: -1, d_z: 0, jump_range_per_turn: 2}
-        - {d_x: -1, d_y: 1,  d_z: 0, jump_range_per_turn: 2}
-        - {d_x: -1, d_y: -1, d_z: 0, jump_range_per_turn: 2}
+        - {d_x: 1,  d_y: 0,  d_z: 0}
+        - {d_x: -1, d_y: 0,  d_z: 0}
+        - {d_x: 0,  d_y: 1,  d_z: 0}
+        - {d_x: 0,  d_y: -1, d_z: 0}
+        - {d_x: 1,  d_y: 1,  d_z: 0}
+        - {d_x: 1,  d_y: -1, d_z: 0}
+        - {d_x: -1, d_y: 1,  d_z: 0}
+        - {d_x: -1, d_y: -1, d_z: 0}
   # Queued rather than ordered now: a ship in transit is locked, so a second
   # immediate step would be refused ship by ship. upon_arrival is the ship's
   # log doing the waiting that the interpreter has no verb for -- it fires the

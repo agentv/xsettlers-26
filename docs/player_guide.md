@@ -116,10 +116,16 @@ turns proportional to the distance. While it's en route:
   energy it's carrying with no way to replace it. A long voyage can arrive
   with empty tanks and no way to restart its own economy.
 
-Distance is measured in a straight line, and travel time rounds up. **A
-diagonal move costs the same as three straight steps** — moving one sector
-across and one up is a distance of about 1.41, but two diagonal steps is 2.83,
-which rounds to 3 turns. Straight lines are consistently better value.
+Distance is measured in a straight line, and travel time rounds up. **A ship
+covers 2 sectors per turn**, so every sector touching the one you're in —
+diagonals included — is a single turn away. Two sectors out diagonally is a
+distance of 2.83 and takes two turns, while two sectors out straight is
+exactly one. Straight lines are still better value over distance; it's the
+first hop in any direction that's free of that penalty.
+
+You don't set a ship's speed — it's a property of the hull, the same way its
+storage is. You name where you want it to go and the ship takes as long as it
+takes.
 
 You can preview a move before committing to see how long it takes. Once
 committed you can still cancel while it's in progress — the ship rubber-bands

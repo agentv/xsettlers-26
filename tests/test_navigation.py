@@ -1,5 +1,6 @@
 from db.connection import connection, get_connection
-from engine.movement import plan_move
+from engine.movement import (plan_move, get_jump_range, move_params_error,
+                             BASE_HULL_SPEED, SPEED_NOT_ORDERABLE)
 from engine.turn import get_current_turn
 from xsettlers_mcp.tools.navigation_tools import preview_move, confirm_move, cancel_move
 from tests.conftest import seed_player, seed_sector, seed_ship
@@ -20,28 +21,63 @@ def test_plan_move_arrival_turn_is_one_past_the_landing_pass():
     end_of_turn() pass that performs the landing (see engine/turn.py)."""
     assert plan_move((0, 0, 0), (3, 0, 0), 1, 10)["arrival_turn"] == 10 + 3 + 1
 
+def test_base_speed_puts_every_adjacent_sector_one_turn_away():
+    """A hull's base speed is 2 sectors per turn, and the reason is the
+    diagonal: at speed 1 the orthogonal neighbour is one turn out but the
+    diagonal one (sqrt(2) ~= 1.41) is two, so the ring around a ship is not
+    equidistant in turns. Speed 2 collapses all eight to a single turn."""
+    assert BASE_HULL_SPEED == 2
+    for dest in ((1, 0, 0), (0, 1, 0), (1, 1, 0), (2, 0, 0)):
+        assert plan_move((0, 0, 0), dest, BASE_HULL_SPEED, 0)["turns_needed"] == 1
+    # Two out diagonally is sqrt(8) ~= 2.83 -- still beyond one turn's reach.
+    assert plan_move((0, 0, 0), (2, 2, 0), BASE_HULL_SPEED, 0)["turns_needed"] == 2
+
+def test_speed_comes_from_the_hull_not_the_order():
+    """Speed is a property of the organization. A caller names a destination
+    and the engine looks up how fast that ship covers it, so travel time
+    cannot be argued with."""
+    pid = seed_player(); oid = seed_sector(0, 0, 0)
+    sid = seed_ship(pid, oid)
+    with connection() as conn:
+        assert get_jump_range(conn, sid) == BASE_HULL_SPEED
+    quoted = preview_move("U_P1", sid, 4, 0, 0)
+    assert quoted["turns_needed"] == 2      # distance 4 at hull speed 2
+
+def test_an_order_naming_a_speed_is_refused():
+    """A queued or authored move that still carries jump_range_per_turn is
+    rejected rather than silently ignored -- the parameter used to exist, so
+    a stale caller must be told the rule changed, not quietly obeyed at some
+    other speed."""
+    assert move_params_error({"dest_x": 3, "dest_y": 0, "dest_z": 0,
+                              "jump_range_per_turn": 1}) == SPEED_NOT_ORDERABLE
+
+def test_get_jump_range_falls_back_for_an_unknown_org():
+    """A missing org is a design gap, not a reason to abort a turn."""
+    with connection() as conn:
+        assert get_jump_range(conn, 9999) == BASE_HULL_SPEED
+
 def test_preview_and_confirm_quote_the_same_travel_time():
     """The quote and the move that follows it must agree -- they share
     plan_move precisely so they cannot drift apart."""
     pid = seed_player(); oid = seed_sector(0, 0, 0)
     sid = seed_ship(pid, oid)
-    quoted = preview_move("U_P1", sid, 4, 3, 0, jump_range_per_turn=2)
-    committed = confirm_move("U_P1", sid, 4, 3, 0, jump_range_per_turn=2)
+    quoted = preview_move("U_P1", sid, 4, 3, 0)
+    committed = confirm_move("U_P1", sid, 4, 3, 0)
     assert quoted["turns_needed"] == committed["turns_needed"]
     assert quoted["arrival_turn"] == committed["arrival_turn"]
 
 # --- preview_move ---
 
 def test_preview_move_returns_travel_time():
-    """Distance 3 at jump_range_per_turn=1 should take 3 turns."""
+    """Distance 4 at hull speed 2 should take 2 turns."""
     pid = seed_player(); oid = seed_sector(0,0,0)
     sid = seed_ship(pid, oid)
-    result = preview_move("U_P1", sid, 3, 0, 0, jump_range_per_turn=1)
+    result = preview_move("U_P1", sid, 4, 0, 0)
     assert result["preview"] is True
-    assert result["turns_needed"] == 3
+    assert result["turns_needed"] == 2
     # arrival_turn is the turn the ship is free to act, one turn after the
     # end_of_turn() pass that performs the landing (see engine/turn.py).
-    assert result["arrival_turn"] == get_current_turn() + 3 + 1
+    assert result["arrival_turn"] == get_current_turn() + 2 + 1
 
 def test_preview_move_no_db_write():
     """preview_move must not park the ship or create an arrival_queue row."""

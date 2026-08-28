@@ -76,9 +76,9 @@ def _write_aim(sess, org_id: int, subject_id: int, offset, clearing: bool,
     "Set an organization's mission (idle/move/colonize). 'defend' and "
     "'attack' are part of the design but not built -- ordering one is "
     "refused, not silently accepted. For "
-    "mission='move', params must include dest_x/dest_y/dest_z (optionally "
-    "jump_range_per_turn) -- delegates to the same confirm_move flow as the "
-    "dedicated tool, so prefer preview_move first to check travel time.")
+    "mission='move', params must include dest_x/dest_y/dest_z -- delegates "
+    "to the same confirm_move flow as the dedicated tool, so prefer "
+    "preview_move first to check travel time.")
 @player_tool
 def set_mission(sess, org_id: int, mission: str, params: dict = None) -> dict:
     """
@@ -129,8 +129,7 @@ def set_mission(sess, org_id: int, mission: str, params: dict = None) -> dict:
         # ("database is locked" -- see PlayerSession.release).
         sess.release()
         return confirm_move(sess.player["player_token"], org_id,
-                             params["dest_x"], params["dest_y"],
-                             params["dest_z"], params.get("jump_range_per_turn", 1))
+                             params["dest_x"], params["dest_y"], params["dest_z"])
     # Colonization is bought, not merely ordered, and every rule about that
     # purchase lives in engine.missions.apply_colonize -- the same function
     # the ship's log dispatches a queued 'colonize' through, so a scheduled
@@ -286,7 +285,7 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     "somewhere else\"). "
     "Action whitelist: 'move' (either dest_x/dest_y/dest_z absolute or "
     "d_x/d_y/d_z relative to wherever the org is when the order fires, "
-    "never both, plus optional jump_range_per_turn); 'set_pod_task' "
+    "never both -- a move takes no speed, that is the hull's); 'set_pod_task' "
     "(params: pod_id, task, optionally bearing/offset_x/y/z -- same shape "
     "set_pod_task takes); 'colonize' (no params -- commits the ship at "
     "whatever sector it occupies when the order fires, and is refused if it "
@@ -325,8 +324,8 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
 
     Action whitelist, all valid for upon_arrival/at_turn:
       - 'move' -- either dest_x/dest_y/dest_z or d_x/d_y/d_z (relative to
-        wherever this org is standing when the order fires), never both,
-        plus optional jump_range_per_turn.
+        wherever this org is standing when the order fires), never both. No
+        speed: how fast the ship covers the distance is its hull's business.
       - 'set_pod_task' -- pod_id, task, optionally bearing/offset_x/y/z.
       - 'colonize' -- no params. Alone among these it can be refused at fire
         time rather than failing: a ship that cannot pay when the moment

@@ -128,7 +128,9 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
 * Movement is a **two-step confirmation flow**: `preview_move` → `confirm_move`.
 * `preview_move` is read-only: calculates travel time, no DB writes.
 * `confirm_move` commits the move: parks the ship at the sentinel sector and queues an arrival.
-* Travel time = `ceil(Euclidean distance / jump_range_per_turn)`, minimum 1 turn.
+* Travel time = `ceil(Euclidean distance / hull speed)`, minimum 1 turn.
+* **Speed belongs to the organization, not to the order.** A move names a destination and nothing else; how fast the ship covers the distance is a performance figure of its hull, looked up by `engine/movement.get_jump_range(cur, org_id)` — always call it, never hard-code the number. No tool accepts a speed, and a queued or authored move that still carries `jump_range_per_turn` is **refused**, not silently obeyed at some other speed. Speed is deliberately *not* derived from the pod loadout: pods are cargo and crew, the hull is what moves.
+* **Every hull type in the game today runs at 2 sectors per turn** (`HULL_SPEED`, keyed by `org_type`, defaulting to `BASE_HULL_SPEED`). Two rather than one for the same reason `SCAN_RANGE` is 2: under a Euclidean metric the diagonal neighbour is 1.41 away, so at speed 1 the eight sectors surrounding a ship are not equidistant in turns and the ring around it reads as broken. At speed 2 every adjacent sector, diagonal included, is one turn out — which is what makes a scouting or ranger hull worth building. A faster hull is a new row in `HULL_SPEED`, not a new parameter.
 * `cancel_move` is available while a ship is in transit. Cancellation **rubber-bands** the ship to its `origin_sector_id` — no partial credit for distance traveled.
 
 ---

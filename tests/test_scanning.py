@@ -216,14 +216,14 @@ def test_scan_aim_is_relative_and_survives_a_move():
     seed_pod(oid, task="produce_energy", storage_current=200.0)   # scanning costs energy
     set_org_scan_bearing("U_P1", oid, "E")          # scans (1,0,0) from home
     end_of_turn()
-    confirm_move("U_P1", oid, 5, 0, 0, jump_range_per_turn=5)
-    end_of_turn(); end_of_turn()                    # arrives at (5,0,0)
+    confirm_move("U_P1", oid, 2, 0, 0)              # one turn at hull speed 2
+    end_of_turn(); end_of_turn()                    # arrives at (2,0,0)
     with connection() as conn:
         here = conn.execute("SELECT coord_x FROM sectors s JOIN organizations o ON o.sector_id=s.id "
                             "WHERE o.id=?", (oid,)).fetchone()
-        revealed = conn.execute("SELECT id FROM sectors WHERE coord_x=6 AND coord_y=0").fetchone()
-    assert here["coord_x"] == 5
-    assert revealed is not None                     # now scanning (6,0,0), no re-aiming
+        revealed = conn.execute("SELECT id FROM sectors WHERE coord_x=3 AND coord_y=0").fetchone()
+    assert here["coord_x"] == 2
+    assert revealed is not None                     # now scanning (3,0,0), no re-aiming
 
 def test_org_scan_target_persists_across_turns():
     """Holding a target is a legitimate way to keep a sector from blinking out."""

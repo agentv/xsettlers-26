@@ -20,22 +20,21 @@ description: Scout outward in all eight directions, scanning ahead every turn.
 loop: true
 steps:
   # One direction per ship, keyed on fleet index so a ship keeps its heading
-  # for the whole game (see npc/strategy.py's params_for). Legs are 2 sectors;
-  # jump_range 3 covers the diagonal (2.83) in a single turn too, so every
-  # scout advances in step and none is a turn behind for a reason unrelated to
-  # the strategy.
+  # for the whole game (see npc/strategy.py's params_for). Legs are 2 sectors:
+  # a cardinal leg is one turn at hull speed 2, a diagonal leg (2.83) is two,
+  # so the diagonal scouts run a turn behind the cardinal ones by design.
   - order:
       ships: idle
       action: move
       params:
-        - {d_x: 0,  d_y: -2, d_z: 0, jump_range_per_turn: 3}   # N
-        - {d_x: 2,  d_y: -2, d_z: 0, jump_range_per_turn: 3}   # NE
-        - {d_x: 2,  d_y: 0,  d_z: 0, jump_range_per_turn: 3}   # E
-        - {d_x: 2,  d_y: 2,  d_z: 0, jump_range_per_turn: 3}   # SE
-        - {d_x: 0,  d_y: 2,  d_z: 0, jump_range_per_turn: 3}   # S
-        - {d_x: -2, d_y: 2,  d_z: 0, jump_range_per_turn: 3}   # SW
-        - {d_x: -2, d_y: 0,  d_z: 0, jump_range_per_turn: 3}   # W
-        - {d_x: -2, d_y: -2, d_z: 0, jump_range_per_turn: 3}   # NW
+        - {d_x: 0,  d_y: -2, d_z: 0}   # N
+        - {d_x: 2,  d_y: -2, d_z: 0}   # NE
+        - {d_x: 2,  d_y: 0,  d_z: 0}   # E
+        - {d_x: 2,  d_y: 2,  d_z: 0}   # SE
+        - {d_x: 0,  d_y: 2,  d_z: 0}   # S
+        - {d_x: -2, d_y: 2,  d_z: 0}   # SW
+        - {d_x: -2, d_y: 0,  d_z: 0}   # W
+        - {d_x: -2, d_y: -2, d_z: 0}   # NW
   # Same ships, same headings, aimed the way they are going. Cardinals get the
   # range-2 aim and diagonals only range 1 -- engine/bearings.py names no
   # diagonal at range 2, because (2,-2) is 2.83 away and SCAN_RANGE is 2. So a

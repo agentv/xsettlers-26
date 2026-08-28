@@ -24,10 +24,10 @@ steps:
       ships: idle
       action: move
       params:
-        - {d_x: 0,  d_y: -3, d_z: 0, jump_range_per_turn: 1}
-        - {d_x: 0,  d_y: 3,  d_z: 0, jump_range_per_turn: 1}
-        - {d_x: 3,  d_y: 0,  d_z: 0, jump_range_per_turn: 1}
-        - {d_x: -3, d_y: 0,  d_z: 0, jump_range_per_turn: 1}
+        - {d_x: 0,  d_y: -3, d_z: 0}
+        - {d_x: 0,  d_y: 3,  d_z: 0}
+        - {d_x: 3,  d_y: 0,  d_z: 0}
+        - {d_x: -3, d_y: 0,  d_z: 0}
   # Same ships as the step above: the fleet is snapshotted once per turn, so
   # these are still the ships that were idle when the pass began, not the
   # (empty) set that is still idle after they were ordered to move.

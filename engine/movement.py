@@ -7,6 +7,45 @@ from engine.scanning import offset_from_params
 ABSOLUTE_KEYS = ("dest_x", "dest_y", "dest_z")
 RELATIVE_KEYS = ("d_x", "d_y", "d_z")
 NEGATIVE_DEST = "Destination coordinates cannot be negative -- space has no negative indices"
+SPEED_NOT_ORDERABLE = ("a move takes a destination, not a speed -- how fast a ship "
+                       "covers the distance is a property of its hull "
+                       "(see engine/movement.HULL_SPEED)")
+
+# How many sectors a hull covers in one turn.
+#
+# Speed is a performance figure belonging to the ORGANIZATION -- to the hull --
+# and it is deliberately not an order parameter and not derived from the pod
+# loadout. A player names a destination; how long the trip takes is the
+# engine's answer, not a number the caller supplies. That is why no move tool
+# accepts a speed: there is nothing for a caller to get wrong or to game.
+#
+# Two, not one, so that under the Euclidean metric the diagonal neighbour
+# (distance sqrt(2) ~= 1.41) is one turn away rather than two -- the same
+# reason SCAN_RANGE is 2 (engine/bearings.py). At speed 1 the eight sectors
+# surrounding a ship are not equidistant in turns, which reads as broken.
+BASE_HULL_SPEED = 2
+
+# Speed by organization type. Every hull in the game today runs at
+# BASE_HULL_SPEED; this table exists so a faster hull (a ranger, a scout) is a
+# row here rather than a parameter threaded back through every move path.
+# A colony has no speed -- it cannot move at all -- so it is absent by design
+# and the lookup below never reaches one.
+HULL_SPEED = {"ship": BASE_HULL_SPEED}
+
+
+def get_jump_range(cur, org_id: int) -> int:
+    """
+    How many sectors this organization covers in one turn -- the movement
+    counterpart of bearings.get_scan_range(). Always call it; never hard-code
+    the number.
+
+    Falls back to BASE_HULL_SPEED for an org type not in HULL_SPEED rather
+    than raising: an unknown hull that cannot move is a design gap, not a
+    reason to abort a turn mid-resolution.
+    """
+    row = cur.execute("SELECT org_type FROM organizations WHERE id=?",
+                      (org_id,)).fetchone()
+    return HULL_SPEED.get(row["org_type"], BASE_HULL_SPEED) if row else BASE_HULL_SPEED
 
 def move_params_error(params: dict) -> str | None:
     """
@@ -19,6 +58,8 @@ def move_params_error(params: dict) -> str | None:
     negative-coordinate guard only applies to the absolute form here -- a
     relative move's real destination isn't knowable until it fires, so
     resolve_move_destination checks it then."""
+    if params.get("jump_range_per_turn") is not None:
+        return SPEED_NOT_ORDERABLE
     absolute = [k for k in ABSOLUTE_KEYS if params.get(k) is not None]
     relative = [k for k in RELATIVE_KEYS if params.get(k) is not None]
     if absolute and relative:
@@ -76,7 +117,7 @@ def plan_move(origin, dest, jump_range_per_turn: int, current_turn: int) -> dict
 
 def apply_confirm_move(cur, org_id: int, player_id: int,
                        dest_x: int, dest_y: int, dest_z: int,
-                       jump_range_per_turn: int, current_turn: int) -> dict:
+                       current_turn: int) -> dict:
     """
     Core mutation logic behind confirm_move, operating on an already-open
     cur/transaction -- no connection management, no ownership check (the
@@ -96,7 +137,7 @@ def apply_confirm_move(cur, org_id: int, player_id: int,
         return {"error": "Organization not found or already in transit"}
     origin_sector_id = org["sector_id"]
     plan = plan_move((org["coord_x"], org["coord_y"], org["coord_z"]),
-                     (dest_x, dest_y, dest_z), jump_range_per_turn, current_turn)
+                     (dest_x, dest_y, dest_z), get_jump_range(cur, org_id), current_turn)
     turns_needed, arrival_turn = plan["turns_needed"], plan["arrival_turn"]
     record_event_direct(cur, current_turn, "ship.move_confirmed",
         payload={"org_id": org_id, "from_sector_id": origin_sector_id,

@@ -123,14 +123,14 @@ def test_start_session_bootstraps_ships_and_pods():
 def test_start_session_assigns_npc_profile_with_config():
     _clear_active_game()
     result = start_session("tok1", [_person(1), _npc("npc-1", strategy="fan_out",
-                                                       config={"jump_range_per_turn": 2})])
+                                                       config={"aggression": 2})])
     npc_id = next(p for p in result["players"] if p["kind"] == "npc")["xsettlers_player_id"]
     with connection() as conn:
         profile = conn.execute("SELECT strategy_name, config FROM npc_profiles WHERE player_id=?",
                                (npc_id,)).fetchone()
     import json
     assert profile["strategy_name"] == "fan_out"
-    assert json.loads(profile["config"]) == {"jump_range_per_turn": 2}
+    assert json.loads(profile["config"]) == {"aggression": 2}
 
 def test_start_session_stores_the_session_token():
     _clear_active_game()

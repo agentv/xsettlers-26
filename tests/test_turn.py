@@ -122,7 +122,7 @@ def test_consensus_does_not_fire_when_undeclared():
 def test_arrival_reveals_destination_and_stamps_visibility():
     from xsettlers_mcp.tools.navigation_tools import confirm_move
     pid = seed_player(); oid = seed_sector(0,0,0); sid = seed_ship(pid, oid)
-    confirm_move("U_P1", sid, 1, 0, 0, jump_range_per_turn=1)  # turns_needed == 1
+    confirm_move("U_P1", sid, 1, 0, 0)  # turns_needed == 1
     end_of_turn()  # arrival not yet due
     end_of_turn()  # arrival resolves
     conn = get_connection()

@@ -24,8 +24,7 @@ from engine.pod_tasking import apply_set_pod_task
 
 def _dispatch_move(cur, org_id: int, player_id: int, params: dict, current_turn: int):
     dest_x, dest_y, dest_z = resolve_destination(cur, org_id, params)
-    apply_confirm_move(cur, org_id, player_id, dest_x, dest_y, dest_z,
-        params.get("jump_range_per_turn", 1), current_turn)
+    apply_confirm_move(cur, org_id, player_id, dest_x, dest_y, dest_z, current_turn)
 
 def _dispatch_set_pod_task(cur, org_id: int, player_id: int, params: dict, current_turn: int):
     apply_set_pod_task(cur, params["pod_id"], org_id, player_id,

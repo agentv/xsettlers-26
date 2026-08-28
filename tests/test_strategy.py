@@ -112,8 +112,8 @@ def test_a_binding_expands_into_destination_coordinates():
 
 
 def test_a_reference_falls_back_to_the_documents_config():
-    resolved = resolve_params({"jump_range_per_turn": "$jump"}, {}, {"jump": 3})
-    assert resolved["jump_range_per_turn"] == 3
+    resolved = resolve_params({"amount": "$ration"}, {}, {"ration": 3})
+    assert resolved["amount"] == 3
 
 
 def test_a_binding_beats_config_of_the_same_name():

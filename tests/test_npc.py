@@ -42,7 +42,7 @@ CYCLE = ["N", "S", "E", "W"]
 
 def test_assign_npc_profile_sets_flag_and_creates_row():
     pid = seed_player()
-    result = assign_npc_profile(pid, "fan_out", config={"jump_range_per_turn": 2})
+    result = assign_npc_profile(pid, "fan_out", config={"aggression": 2})
     assert result == {"ok": True, "player_id": pid, "strategy_name": "fan_out"}
     with connection() as conn:
         player = conn.execute("SELECT is_npc FROM players WHERE id=?", (pid,)).fetchone()
@@ -50,7 +50,7 @@ def test_assign_npc_profile_sets_flag_and_creates_row():
                                (pid,)).fetchone()
     assert player["is_npc"] == 1
     assert profile["strategy_name"] == "fan_out"
-    assert json.loads(profile["config"]) == {"jump_range_per_turn": 2}
+    assert json.loads(profile["config"]) == {"aggression": 2}
     assert json.loads(profile["memory"]) == {}
 
 def test_assign_npc_profile_reassignment_resets_memory():
@@ -194,7 +194,11 @@ def test_fan_out_commits_to_the_revealed_sector_once_scan_resolves():
     seed_pod(ship_id, task="produce_energy", storage_current=100.0)
     assign_npc_profile(pid, "fan_out")
 
-    for _ in range(4):
+    # Turn 0 scouts out and aims; turn 1 lands the hop and resolves the scan;
+    # turn 2's NPC phase is where the decide fires and the fleet is committed.
+    # A fourth pass would start landing ships at the target and empty the
+    # arrival queue this asserts on.
+    for _ in range(3):
         end_of_turn()
 
     memory = _memory(pid)
@@ -227,7 +231,10 @@ def test_fan_out_converges_whole_fleet_on_the_richest_scouted_sector():
     seed_sector(21, 25, 0, energy=500.0)   # west
     assign_npc_profile(pid, "fan_out")
 
-    for _ in range(4):
+    # Three passes, not four: the decide fires on turn 2 and commits the whole
+    # fleet, and a fourth would land the nearest ships and drop them out of
+    # the arrival queue below.
+    for _ in range(3):
         end_of_turn()
 
     memory = _memory(pid)

@@ -1,7 +1,7 @@
-# Packaging exists so a sibling checkout can install this engine and drive it
-# in-process -- specifically ../xsettlers-lab, the game-design harness that
-# fast-forwards whole games by calling engine.turn.end_of_turn() in a loop.
-# No wire protocol makes that fast, so the lab needs the real modules.
+# Packaging exists so a sibling checkout can install this engine editable and
+# drive it in-process -- specifically ../xsettlers-designer, which calls
+# engine.turn.end_of_turn() directly. No wire protocol makes that fast enough,
+# so it needs the real modules.
 #
 # The Fly build does not use this file: the Dockerfile runs
 # `pip install -r requirements.txt` and `COPY . .`, never `pip install .`.
@@ -10,12 +10,12 @@
 #
 # Install editable, never as a built wheel:
 #     pip install -e /path/to/xsettlers26
-# npc/programs.py resolves config/npc_programs/ relative to __file__, and
+# npc/library.py resolves config/npc_strategies/ relative to __file__, and
 # config/game*.yaml is read as ordinary files rather than package data, so an
 # editable install (which points at this checkout) is what makes those
 # lookups land on real files. A wheel would need every YAML declared as
-# package data and would still hand the lab a frozen copy of the scenarios it
-# is supposed to be editing.
+# package data and would still hand the designer repo a frozen copy of the
+# scenarios it is supposed to be editing.
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -43,7 +43,8 @@ dev = ["pytest", "pytest-asyncio"]
 # generic top-level names (config, db, engine, views) that setuptools'
 # find_packages would also pick up from tests/ or scripts/, and that an
 # unrelated package in the same environment could collide with. Keep the
-# lab's virtualenv to xsettlers + lab and there is nothing to collide with.
+# designer repo's virtualenv to xsettlers + designer and there is nothing to
+# collide with.
 [tool.setuptools]
 packages = [
     "xsettlers_mcp",

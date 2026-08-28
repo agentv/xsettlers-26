@@ -315,9 +315,10 @@ of a 300s tick. Moving any of this to a task queue or background thread would
 be over-engineering; everything runs synchronously and inline.
 
 **Both NPC ports were proven equivalent, not assumed.** The pattern: seeded
-runs (`--seed`) of the same matchup before and after, diffing standings,
-per-turn holdings, *and* the `events` table. Repeat it for any refactor
-claiming to change nothing.
+runs of the same matchup before and after, diffing standings, per-turn
+holdings, *and* the `events` table -- the designer repo's `--seed` is what
+holds the board identical across the two runs. Worth repeating there for any
+refactor claiming to change nothing.
 
 The first port (openings from Python into YAML) was byte-identical including
 `seq`. The second (every strategy into a document) was identical in standings,
@@ -363,8 +364,10 @@ recorded before that are comparable within a matchup but not across them.
 `scripts/run_tournament.py`, `scripts/build_tournament_report.py` and the
 `tourney/` results directory were removed from this repo after the extraction
 was verified byte-identical (same seeded standings, same per-turn holdings,
-same rendered report). They live in `../xsettlers-designer` now. For the pre-move
-versions, recover from commit `b6032c5` rather than reconstructing them.
+same rendered report). Their successors are `../xsettlers-designer`'s
+`designer/simulate.py`, `designer/tournament.py` and `designer/report.py` --
+rewrites, not the same files carried over. For the pre-move versions, recover
+from commit `b6032c5` rather than reconstructing them.
 
 **Schema migrations.** `db/schema.py` carries no *general* migration step — the
 `CREATE TABLE` statements are the whole schema. The one exception is

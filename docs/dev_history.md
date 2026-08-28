@@ -236,6 +236,55 @@ roster containing the same `player_id` twice instead of raising out of
 `gamehouse-<id>@handoff` address is what collides, and an error GameHouse can
 read beats a traceback.
 
+**Resource transfer between organizations (built 2026-08-28).** `transfer_resources`
+queues a one-resource push from one of a player's organizations to another;
+`transfer_queue` holds it and `engine/transfers.py` resolves it one tick later,
+at `engine/turn.py` step 2.3 — right *after* arrivals settle, not before. The
+earlier design had it running first, ahead of arrivals, to stop a transfer
+completing on a sector pairing that only formed during the turn being resolved.
+That was reversed on the day it was built: resolving after arrivals means a
+transfer ordered while the giver was still inbound completes the turn it lands,
+which is the behaviour a queued "on arrival, transfer" order wants — and a
+departing org is parked at the `-1` sentinel by then, so it still fails the
+co-location check the honest way. Settled at the same time:
+
+* **One civilization only.** Both orgs belong to the caller, enforced at order
+  time. A cross-owner push would be a weapon — overflow is destroyed, so
+  filling a rival's colony past capacity would burn their turn's headroom
+  through a tool with no combat behind it.
+* **No handshake, no approval, no receiver policy.** Co-location is the
+  consent. A standing "refuse inbound cargo" rule was raised and dropped —
+  own-fleet-only means it would only ever be a player constraining their own
+  fleet, and they can discover the destroy-on-overflow rule by hitting it.
+* **Nothing escrowed; cap at resolution.** The amount stays spendable in the
+  giver's economy until the tick it resolves, then the giver loses what it
+  still holds capped at the order, the receiver gains that capped at free
+  capacity, and the rest is destroyed. `store_org_resource` grew two wideners
+  for the credit side — an optional preferred pod, and a return value for how
+  much actually fit.
+* **Destroyed overflow is invisible to the waste ledger.** `_snapshot_holdings`
+  reads `before_holdings` at step 3, after transfers have resolved, so the
+  destroyed amount never enters `produced − consumed − delta`. The
+  `transfer.resolved` event's `destroyed` field is the only record.
+* **In the action vocabulary, both bindings (added 2026-08-28, same day).**
+  `transfer` is the fifth name in `engine/actions.py`'s `ACTION_NAMES`, bound
+  in `engine/ship_log.py`'s queued `ACTIONS` and `npc/strategy.py`'s IMMEDIATE.
+  This was a deliberate reversal of "leave it out to avoid handing it to NPC
+  strategy documents": piling resources at a hub and hauling them there is a
+  named tactic that should be open to NPCs, not just humans. A strategy
+  document names the receiver by `to_index` — an index into the giver's
+  player's own organizations in id order (0 = first ship, a lone colony hub =
+  last), resolved per game in `strategy._org_id_at_index`, the same
+  can't-name-ids problem `pod_index` solves for `set_pod_task`. Fog of war is
+  untouched: both orgs belong to the caller, so no unseen sector is named.
+  `queue_command` callers pass a concrete `to_org_id` instead. Co-location is
+  **not** checked when a transfer is queued — the whole point of
+  `upon_arrival` is that the giver is still inbound — only when it fires
+  (`apply_transfer_order`), and a miss there is a refusal, logged like a
+  queued colonize that can no longer pay. An `upon_arrival` transfer therefore
+  settles two ticks after the dock: the queued order fires the tick the ship
+  lands, and the transfer it creates resolves the next tick at step 2.3.
+
 ## Findings from play
 
 **A tool declared in three places will eventually disagree.** Before the

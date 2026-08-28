@@ -10,20 +10,6 @@ for them there before proposing them as new.
 
 * [ ] `engine/turn.py` — the `pod.scanned`/`org.scanned` events are still unbuilt, and no NPC strategy scans toward an opponent, so nothing in the library produces contact on its own. Rival detection itself shipped 2026-08-18 (`db/sightings.py`); see `docs/dev_history.md`.
 
-* [ ] **Resource transfer between organizations.** A new org-level action — `transfer` — moving one resource type and an amount from one organization to another. **Org-scoped, not pod-scoped**: it draws from and credits an org's pooled total, the same figure `apply_colonize` already reads to check affordability, not any particular pod's storage.
-
-  **The giving org initiates.** A transfer is a push — no request, no accept, no handshake; the receiver's consent is implied by co-location. A "request resources" verb is a different feature and is not this one.
-
-  **Ordering it requires the two organizations to currently share a sector** — and the sector must be a real one. Both `sector_id`s must match *and* must not be `-1`: the sentinel is a parking slot, not a place, so two ships in transit are never co-located no matter what the column says. This is the check most likely to be written wrong. Nothing is escrowed at order time: the resource stays live in the sender's own economy, spendable by its own production and upkeep, right up until resolution.
-
-  **Resolves one tick later, and has to be the first thing `end_of_turn()` does — ahead of arrivals, ahead of everything.** Co-location is rechecked at resolution using each org's position as of the *start* of that turn, before any of the turn's own movement can change it. Running this step after arrivals would let a transfer complete on a sector pairing that only came into existence during the very turn being resolved — two orgs that only just met, credited as though they had been together for the whole wait. Resolving transfers first closes that off.
-
-  If the two are no longer co-located at resolution, the transfer does not happen and the sender keeps everything, exactly as if it had never been ordered. If they are still co-located, the sender loses whatever of the resource it currently holds, **capped at the amount originally ordered** — never more than what is actually there, so a sender that spent some of it down in the intervening turn simply sends less rather than being refused. The receiver gains that amount **capped at its own free capacity** (total storage across its pods, less what it already holds); anything beyond that is destroyed — not returned, not held anywhere.
-
-  Needs a **credit** counterpart to the org-pool drain `apply_colonize` already uses: that helper only ever drains a pooled resource today, and crediting one, spread across whichever of the receiving org's pods have room, is new.
-
-  Still open: whether a transfer may cross player ownership (an allied hand-off) or is confined to one player's own fleet — the original direction said own-fleet-only, and "two units in the same sector" reads wider than that. And whether `transfer` joins the ship's log's action whitelist (`{move, set_pod_task, colonize, aim_scan}`, `engine/ship_log.py`), which would need an engine-layer `apply_*` helper rather than the self-connecting tool wrapper.
-
 ## MCP Tools
 
 * [ ] **Move-tasking response template — canonical.** This is the report a player wants back after ordering a ship to move, and it should be what `confirm_move` (and `set_mission(mission='move')`, which delegates to it) returns. Today they return a bare dict of raw fields and the client improvises the rest. Four parts, in order:

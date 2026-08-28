@@ -166,6 +166,7 @@ fast. Because costs are fixed, the effect on the *margin* is much larger than
     * **NPC decisions** — every `is_npc=1` player's registered strategy (see `npc/strategies.py`) acts, via the same tool functions a human player would call, before anything else this turn resolves
     * Player declarations reset
     * Arrivals processed
+    * **Resource transfers resolved** — transfers ordered last tick (`transfer_resources`, or a queued `transfer` action) settle here, right after arrivals so co-location is judged once inbound ships have landed. Sender loses what it still holds up to the amount ordered; receiver gains that up to its free capacity; any excess is destroyed and recorded only on the `transfer.resolved` event
     * **Ship's log dispatch** — any `queue_command`-deferred action due this turn (`upon_arrival`/`at_turn`) fires here, right after arrivals so a chained action sees an org's just-landed state, and before production so a re-departing org's production is correctly suppressed that turn
     * Pod consumption then production (all pods: resources consumed first, then output produced; scan resolution for stationary orgs)
     * Colonization resolution (matured `colonize_complete` events flip `org_type` ship → colony)

@@ -34,7 +34,7 @@ from npc import decide
 from xsettlers_mcp.tools.navigation_tools import confirm_move
 from xsettlers_mcp.tools.organization_tools import (
     queue_command, set_mission, set_pod_task, set_org_scan_bearing,
-    VALID_POD_TASKS, _aim_args)
+    transfer_resources, VALID_POD_TASKS, VALID_TRANSFER_RESOURCES, _aim_args)
 
 DOCUMENT_KEYS = {"name", "description", "config", "loop", "steps"}
 ORDER_KEYS = {"ships", "when", "action", "params", "repeat_each"}
@@ -42,6 +42,7 @@ DECIDE_KEYS = {"await", "from", "rank_by", "pick", "bind"}
 STEP_KINDS = {"order", "decide"}
 ARRIVAL_RELATIVE = {"upon_arrival"}
 NO_POD_AT_INDEX = "org {org_id} has no pod at the requested index"
+NO_ORG_AT_INDEX = "org {org_id}'s player has no organization at to_index {index}"
 
 
 # ---------------------------------------------------------------- selection
@@ -223,6 +224,12 @@ def _dispatch(player_token: str, org_id: int, order: dict, params: dict):
         params.pop("pod_index", None)
         if params["pod_id"] is None:
             return {"error": NO_POD_AT_INDEX.format(org_id=org_id)}
+    if action == "transfer":
+        with connection() as conn:
+            params["to_org_id"] = _org_id_at_index(conn, org_id, params.get("to_index"))
+        index = params.pop("to_index", None)
+        if params["to_org_id"] is None:
+            return {"error": NO_ORG_AT_INDEX.format(org_id=org_id, index=index)}
     return queue_command(player_token, org_id, phase, action, params, turn=turn)
 
 
@@ -235,6 +242,24 @@ def _pod_id_for(cur, org_id: int, params: dict):
     pods = cur.execute("SELECT id FROM pods WHERE org_id=? ORDER BY id", (org_id,)).fetchall()
     index = params.get("pod_index", 0)
     return pods[index]["id"] if index < len(pods) else None
+
+
+def _org_id_at_index(cur, giver_org_id: int, index):
+    """
+    A transfer's receiver, addressed the same way set_pod_task addresses a pod
+    -- by index, since a document cannot name org ids. The index runs over the
+    giver's player's own organizations in id order: bootstrap numbers every
+    ship before any colony (db/bootstrap.py), so 0 is the first ship of the
+    starting fleet and a single colony hub is the last index. None or an
+    out-of-range index returns None, which the caller turns into an error.
+    """
+    if not isinstance(index, int) or index < 0:
+        return None
+    rows = cur.execute(
+        """SELECT id FROM organizations
+           WHERE player_id=(SELECT player_id FROM organizations WHERE id=?)
+           ORDER BY id""", (giver_org_id,)).fetchall()
+    return rows[index]["id"] if index < len(rows) else None
 
 
 def _now_move(player_token: str, org_id: int, params: dict):
@@ -262,12 +287,22 @@ def _now_set_pod_task(player_token: str, org_id: int, params: dict):
     return set_pod_task(player_token, pod_id, params["task"], **_aim_args(params))
 
 
+def _now_transfer(player_token: str, org_id: int, params: dict):
+    with connection() as conn:
+        to_org_id = _org_id_at_index(conn, org_id, params.get("to_index"))
+    if to_org_id is None:
+        return {"error": NO_ORG_AT_INDEX.format(org_id=org_id, index=params.get("to_index"))}
+    return transfer_resources(player_token, org_id, to_org_id,
+                              params.get("resource"), params.get("amount"))
+
+
 # The immediate binding of engine/actions.py's vocabulary: these go through
 # the ordinary @player_tool wrappers, since run_npc_decisions() completes
 # before end_of_turn() opens its transaction. engine/ship_log.py holds the
 # queued binding of the same names.
 IMMEDIATE = {"move": _now_move, "colonize": _now_colonize,
-             "aim_scan": _now_aim_scan, "set_pod_task": _now_set_pod_task}
+             "aim_scan": _now_aim_scan, "set_pod_task": _now_set_pod_task,
+             "transfer": _now_transfer}
 
 
 # -------------------------------------------------------------- validation
@@ -467,4 +502,32 @@ def _validate_params(order: dict, action: str, where: str, bound: set) -> dict |
             if task not in VALID_POD_TASKS:
                 return {"error": f"{where}: invalid pod task '{task}'. "
                                  f"Valid: {sorted(VALID_POD_TASKS)}"}
+        elif action == "transfer":
+            err = _validate_transfer_params(entry, where)
+            if err:
+                return err
+    return None
+
+
+def _is_ref(value) -> bool:
+    return isinstance(value, str) and value.startswith("$")
+
+
+def _validate_transfer_params(entry: dict, where: str) -> dict | None:
+    """
+    A transfer names its receiver by `to_index` -- an index into the player's
+    own organizations in id order, resolved per game (see _org_id_at_index) --
+    plus a `resource` and an `amount`. `amount` may be a `$name` bound
+    elsewhere; the others must be literals.
+    """
+    if not isinstance(entry.get("to_index"), int) or entry["to_index"] < 0:
+        return {"error": f"{where}: 'transfer' needs 'to_index' -- a non-negative "
+                         f"index into your organizations (0 is your first ship)"}
+    if entry.get("resource") not in VALID_TRANSFER_RESOURCES:
+        return {"error": f"{where}: 'transfer' needs 'resource' one of "
+                         f"{sorted(VALID_TRANSFER_RESOURCES)}"}
+    amount = entry.get("amount")
+    if not _is_ref(amount) and (isinstance(amount, bool)
+                                or not isinstance(amount, (int, float)) or amount <= 0):
+        return {"error": f"{where}: 'transfer' needs a positive 'amount'"}
     return None

@@ -1,7 +1,7 @@
 """
 What an org can be ordered to do, named once.
 
-The same four actions are bound twice, deliberately, because they are invoked
+The same actions are bound twice, deliberately, because they are invoked
 from two places that cannot share an implementation:
 
 * **queued** (`engine/ship_log.py`'s ACTIONS) runs inside engine/turn.py's
@@ -16,10 +16,10 @@ This module holds no handlers, only the vocabulary, which is what lets both
 bindings and queue_command's whitelist agree without any of them importing the
 others (the tool layer imports the ship's log, so a registry holding tool
 functions would close a cycle). tests/test_actions.py asserts both bindings
-cover exactly these names, so a fifth action cannot be half-added.
+cover exactly these names, so an action cannot be half-added.
 """
 
-ACTION_NAMES = frozenset({"move", "set_pod_task", "colonize", "aim_scan"})
+ACTION_NAMES = frozenset({"move", "set_pod_task", "colonize", "aim_scan", "transfer"})
 
 # Entering transit locks an org's own mission entirely, but not its pods'
 # tasks -- which is the whole reason the upon_departure phase exists, and why

@@ -4,6 +4,7 @@ from db.orgs import org_position
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED, POD_NOT_OWNED
 from engine.turn import get_current_turn
 from engine.missions import apply_colonize
+from engine.transfers import apply_transfer_order, VALID_RESOURCES as VALID_TRANSFER_RESOURCES
 from engine.movement import move_params_error
 from engine.actions import ACTION_NAMES, UPON_DEPARTURE_ACTIONS, TRIGGER_PHASES
 from engine.pod_tasking import apply_set_pod_task
@@ -147,6 +148,36 @@ def set_mission(sess, org_id: int, mission: str, params: dict = None) -> dict:
                 (mission, json.dumps(params) if params else None, org_id))
     return {"ok": True, "org_id": org_id, "mission": mission}
 
+@mcp_tool(
+    "Order one of your organizations to hand a resource to another of your "
+    "own organizations. A push -- no request or accept on the receiving "
+    "end; the two sharing a sector is the consent. Both must be yours and "
+    "must currently occupy the same real sector (not in transit). One "
+    "resource type (energy/food/goods) and a positive amount. Nothing is "
+    "held aside: the amount stays spendable in the giver's economy until "
+    "the transfer resolves one tick later, when the giver sends whatever it "
+    "still holds up to the amount ordered, the receiver takes what fits, "
+    "and any excess is destroyed. If the two are no longer together at "
+    "resolution, nothing moves.")
+@player_tool
+def transfer_resources(sess, from_org_id: int, to_org_id: int, resource: str,
+                       amount: float) -> dict:
+    """
+    Queue a resource transfer between two of the caller's own organizations,
+    resolved one tick later, just after that turn's arrivals settle -- so a
+    ship that only lands at the receiver's sector on the resolving turn still
+    completes a transfer it ordered while inbound.
+
+    Every rule about the transfer lives in engine.transfers.apply_transfer_order:
+    both orgs owned by the caller, distinct, sharing a real sector (equal
+    sector_id, neither -1). Nothing is charged here; the giver's stock stays
+    live until resolution, capped there at the amount ordered, and the
+    receiver's gain is capped at its free capacity with the rest destroyed.
+    """
+    return apply_transfer_order(sess.cur, sess.player_id, from_org_id, to_org_id,
+                                resource, amount, get_current_turn())
+
+
 def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     """
     Validate a queued command's params at QUEUE time and return them
@@ -189,6 +220,33 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
             return None, err
         return {"offset_x": offset[0], "offset_y": offset[1], "offset_z": offset[2],
                 "bearing": status["bearing"]}, None
+
+    if action == "transfer":
+        # Co-location is deliberately NOT checked here -- the whole point of a
+        # queued 'upon_arrival' transfer is that the giver is not there yet.
+        # engine.transfers.apply_transfer_order rechecks it at fire time and a
+        # miss is logged as a refusal, like a queued colonize that can no
+        # longer pay. What must be sound now is the shape and the target's
+        # ownership, since the dispatcher indexes straight into these fields.
+        to_org_id, resource, amount = (params.get("to_org_id"),
+                                       params.get("resource"), params.get("amount"))
+        missing = [n for n, v in (("to_org_id", to_org_id), ("resource", resource),
+                                  ("amount", amount)) if v is None]
+        if missing:
+            return None, {"error": f"action='transfer' requires params: {', '.join(missing)}"}
+        if resource not in VALID_TRANSFER_RESOURCES:
+            return None, {"error": f"Invalid resource '{resource}'. "
+                                   f"Valid: {sorted(VALID_TRANSFER_RESOURCES)}"}
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount <= 0:
+            return None, {"error": "amount must be a positive number"}
+        if to_org_id == org_id:
+            return None, {"error": "An organization cannot transfer to itself"}
+        if not cur.execute(
+                """SELECT 1 FROM organizations WHERE id=? AND
+                   player_id=(SELECT player_id FROM organizations WHERE id=?)""",
+                (to_org_id, org_id)).fetchone():
+            return None, {"error": "Receiving organization not found or not owned by you"}
+        return params, None
 
     # action == 'set_pod_task' (the only remaining entry in SHIP_LOG_ACTIONS)
     pod_id, task = params.get("pod_id"), params.get("task")
@@ -234,7 +292,10 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     "whatever sector it occupies when the order fires, and is refused if it "
     "cannot afford the energy by then); 'aim_scan' (optionally "
     "bearing/offset_x/y/z, same shape set_org_scan_bearing takes; pass none "
-    "to clear the aim). If you give the org new orders before a "
+    "to clear the aim); 'transfer' (params: to_org_id, resource, amount -- "
+    "hands a resource to another of your organizations; co-location is "
+    "checked when it fires, not now, so a queued transfer is refused if the "
+    "two are not together then). If you give the org new orders before a "
     "upon_arrival/at_turn command fires, the queued one is "
     "silently dropped rather than overriding your manual orders.")
 @player_tool
@@ -272,6 +333,10 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
         arrives is declined and left untouched
         (logged as alert.queued_command_refused).
       - 'aim_scan' -- optionally bearing/offset_x/y/z; pass none to clear.
+      - 'transfer' -- to_org_id, resource, amount. Pushes a resource to
+        another of your organizations. Like colonize it can be refused at
+        fire time: co-location is rechecked then (the point of queueing it
+        'upon_arrival' is that the giver is still inbound now).
 
     If a player gives the org new orders before a queued command fires, the
     command is silently dropped rather than clobbering them (see

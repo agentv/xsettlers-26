@@ -17,7 +17,7 @@ TOOL_LIST = asyncio.run(list_tools())
 
 def test_every_registered_tool_is_listed():
     assert {t.name for t in TOOL_LIST} == set(TOOLS)
-    assert len(TOOL_LIST) == 29
+    assert len(TOOL_LIST) == 30
 
 
 @pytest.mark.parametrize("name", sorted(TOOLS))

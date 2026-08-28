@@ -11,6 +11,7 @@ from engine.production import (get_production, get_consumption_recipe,
                                RESOURCE_CAPACITY_COLUMN)
 from engine.org_resources import (available_org_resource, drain_org_resource,
                                   store_org_resource)
+from engine.transfers import resolve_due_transfers
 from engine.scoring import score_for, player_standings
 from engine.bearings import get_scan_range
 
@@ -223,6 +224,15 @@ def end_of_turn():
             cur.execute("""UPDATE organizations SET sector_id=?,mission='idle',mission_params=NULL,
                            is_mobile=1 WHERE id=?""", (dest_sector_id,arrival["org_id"]))
     cur.execute("DELETE FROM arrival_queue WHERE arrival_turn<=?", (current_turn + 1,))
+
+    # 2.3. Resolve resource transfers ordered last tick -- AFTER arrivals, so a
+    #      ship that only lands at the receiver's sector this turn still
+    #      completes a transfer ordered while it was inbound, and so a queued
+    #      upon_arrival transfer has somewhere to resolve against. Co-location
+    #      is judged on where each org sits once this turn's arrivals have
+    #      settled; a departing org is parked at the -1 sentinel by then and
+    #      correctly fails the check (see engine/transfers.py).
+    resolve_due_transfers(cur, current_turn)
 
     # 2.5. Ship's log: dispatch any due upon_arrival/at_turn queued
     #      commands (see engine/ship_log.py). Must run after the arrival loop

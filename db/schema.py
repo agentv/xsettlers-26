@@ -255,6 +255,28 @@ def init_schema():
             created_turn  INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_org_command_queue_resolve ON org_command_queue(resolve_turn);
+        -- Resource transfers between two of one player's own organizations.
+        -- A push: the giver orders it (transfer_resources), it resolves one
+        -- tick later, right after that turn's arrivals settle (engine/turn.py
+        -- step 2.3) -- so co-location is judged once inbound ships have
+        -- landed, and a transfer ordered while a party was in transit
+        -- completes the turn it arrives. Nothing is escrowed at order time:
+        -- `amount` stays live in the giver's economy until resolution, when
+        -- the giver loses whatever it still holds capped at `amount`, the
+        -- receiver gains that capped at its free capacity, and any excess is
+        -- destroyed (see engine/transfers.py). Rows are deleted on resolution
+        -- -- that, not a flag, is what makes resolution idempotent (same as
+        -- arrival_queue).
+        CREATE TABLE IF NOT EXISTS transfer_queue (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_org_id  INTEGER NOT NULL REFERENCES organizations(id),
+            to_org_id    INTEGER NOT NULL REFERENCES organizations(id),
+            resource     TEXT NOT NULL CHECK(resource IN ('energy','food','goods')),
+            amount       REAL NOT NULL,
+            ordered_turn INTEGER NOT NULL,
+            resolve_turn INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_transfer_queue_resolve ON transfer_queue(resolve_turn);
         CREATE TABLE IF NOT EXISTS events (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             game_id         INTEGER,

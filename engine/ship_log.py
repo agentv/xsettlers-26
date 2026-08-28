@@ -18,6 +18,7 @@ import json
 from db.events import record_dispatch_failure, record_command_refused
 from engine.movement import apply_confirm_move, resolve_move_destination
 from engine.missions import apply_colonize
+from engine.transfers import apply_transfer_order
 from engine.scanning import apply_set_org_scan_bearing, offset_from_params
 from engine.pod_tasking import apply_set_pod_task
 
@@ -44,12 +45,25 @@ def _dispatch_aim_scan(cur, org_id: int, player_id: int, params: dict, current_t
     apply_set_org_scan_bearing(cur, org_id, player_id, offset_from_params(params),
                                current_turn, bearing=params.get("bearing"))
 
+def _dispatch_transfer(cur, org_id: int, player_id: int, params: dict, current_turn: int):
+    """
+    Queue a transfer order from this org to another of the same player's orgs;
+    it resolves at the next tick's step 2.3, one tick after this command
+    fires. Like colonize, this can hand back {"error": ...} rather than
+    raising -- co-location is rechecked here (the receiver may have moved off
+    the sector this org just arrived at), and a giver that is no longer with
+    its target is a refusal, not a fault.
+    """
+    return apply_transfer_order(cur, player_id, org_id, params["to_org_id"],
+                                params["resource"], params["amount"], current_turn)
+
 # The queued binding of engine/actions.py's vocabulary -- these run inside
 # engine/turn.py's open transaction, so they dispatch into the engine-layer
 # apply_* helpers rather than the self-connecting tool wrappers.
 # npc/strategy.py holds the immediate binding of the same names.
 ACTIONS = {"move": _dispatch_move, "set_pod_task": _dispatch_set_pod_task,
-           "colonize": _dispatch_colonize, "aim_scan": _dispatch_aim_scan}
+           "colonize": _dispatch_colonize, "aim_scan": _dispatch_aim_scan,
+           "transfer": _dispatch_transfer}
 
 def resolve_destination(cur, org_id: int, params: dict) -> tuple:
     """

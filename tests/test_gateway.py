@@ -59,10 +59,10 @@ def test_argument_validation_never_runs_before_authentication():
     at all until the token resolves.
     """
     from xsettlers_mcp.tools.sector_tools import show_sector_neighborhood
-    from xsettlers_mcp.tools.organization_tools import set_mission, rename_organization
+    from xsettlers_mcp.tools.organization_tools import set_mission, set_call_sign
 
     assert _stranger_sees_only(show_sector_neighborhood("U_STRANGER", org_id=1, radius=99))
-    assert _stranger_sees_only(rename_organization("U_STRANGER", 1, "   "))
+    assert _stranger_sees_only(set_call_sign("U_STRANGER", 1, "   "))
     invalid_mission = set_mission("U_STRANGER", 1, "dance")
     assert _stranger_sees_only(invalid_mission)
     assert "colonize" not in str(invalid_mission), "must not enumerate valid missions"
@@ -99,7 +99,7 @@ def test_every_player_facing_tool_rejects_an_unknown_token():
         lambda: organization_tools.set_pod_task(S, 1, "idle"),
         lambda: organization_tools.set_pod_scan_bearing(S, 1, bearing="N"),
         lambda: organization_tools.set_org_scan_bearing(S, 1, bearing="N"),
-        lambda: organization_tools.rename_organization(S, 1, "Nope"),
+        lambda: organization_tools.set_call_sign(S, 1, "Nope"),
         lambda: organization_tools.queue_command(S, 1, "at_turn", "set_pod_task",
                                                  {"pod_id": 1, "task": "idle"}, turn=1),
         lambda: organization_reports.show_organization(S, 1),

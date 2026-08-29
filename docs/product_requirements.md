@@ -201,9 +201,20 @@ Assigns a task to a pod belonging to the player's organization. Valid tasks: `id
 
 For `task = scan`, an aim may optionally be supplied in the same call as either a compass `bearing` or an explicit `offset_x/y/z`. If omitted, the pod takes the scan task with no aim — `set_pod_scan_bearing` must follow before end of turn, or the pod pays its food cost and reveals nothing.
 
-### Rename Organization (`rename_organization`)
+### Set Call Sign (`set_call_sign`, `set_task_force_call_sign`)
 
-Gives one of the player's own ships or colonies a name of their choosing (max 24 characters). Names must be unique among that player's own organizations, case-insensitively — a name is how a player issues an order, so an ambiguous one is not a name. Uniqueness is per player, not global. Defaults are `S1`…`Sn` for ships and `C1` for a colony.
+**Every unit has two labels, and they do different jobs.**
+
+* Its **given name** is assigned once at bootstrap — `S1`…`Sn` for ships, `C1` for a colony — and **never changes for the life of the game**. Short and sayable, unique per player, and the stable handle everything else is reasoned against.
+* Its **call sign** is an *additional* label the player chooses and may change as often as they like during a game, up to `MAX_CALL_SIGN_LENGTH` (24) characters. It is purely for the player and for reports; no engine rule reads it.
+
+A call sign does **not** rename anything. Setting one leaves `organizations.name` exactly as it was, which is what makes it safe to change mid-game — nothing underneath moves.
+
+Call signs must be unique among that player's own units, case-insensitively, and may not collide with another unit's *given* name either: calling `S1` "S2" while a real `S2` exists would make every spoken reference ambiguous. Uniqueness is per player, not global. Empty is refused rather than treated as a clear.
+
+Task forces get call signs on the same terms via `set_task_force_call_sign`, scoped for uniqueness to that player's task forces alone (no tool takes a unit by name, so a ship and a task force sharing a call sign is not ambiguous).
+
+Reports show the call sign in place of the given name wherever one is set (`views/format.py`'s `display_label`), and always carry `name` and `call_sign` as separate fields so a client can show either.
 
 ---
 
@@ -299,7 +310,7 @@ Ownership-gated — only the calling player's data is returned. Lives in `organi
 # Events (Write-Ahead Log)
 
 * Every state mutation is preceded by an event log entry. No exceptions.
-* **Player-action events** (deltas): `ship.move_confirmed`, `ship.move_cancelled`, `mission.set`, `pod.task_set`, `organization.scan_bearing_set`, `pod.scan_bearing_set`, `organization.renamed`
+* **Player-action events** (deltas): `ship.move_confirmed`, `ship.move_cancelled`, `mission.set`, `pod.task_set`, `organization.scan_bearing_set`, `pod.scan_bearing_set`, `organization.call_sign_set`, `task_force.call_sign_set`
 * **Engine events** (deltas): `ship.colonized`, `colonize_complete` (scheduled 3 turns ahead by `mission.set`, resolved by the engine), `alert.scan_out_of_range`
 * **Snapshots**: `turn.snapshot` — full state written at end of each turn for replay and debug; `game.final_scores` — the persisted, idempotent end-of-game scoreboard.
 * **Rival detection is a real gap**: [Visibility & Fog of War](#visibility--fog-of-war) above describes it as a feature, but no `alert.rival_detected` event is ever written. The event list above is the complete set the code actually emits — check it against `grep` before relying on any event name.

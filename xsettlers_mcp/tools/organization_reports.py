@@ -18,7 +18,7 @@ from engine.turn import get_next_tick_at, get_final_scores, TURN_LIMIT
 from engine.scoring import player_standings
 from engine.scanning import aim_label, scanners_on
 from views.format import (RESOURCE_ABBREV, TASK_ABBREV, TASK_DISPLAY,
-                          resource_summary, scanner_footer, short_name,
+                          resource_summary, scanner_footer, short_name, display_label,
                           stacked_header, tasking_summary, tick_countdown,
                           totals_footer, turn_header, winners_label)
 import os
@@ -51,7 +51,7 @@ def show_organization(sess, org_id: int) -> dict:
     """
     cur = sess.cur
     cur.execute("""
-        SELECT o.id, o.org_type, o.name, o.mission, o.mission_params,
+        SELECT o.id, o.org_type, o.name, o.call_sign, o.mission, o.mission_params,
                o.is_mobile, o.sector_id, o.task_force_id,
                o.scan_offset_x, o.scan_offset_y, o.scan_offset_z,
                s.coord_x, s.coord_y, s.coord_z
@@ -82,12 +82,16 @@ def show_organization(sess, org_id: int) -> dict:
             t[f"{resource}_display"] = f"{t[resource] or 0:.0f}"
     status = (f"at ({org['coord_x']},{org['coord_y']},{org['coord_z']})"
               if org["sector_id"] != -1 else "in transit")
-    result["short_name"] = short_name(org["name"])
+    label = display_label(org["name"], org["call_sign"])
+    # short_name is the label a client prints; `name` and `call_sign` stay
+    # alongside it so the given name is still available to show or search on.
+    result["short_name"] = label
+    result["call_sign"] = org["call_sign"]
     result["status"] = status
     scanners = _scanners_on(cur, org)
     result["scanners"] = scanners
     result["display"] = {
-        "header": f"{org['name']} — {status}, {org['mission']}",
+        "header": f"{label} — {status}, {org['mission']}",
         "rows_key": "tasks",
         "columns": ["task_display", "count", "energy_display", "food_display",
                     "goods_display", "capacity_display"],
@@ -133,7 +137,7 @@ def show_civilization_status(sess) -> dict:
 
     # Organizations
     cur.execute("""
-        SELECT o.id, o.name, o.org_type, o.mission, o.mission_params,
+        SELECT o.id, o.name, o.call_sign, o.org_type, o.mission, o.mission_params,
                o.sector_id, s.coord_x, s.coord_y, s.coord_z
         FROM organizations o
         LEFT JOIN sectors s ON s.id = o.sector_id
@@ -157,7 +161,8 @@ def show_civilization_status(sess) -> dict:
         entry = {
             "id": o["id"],
             "name": o["name"],
-            "short_name": short_name(o["name"]),
+            "call_sign": o["call_sign"],
+            "short_name": display_label(o["name"], o["call_sign"]),
             "org_type": o["org_type"],
             "mission": o["mission"],
             "cargo": {"current": cargo["current"] or 0.0, "capacity": cargo["capacity"] or 0.0},

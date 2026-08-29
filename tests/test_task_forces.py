@@ -5,7 +5,7 @@ from xsettlers_mcp.tools.organization_tools import set_mission
 from xsettlers_mcp.tools.task_force_tools import (
     create_task_force, add_to_task_force, remove_from_task_force,
     disband_task_force, list_task_forces, order_task_force,
-    TASK_FORCE_NOT_OWNED, NOT_A_SHIP,
+    set_task_force_call_sign, TASK_FORCE_NOT_OWNED, NOT_A_SHIP,
 )
 from xsettlers_mcp.tools.session import ORG_NOT_OWNED
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
@@ -245,3 +245,35 @@ def test_order_task_force_unowned():
     seed_player()
     result = order_task_force("U_P1", tfid, "idle")
     assert result["error"] == TASK_FORCE_NOT_OWNED
+
+
+# --- call signs (the player's own name for a task force) ---
+
+def test_task_force_call_sign_leaves_the_created_name_alone():
+    """Additional, not a rename -- same rule organizations follow."""
+    seed_player()
+    tfid = create_task_force("U_P1", "Task Force One", [])["task_force_id"]
+    result = set_task_force_call_sign("U_P1", tfid, "Hammer")
+    assert result["ok"] is True
+    assert (result["name"], result["call_sign"]) == ("Task Force One", "Hammer")
+    with connection() as conn:
+        row = conn.execute("SELECT name, call_sign FROM task_forces WHERE id=?",
+                           (tfid,)).fetchone()
+    assert (row["name"], row["call_sign"]) == ("Task Force One", "Hammer")
+
+
+def test_task_force_call_sign_rejects_a_duplicate_and_an_overlong_one():
+    seed_player()
+    first = create_task_force("U_P1", "Alpha", [])["task_force_id"]
+    second = create_task_force("U_P1", "Beta", [])["task_force_id"]
+    set_task_force_call_sign("U_P1", first, "Hammer")
+    assert "error" in set_task_force_call_sign("U_P1", second, "hammer")
+    assert "error" in set_task_force_call_sign("U_P1", second, "x" * 25)
+    assert "error" in set_task_force_call_sign("U_P1", second, "   ")
+
+
+def test_task_force_call_sign_is_ownership_gated():
+    seed_player(email="other@test.com", player_token="U_P2")
+    tfid = create_task_force("U_P2", "Theirs", [])["task_force_id"]
+    seed_player()
+    assert set_task_force_call_sign("U_P1", tfid, "Stolen")["error"] == TASK_FORCE_NOT_OWNED

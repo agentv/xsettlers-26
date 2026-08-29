@@ -638,3 +638,38 @@ def test_neighborhood_error_payload_draws_a_card_not_a_crash():
     marks, dims = layout_neighborhood({"error": "Organization not found"})
     assert dims["width"] and dims["height"]
     assert any(m["kind"] == "text" and "not found" in m["s"] for m in marks)
+
+
+# --- call signs reach the reports (which is the whole point of having them) ---
+
+def test_a_call_sign_replaces_the_given_name_in_reports():
+    """A call sign exists so a player sees their own word for a unit. Both
+    reports show it, and both keep `name` alongside so S1 stays findable."""
+    from xsettlers_mcp.tools.organization_tools import set_call_sign
+    from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
+    pid = seed_player(); sid = seed_sector(0, 0, 0)
+    oid = seed_ship(pid, sid, name="S1")
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    set_call_sign("U_P1", oid, "Vanguard")
+
+    org = show_organization("U_P1", oid)
+    assert org["call_sign"] == "Vanguard"
+    assert org["name"] == "S1"
+    assert org["short_name"] == "Vanguard"
+    assert org["display"]["header"].startswith("Vanguard")
+
+    fleet = show_civilization_status("U_P1")
+    row = next(o for o in fleet["organizations"] if o["id"] == oid)
+    assert (row["name"], row["call_sign"], row["short_name"]) == ("S1", "Vanguard", "Vanguard")
+    assert "Vanguard" in render_status(fleet)
+
+
+def test_a_unit_with_no_call_sign_still_shows_its_given_name():
+    from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
+    pid = seed_player(); sid = seed_sector(0, 0, 0)
+    oid = seed_ship(pid, sid, name="S1")
+    seed_pod(oid, task="produce_energy", storage_current=10.0)
+    fleet = show_civilization_status("U_P1")
+    row = next(o for o in fleet["organizations"] if o["id"] == oid)
+    assert row["call_sign"] is None
+    assert row["short_name"] == "S1"

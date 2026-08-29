@@ -53,9 +53,22 @@ Every organization — ship or colony — carries **pods**, and every
 organization also has **sensors of its own** (see
 [Scanning & Discovery](#scanning--discovery)).
 
-You can rename any ship or colony to whatever you like. Defaults are `S1`…`Sn`
-and `C1`; names must be unique within your own fleet, because a name is how
-you give an order.
+### Names and call signs
+
+Every unit is launched with a **given name** — `S1`, `S2`, `C1` and so on.
+That name is fixed for the whole game. It's short on purpose, so you can say
+it out loud, and it stays put so you always have a stable way to refer to a
+unit.
+
+On top of that, you can give any ship, colony, or task force a **call sign** —
+your own name for it, up to 24 characters. Call `S3` "Vanguard" and every
+report starts calling it Vanguard. Change it whenever you like; the given name
+underneath never moves, so nothing gets lost when you do.
+
+A call sign is purely for you and your reports — nothing in the game's rules
+reads it. Keep them unique within your own fleet, and don't hand one unit
+another's given name (calling `S1` "S2" while a real `S2` is flying around
+helps nobody).
 
 ---
 
@@ -239,7 +252,8 @@ the music stops.
 | Change what a pod is doing | `set_pod_task` |
 | Aim an organization's own sensors | `set_org_scan_bearing` |
 | Aim a scan pod | `set_pod_scan_bearing` |
-| Name a ship or colony | `rename_organization` |
+| Give a ship or colony a call sign | `set_call_sign` |
+| Give a task force a call sign | `set_task_force_call_sign` |
 | Check on one ship or colony | `show_organization` |
 | Review your whole fleet | `show_civilization_status` |
 | Look at the space around something | `show_sector_neighborhood` |

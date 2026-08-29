@@ -460,46 +460,61 @@ def set_pod_scan_bearing(sess, pod_id: int, bearing: str = None,
                       apply_set_pod_scan_bearing, {"pod_id": pod_id})
 
 
-MAX_ORG_NAME_LENGTH = 24
+# How long a player-chosen call sign may be. Reports lay their columns out to
+# fit the widest cell (views/render.py), so this is a legibility bound rather
+# than a layout one -- it has to stay readable in a fleet table on a phone.
+MAX_CALL_SIGN_LENGTH = 24
 
 @mcp_tool(
-    "Give one of your own ships or colonies a name of your choosing (max 24 "
-    "chars). Names are how a player refers to a unit, so they must be "
-    "unique among your own organizations; defaults are short and sayable "
-    "(S1..Sn for ships, C1 for a colony).")
+    "Give one of your own ships or colonies a call sign -- your own name for "
+    "it, up to 24 characters, which reports show in place of its given name. "
+    "A call sign is additional, not a rename: the unit keeps the given name "
+    "it was launched with (S1..Sn for ships, C1 for a colony). Change it as "
+    "often as you like during a game. Must be unique among your own units.")
 @player_tool
-def rename_organization(sess, org_id: int, name: str) -> dict:
+def set_call_sign(sess, org_id: int, call_sign: str) -> dict:
     """
-    Give one of your own ships or colonies a name of your choosing.
+    Give one of the caller's ships or colonies a call sign -- the player's own
+    word for that unit, shown by every report in place of its given name (see
+    views/format.display_label).
 
-    Bounded at MAX_ORG_NAME_LENGTH characters and stripped of surrounding
-    whitespace, because the name has to fit a fleet-report column on a phone.
-    Empty names are rejected rather than silently restoring the bootstrap
-    default -- clearing a name is not a thing you can do; renaming is.
+    Additive, not a rename: `organizations.name` is assigned once at bootstrap
+    and never changes, so a call sign can be set, changed and reasoned about
+    without the S1/C1 scheme underneath it ever moving. That is what makes a
+    call sign safe to change mid-game.
+
+    Bounded at MAX_CALL_SIGN_LENGTH characters and stripped of surrounding
+    whitespace, because it has to fit a fleet-report column on a phone.
+    Rejected if it collides with any of this player's other call signs OR with
+    any of their given names -- a call sign of "S2" on the ship named S1 would
+    make every spoken reference ambiguous. Empty is rejected rather than
+    silently clearing: dropping a call sign is not something this does.
     """
-    name = (name or "").strip()
-    if not name:
-        return {"error": "Name cannot be empty"}
-    if len(name) > MAX_ORG_NAME_LENGTH:
-        return {"error": f"Name is {len(name)} characters; limit is {MAX_ORG_NAME_LENGTH}"}
+    call_sign = (call_sign or "").strip()
+    if not call_sign:
+        return {"error": "Call sign cannot be empty"}
+    if len(call_sign) > MAX_CALL_SIGN_LENGTH:
+        return {"error": f"Call sign is {len(call_sign)} characters; "
+                         f"limit is {MAX_CALL_SIGN_LENGTH}"}
     cur = sess.cur
-    cur.execute("SELECT id, name FROM organizations WHERE id=? AND player_id=?",
-                (org_id, sess.player_id))
-    org = cur.fetchone()
+    org = sess.own_org(org_id, columns="id, name, call_sign")
     if not org:
         return {"error": ORG_NOT_OWNED}
-    cur.execute("""SELECT id FROM organizations
-        WHERE player_id=? AND id!=? AND name=? COLLATE NOCASE""",
-        (sess.player_id, org_id, name))
-    if cur.fetchone():
-        return {"error": f"You already have an organization named '{name}'"}
-    previous = org["name"]
+    clash = cur.execute("""SELECT name, call_sign FROM organizations
+        WHERE player_id=? AND id!=? AND (name=? COLLATE NOCASE
+                                         OR call_sign=? COLLATE NOCASE)""",
+        (sess.player_id, org_id, call_sign, call_sign)).fetchone()
+    if clash:
+        return {"error": f"'{call_sign}' is already taken by another of your units"}
+    previous = org["call_sign"]
     record_event(
-        event_type="organization.renamed",
-        payload={"org_id": org_id, "from": previous, "to": name},
+        event_type="organization.call_sign_set",
+        payload={"org_id": org_id, "name": org["name"],
+                 "from": previous, "to": call_sign},
         actor_id=sess.player_id, subject_id=org_id, subject_type="organization")
-    cur.execute("UPDATE organizations SET name=? WHERE id=?", (name, org_id))
-    return {"ok": True, "org_id": org_id, "previous_name": previous, "name": name}
+    cur.execute("UPDATE organizations SET call_sign=? WHERE id=?", (call_sign, org_id))
+    return {"ok": True, "org_id": org_id, "name": org["name"],
+            "previous_call_sign": previous, "call_sign": call_sign}
 
 
 @mcp_tool(

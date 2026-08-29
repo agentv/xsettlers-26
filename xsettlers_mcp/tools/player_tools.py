@@ -3,7 +3,7 @@ from db.events import record_event
 from engine.turn import check_consensus_acceleration
 from xsettlers_mcp.tools.session import player_tool
 
-# Matches organization_tools.py's MAX_ORG_NAME_LENGTH -- same "has to fit a
+# Matches organization_tools.py's MAX_CALL_SIGN_LENGTH -- same "has to fit a
 # fleet-report/leaderboard column on a phone" constraint.
 MAX_DISPLAY_NAME_LENGTH = 24
 
@@ -57,11 +57,11 @@ def set_display_name(sess, display_name: str) -> dict:
     "Player 3") supplied at handoff. This is the only name other players
     ever see, shown on the shared leaderboard (show_civilization_status),
     so it's required to be unique game-wide, not just per player -- unlike
-    rename_organization's per-player uniqueness, since orgs are never shown
+    set_call_sign's per-player uniqueness, since orgs are never shown
     across players but display_name always is.
 
     Bounded at MAX_DISPLAY_NAME_LENGTH and stripped of surrounding
-    whitespace, same reasoning as rename_organization. Empty names are
+    whitespace, same reasoning as set_call_sign. Empty names are
     rejected rather than silently restoring the bootstrap default.
     """
     display_name = (display_name or "").strip()

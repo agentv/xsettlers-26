@@ -20,12 +20,12 @@ colonization, ...) fails only for that member.
 from xsettlers_mcp.tools.registry import mcp_tool
 from db.events import record_event_direct
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED
-from xsettlers_mcp.tools.organization_tools import set_mission
+from xsettlers_mcp.tools.organization_tools import set_mission, MAX_CALL_SIGN_LENGTH
 from engine.turn import get_current_turn
 
 TASK_FORCE_NOT_OWNED = "Task force not found or not owned by player"
 NOT_A_SHIP = "Only ships can join a task force — colonies cannot"
-# Matches organization names' MAX_ORG_NAME_LENGTH -- both are player-chosen
+# Matches organization_tools' MAX_CALL_SIGN_LENGTH -- both are player-chosen
 # labels that have to fit the same report-column width.
 MAX_TASK_FORCE_NAME_LENGTH = 24
 
@@ -44,8 +44,50 @@ def _own_ship(sess, org_id: int):
 
 def _own_task_force(sess, task_force_id: int):
     return sess.cur.execute(
-        "SELECT id, name FROM task_forces WHERE id=? AND player_id=?",
+        "SELECT id, name, call_sign FROM task_forces WHERE id=? AND player_id=?",
         (task_force_id, sess.player_id)).fetchone()
+
+
+@mcp_tool(
+    "Give one of your own task forces a call sign -- your own name for it, "
+    "up to 24 characters, which reports show in place of the name you "
+    "created it with. Additional, not a rename: the task force keeps that "
+    "name. Change it as often as you like during a game.")
+@player_tool
+def set_task_force_call_sign(sess, task_force_id: int, call_sign: str) -> dict:
+    """
+    Give a task force a call sign, on exactly the same terms an organization
+    gets one (see organization_tools.set_call_sign): additional rather than a
+    rename, bounded at MAX_CALL_SIGN_LENGTH, unique among this player's task
+    forces, and preferred by reports over the created name.
+
+    Uniqueness is scoped to task forces alone -- a task force and a ship
+    sharing a call sign is not ambiguous, because no tool takes either by
+    name.
+    """
+    call_sign = (call_sign or "").strip()
+    if not call_sign:
+        return {"error": "Call sign cannot be empty"}
+    if len(call_sign) > MAX_CALL_SIGN_LENGTH:
+        return {"error": f"Call sign is {len(call_sign)} characters; "
+                         f"limit is {MAX_CALL_SIGN_LENGTH}"}
+    cur = sess.cur
+    tf = _own_task_force(sess, task_force_id)
+    if not tf:
+        return {"error": TASK_FORCE_NOT_OWNED}
+    if cur.execute("""SELECT id FROM task_forces
+        WHERE player_id=? AND id!=? AND (name=? COLLATE NOCASE
+                                         OR call_sign=? COLLATE NOCASE)""",
+        (sess.player_id, task_force_id, call_sign, call_sign)).fetchone():
+        return {"error": f"'{call_sign}' is already taken by another of your task forces"}
+    previous = tf["call_sign"]
+    record_event_direct(cur, get_current_turn(), "task_force.call_sign_set",
+        actor_id=sess.player_id, subject_id=task_force_id, subject_type="task_force",
+        payload={"task_force_id": task_force_id, "name": tf["name"],
+                 "from": previous, "to": call_sign})
+    cur.execute("UPDATE task_forces SET call_sign=? WHERE id=?", (call_sign, task_force_id))
+    return {"ok": True, "task_force_id": task_force_id, "name": tf["name"],
+            "previous_call_sign": previous, "call_sign": call_sign}
 
 
 @mcp_tool(

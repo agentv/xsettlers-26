@@ -135,12 +135,25 @@ def init_schema():
         CREATE TABLE IF NOT EXISTS task_forces (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             player_id INTEGER NOT NULL REFERENCES players(id),
-            name      TEXT NOT NULL
+            name      TEXT NOT NULL,
+            -- See organizations.call_sign. NULL until the player sets one.
+            call_sign TEXT
         );
         CREATE TABLE IF NOT EXISTS organizations (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             org_type       TEXT CHECK(org_type IN ('ship','colony')),
+            -- The unit's given name, assigned once at bootstrap (S1..Sn for
+            -- ships, C1 for a colony) and never changed after. Short and
+            -- sayable so a player can refer to a unit out loud, and unique
+            -- per player so that reference resolves.
             name           TEXT,
+            -- An ADDITIONAL label the player may set and change during a
+            -- game, up to MAX_CALL_SIGN_LENGTH characters. It does not
+            -- replace `name` -- the given name stays what it was at
+            -- bootstrap, and a call sign is a convenience for the player and
+            -- for reports (views/format.py's display_label prefers it when
+            -- set). NULL until the player names one.
+            call_sign      TEXT,
             player_id      INTEGER REFERENCES players(id),
             sector_id      INTEGER REFERENCES sectors(id),
             is_mobile      INTEGER DEFAULT 1,
@@ -317,7 +330,9 @@ def init_schema():
 # every poll, forever.
 ADDED_COLUMNS = {
     "players": {"gamehouse_person_id": "INTEGER"},
-    "organizations": {"task_force_id": "INTEGER REFERENCES task_forces(id)"},
+    "organizations": {"task_force_id": "INTEGER REFERENCES task_forces(id)",
+                      "call_sign": "TEXT"},
+    "task_forces": {"call_sign": "TEXT"},
 }
 
 

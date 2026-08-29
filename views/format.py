@@ -82,6 +82,20 @@ def short_name(name: str) -> str:
     return name
 
 
+def display_label(name: str, call_sign: str = None) -> str:
+    """
+    What a report calls a unit: its call sign if the player has given it one,
+    otherwise its given name.
+
+    A call sign is set precisely so a player sees their own word for a unit
+    rather than "S3", so it wins here -- but it is additive, never a rename,
+    and every report keeps `name` alongside in its data block so the given
+    name stays available (see organizations.call_sign).
+    """
+    call_sign = (call_sign or "").strip()
+    return call_sign or short_name(name)
+
+
 def slashed(values: dict, slots: dict = RESOURCE_ABBREV) -> str:
     """
     {"energy": 20.0, "food": 20.0} -> "20/20/0" -- one slot per entry in

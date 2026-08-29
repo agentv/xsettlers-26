@@ -2,7 +2,7 @@ import json
 from db.connection import connection
 from engine.turn import end_of_turn
 from xsettlers_mcp.tools.organization_tools import (
-    set_mission, set_pod_task, rename_organization, queue_command,
+    set_mission, set_pod_task, set_call_sign, queue_command,
     UNIMPLEMENTED_MISSIONS, VALID_ORG_MISSIONS, WEAPONS_INOPERABLE
 )
 from engine.production import COLONIZATION_ENERGY_COST
@@ -179,42 +179,62 @@ def test_set_pod_task_unowned_pod():
     sid = seed_sector(); oid = seed_ship(p2, sid); pod = seed_pod(oid)
     assert "error" in set_pod_task("U_P1", pod, "produce_energy")
 
-# --- rename_organization (players refer to units by name) ---
+# --- set_call_sign (the player's own name for a unit) ---
 
-def test_rename_organization_sets_a_new_name():
+def test_set_call_sign_leaves_the_given_name_alone():
+    """The whole point: a call sign is additional, not a rename. S1 is still
+    S1 afterwards, which is what makes a call sign safe to change mid-game."""
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid, name="S1")
-    result = rename_organization("U_P1", oid, "Vanguard")
+    result = set_call_sign("U_P1", oid, "Vanguard")
     assert result["ok"] is True
-    assert (result["previous_name"], result["name"]) == ("S1", "Vanguard")
+    assert (result["previous_call_sign"], result["call_sign"]) == (None, "Vanguard")
+    assert result["name"] == "S1"
     with connection() as conn:
-        assert conn.execute("SELECT name FROM organizations WHERE id=?", (oid,)).fetchone()["name"] == "Vanguard"
+        row = conn.execute("SELECT name, call_sign FROM organizations WHERE id=?",
+                           (oid,)).fetchone()
+    assert (row["name"], row["call_sign"]) == ("S1", "Vanguard")
 
-def test_rename_organization_rejects_a_duplicate_within_one_player():
-    """An ambiguous name is not a name -- names are the player's handle for
-    issuing orders, so they must resolve to exactly one unit."""
+def test_a_call_sign_can_be_changed_again():
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid, name="S1")
+    set_call_sign("U_P1", oid, "Vanguard")
+    result = set_call_sign("U_P1", oid, "Rearguard")
+    assert (result["previous_call_sign"], result["call_sign"]) == ("Vanguard", "Rearguard")
+
+def test_set_call_sign_rejects_a_duplicate_within_one_player():
+    """An ambiguous call sign is not a call sign -- it is how a player refers
+    to a unit out loud, so it must resolve to exactly one."""
     pid = seed_player(); sid = seed_sector()
-    seed_ship(pid, sid, name="Vanguard"); other = seed_ship(pid, sid, name="S2")
-    result = rename_organization("U_P1", other, "vanguard")   # case-insensitive
-    assert "error" in result and "already have" in result["error"]
+    first = seed_ship(pid, sid, name="S1"); other = seed_ship(pid, sid, name="S2")
+    set_call_sign("U_P1", first, "Vanguard")
+    result = set_call_sign("U_P1", other, "vanguard")   # case-insensitive
+    assert "error" in result and "already taken" in result["error"]
 
-def test_rename_organization_allows_the_same_name_for_different_players():
+def test_a_call_sign_cannot_impersonate_another_units_given_name():
+    """Calling S1 "S2" while an actual S2 exists would make every spoken
+    reference ambiguous, so the two namespaces are checked together."""
+    pid = seed_player(); sid = seed_sector()
+    first = seed_ship(pid, sid, name="S1"); seed_ship(pid, sid, name="S2")
+    assert "error" in set_call_sign("U_P1", first, "S2")
+
+def test_set_call_sign_allows_the_same_call_sign_for_different_players():
     """Uniqueness is per player: neither can see the other's roster."""
     p1 = seed_player(); p2 = seed_player(email="b@test.com", player_token="U_P2", display_name="Two")
     sid = seed_sector()
     a = seed_ship(p1, sid, name="S1"); b = seed_ship(p2, sid, name="S1")
-    assert rename_organization("U_P1", a, "Vanguard")["ok"] is True
-    assert rename_organization("U_P2", b, "Vanguard")["ok"] is True
+    assert set_call_sign("U_P1", a, "Vanguard")["ok"] is True
+    assert set_call_sign("U_P2", b, "Vanguard")["ok"] is True
 
-def test_rename_organization_rejects_empty_and_overlong_names():
+def test_set_call_sign_rejects_empty_and_overlong():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
-    assert "error" in rename_organization("U_P1", oid, "   ")
-    assert "error" in rename_organization("U_P1", oid, "x" * 25)
-    assert rename_organization("U_P1", oid, "  Trimmed  ")["name"] == "Trimmed"
+    assert "error" in set_call_sign("U_P1", oid, "   ")
+    assert "error" in set_call_sign("U_P1", oid, "x" * 25)
+    assert set_call_sign("U_P1", oid, "x" * 24)["call_sign"] == "x" * 24
+    assert set_call_sign("U_P1", oid, "  Trimmed  ")["call_sign"] == "Trimmed"
 
-def test_rename_organization_is_ownership_gated():
+def test_set_call_sign_is_ownership_gated():
     p1 = seed_player(); seed_player(email="b@test.com", player_token="U_P2", display_name="Two")
     sid = seed_sector(); oid = seed_ship(p1, sid)
-    assert "error" in rename_organization("U_P2", oid, "Stolen")
+    assert "error" in set_call_sign("U_P2", oid, "Stolen")
 
 # --- queue_command param validation -----------------------------------------
 # queue_command validates the full payload, not just the trigger phase, the

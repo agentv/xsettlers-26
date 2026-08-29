@@ -288,8 +288,10 @@ def _normalize_queued_params(cur, org_id: int, action: str, params: dict):
     "never both -- a move takes no speed, that is the hull's); 'set_pod_task' "
     "(params: pod_id, task, optionally bearing/offset_x/y/z -- same shape "
     "set_pod_task takes); 'colonize' (no params -- commits the ship at "
-    "whatever sector it occupies when the order fires, and is refused if it "
-    "cannot afford the energy by then); 'aim_scan' (optionally "
+    "whatever sector it occupies when the order fires; if it cannot afford "
+    "the energy yet, it is refused and retried automatically on a later turn "
+    "rather than dropped -- the only queued action that behaves this way); "
+    "'aim_scan' (optionally "
     "bearing/offset_x/y/z, same shape set_org_scan_bearing takes; pass none "
     "to clear the aim); 'transfer' (params: to_org_id, resource, amount -- "
     "hands a resource to another of your organizations; co-location is "
@@ -327,10 +329,12 @@ def queue_command(sess, org_id: int, trigger_phase: str, action: str,
         wherever this org is standing when the order fires), never both. No
         speed: how fast the ship covers the distance is its hull's business.
       - 'set_pod_task' -- pod_id, task, optionally bearing/offset_x/y/z.
-      - 'colonize' -- no params. Alone among these it can be refused at fire
-        time rather than failing: a ship that cannot pay when the moment
-        arrives is declined and left untouched
-        (logged as alert.queued_command_refused).
+      - 'colonize' -- no params. Can be refused at fire time rather than
+        failing: a ship that cannot pay when the moment arrives is declined
+        and left untouched (logged as alert.queued_command_refused), and
+        unlike every other action here the same command is automatically
+        retried on the next turn instead of being dropped -- the only queued
+        action where firing it again later can simply succeed.
       - 'aim_scan' -- optionally bearing/offset_x/y/z; pass none to clear.
       - 'transfer' -- to_org_id, resource, amount. Pushes a resource to
         another of your organizations. Like colonize it can be refused at

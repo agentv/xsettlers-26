@@ -1,0 +1,45 @@
+# Scatter, scan, converge on the richest find -- and, unlike fan_out, settle
+# it.
+#
+# fan_out already proved the fleet can find and converge on the best sector
+# anyone saw; it never colonizes once it gets there, which is the specific
+# gap this document exists to close (see docs/strategy_and_economy_brief.md's
+# finding that no shipped strategy turns a scan result into a settlement).
+# Structurally this is fan_out's own four steps plus one: the whole fleet
+# scouts one cardinal hop each, scans out to the edge of range, waits for
+# every reading to resolve, and moves as a single group to whichever sector
+# came back richest -- then colonizes on arrival, same upon_arrival idiom
+# sprawl and the new prospector use.
+name: ranger
+description: >
+  Scatter, scan, converge on the richest sector anyone found, and colonize it.
+steps:
+  # One cardinal hop per ship, cycling N/S/E/W by fleet index.
+  - order:
+      ships: all
+      action: move
+      params:
+        - {d_x: 0,  d_y: -2, d_z: 0}
+        - {d_x: 0,  d_y: 2,  d_z: 0}
+        - {d_x: 2,  d_y: 0,  d_z: 0}
+        - {d_x: -2, d_y: 0,  d_z: 0}
+  # Aimed to the edge of SCAN_RANGE from the new position.
+  - order:
+      ships: all
+      action: aim_scan
+      params:
+        - {bearing: N2}
+        - {bearing: S2}
+        - {bearing: E2}
+        - {bearing: W2}
+  # Hold until every aimed scan has come back, then take the richest sector
+  # the fleet collectively found.
+  - decide:
+      await: all_scans_resolved
+      from: scan_targets
+      rank_by: energy_capacity
+      pick: max
+      bind: target
+  # Converge as one group, and settle it -- the step fan_out never takes.
+  - order: {ships: all, action: move, params: {dest: $target}}
+  - order: {ships: all, action: colonize, when: upon_arrival}

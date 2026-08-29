@@ -383,22 +383,58 @@ def test_queued_colonize_commits_the_ship_when_it_can_pay():
 def test_queued_colonize_is_refused_not_failed_when_the_ship_cannot_pay():
     """The order was valid when given; the ship simply doesn't have the energy
     by the time it fires. That is an ordinary outcome, not a malformed order,
-    so it must not land in the same alert stream as a genuine defect."""
+    so it must not land in the same alert stream as a genuine defect. Unlike
+    every other queued action, colonize is not one-shot on refusal -- see
+    test_a_refused_colonize_is_retried_not_dropped -- so it stays queued
+    rather than being consumed."""
     p1 = seed_player()
     ship = seed_ship(p1, seed_sector(0, 0, 0, energy=0.0))
     seed_pod(ship, task="idle", storage_capacity=100.0, storage_current=0.0)
     assert queue_command("U_P1", ship, "at_turn", "colonize", {}, turn=1)["ok"] is True
 
-    end_of_turn(); end_of_turn()
+    # One end_of_turn is enough: current_turn is still 0 during this pass, and
+    # resolve_turn(1) <= 0+1 is already due (see the "can pay" test above for
+    # the same threshold). A second call would retry it again -- see
+    # test_a_refused_colonize_is_retried_not_dropped -- which would make "one
+    # refusal" the wrong count for this test's purpose.
+    end_of_turn()
 
     org = _org_row(ship)
     assert org["mission"] != "colonize", "left untouched"
     assert org["is_mobile"] == 1
-    assert _queue_count() == 0, "one-shot -- refused orders are still consumed"
+    assert _queue_count() == 1, "colonize retries -- see the header comment on this test"
     assert _failure_alerts() == [], "not a failure"
     refusals = _refusals()
     assert len(refusals) == 1
     assert "Colonizing costs" in refusals[0]["payload"]["error"]
+
+def test_a_refused_colonize_is_retried_not_dropped():
+    """The one exception to one-shot (engine.ship_log.dispatch_due_commands):
+    a colonize refusal is purely "not enough energy yet", the one case where
+    firing the identical order again later can simply succeed. This is what
+    lets an NPC document say 'colonize on arrival' with no way to check its
+    own ship's energy stock and have it mean 'colonize as soon as you can
+    afford it' rather than 'colonize now or never'."""
+    p1 = seed_player()
+    ship = seed_ship(p1, seed_sector(0, 0, 0, energy=0.0))
+    pod = seed_pod(ship, task="produce_energy", storage_capacity=100.0, storage_current=0.0)
+    assert queue_command("U_P1", ship, "at_turn", "colonize", {}, turn=1)["ok"] is True
+
+    end_of_turn()
+    assert _org_row(ship)["mission"] != "colonize", "still can't pay"
+    assert _queue_count() == 1, "rescheduled, not consumed"
+    assert len(_refusals()) == 1
+
+    with connection() as conn:
+        conn.execute("UPDATE pods SET energy_stored=100.0 WHERE id=?", (pod,))
+        conn.commit()
+    end_of_turn()
+
+    org = _org_row(ship)
+    assert org["mission"] == "colonize", "retried and succeeded once it could pay"
+    assert org["is_mobile"] == 0
+    assert _queue_count() == 0, "one-shot once it actually commits"
+    assert len(_refusals()) == 1, "no second refusal logged for the turn it succeeded"
 
 def test_queued_aim_scan_points_the_org_sensors():
     p1 = seed_player()

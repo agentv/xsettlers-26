@@ -21,7 +21,19 @@ from db.connection import read_all
 # rejected at validation time instead of silently ranking everything equal.
 RANK_FIELDS = {"energy_capacity"}
 
-PICKS = {"max": max, "min": min}
+def _second_max(candidates: list, key):
+    """
+    The runner-up by `key`, or the only candidate if there is just one --
+    falling back to `max` rather than raising, since a document author asking
+    for "second richest" should still get a target on a two-ship scouting
+    fleet that only ever finds one thing.
+    """
+    if len(candidates) < 2:
+        return max(candidates, key=key)
+    return sorted(candidates, key=key, reverse=True)[1]
+
+
+PICKS = {"max": max, "min": min, "second_max": _second_max}
 
 
 def _aimed_targets(player_id: int) -> list:

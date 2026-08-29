@@ -1,41 +1,137 @@
-# One ship per sector, each colonizing where it lands.
+# Half the fleet scouts one hop out and pauses there scanning while it banks
+# energy; half stays home doing the same. Both groups converge on what the
+# scouts found -- producers on the richest, scouts on the second-richest --
+# and colonize, retrying on their own until they can afford it.
 #
-# The hypothesis: sector energy is a shared, depleting pool, so eight orgs
-# standing on one sector draw eight times as fast from it as one org does.
-# Spreading the fleet across eight sectors buys eight separate pools without
-# giving up the colony multiplier -- which should beat homestead exactly when
-# a single sector cannot carry the whole fleet, and lose to it when home is
-# deep enough that sharing costs nothing.
+# Written for ships_per_player: 8 -- ships 0-3 (fleet index, not id: see
+# npc/strategy.py's _fleet) are the scouts, one cardinal direction each; ships
+# 4-7 are the producers. A scenario with a different fleet size splits
+# unevenly, since the slices are fixed at [0,4] and [4,8].
 #
-# It is homestead's opposite on one axis only: both colonize everything
-# immediately, and neither ever scans or re-decides. What differs is whether
-# the fleet stacks or spreads, so a homestead/sprawl gap is attributable to
-# that alone.
+# Earlier drafts sent the scouts a second physical leg further out before
+# converging, which meant three moves total (out, further out, converge) on a
+# budget sized for one -- three of four scouts routinely arrived too poor to
+# pay COLONIZATION_ENERGY_COST and sat as bare ships all game (see
+# docs/strategy_and_economy_brief.md). This version spends that second "leg"
+# standing still instead: one move out, then two scans from the same spot
+# while banking energy, then one move to converge. Two moves, not three.
+#
+# "Scan on each turn" -- the pause is two scans, not one lookout held twice.
+# An org's scan aim is a single column (scan_offset_x/y/z), so re-aiming the
+# SAME bearing from the SAME position just re-reads player_sectors' already-
+# confident data and resolves instantly, waiting nothing. The second scan
+# aims a diagonal the scout has never looked at, which is both a genuine new
+# reading and the only way to force a second real resolution cycle to pass.
+# Each `decide` step below is therefore a gate as much as a rank: the source
+# check inside npc/decide.evaluate (an empty scan_targets) is what actually
+# holds the document until each scan has a real answer, not the gate name.
+#
+# Producers depart as soon as the *first* scan resolves -- they don't need to
+# wait through the scouts' second look, and departing sooner gives them more
+# banked energy at arrival, not less.
+#
+# "Max produce energy" means only the goods pods convert -- the food pods
+# stay put, both groups, the whole game. A ship that zeroed food too would
+# starve its own upkeep (ORG_UPKEEP_COST: 5 food/turn, paid regardless of
+# transit state) during travel, which is the opposite of what banking energy
+# for the trip is for. Neither group ever reverts this split back to a
+# balanced ratio, matching set_pod_task's precedent already established for
+# producers, since npc/decide has no gate on an org's own resource stock --
+# see below for why that gap does not leave the scouts stranded now.
+#
+# Colonize failing for lack of energy is no longer permanent: a refused
+# 'upon_arrival colonize' is retried automatically every turn until it can be
+# afforded (engine/ship_log.dispatch_due_commands' one exception to one-shot
+# queued commands). That is what "keep producing at a high rate, then
+# colonize when ready" actually means here -- there still isn't a gate on an
+# org's own energy, so the document commits to colonizing and lets the
+# engine keep trying rather than trying to predict the wait.
 name: sprawl
-description: Disperse one ship to each surrounding sector, colonizing on arrival.
+description: >
+  Four ships scout one hop out, pause there scanning twice while banking
+  energy, then converge on the second-richest find and colonize (retrying
+  until they can afford it); four stay home banking energy the same way and
+  converge on the richest find.
 steps:
-  # The eight sectors adjoining home in the z=0 plane. A hull's speed of 2
-  # covers the diagonals (distance 1.41) as well as the cardinals in a single
-  # turn, so every ship lands together and none of them is settling a turn
-  # behind the rest for a reason that has nothing to do with the strategy.
+  # Producers (4-7): redirect the goods pods to energy while they wait.
+  # Pods 0-1 are already produce_energy, pods 4-5 stay produce_food
+  # (pods_per_ship's own order -- see db/bootstrap.py's _create_org, which
+  # expands pod templates in list order).
+  - order: {ships: {slice: [4, 8]}, action: set_pod_task,
+           params: {task: produce_energy, pod_index: 2}}
+  - order: {ships: {slice: [4, 8]}, action: set_pod_task,
+           params: {task: produce_energy, pod_index: 3}}
+
+  # Scouts (0-3): the one move out, one cardinal each, cycling by fleet index.
   - order:
-      ships: all
+      ships: {slice: [0, 4]}
       action: move
       params:
-        - {d_x: 1,  d_y: 0,  d_z: 0}
-        - {d_x: -1, d_y: 0,  d_z: 0}
-        - {d_x: 0,  d_y: 1,  d_z: 0}
-        - {d_x: 0,  d_y: -1, d_z: 0}
-        - {d_x: 1,  d_y: 1,  d_z: 0}
-        - {d_x: 1,  d_y: -1, d_z: 0}
-        - {d_x: -1, d_y: 1,  d_z: 0}
-        - {d_x: -1, d_y: -1, d_z: 0}
-  # Queued rather than ordered now: a ship in transit is locked, so a second
-  # immediate step would be refused ship by ship. upon_arrival is the ship's
-  # log doing the waiting that the interpreter has no verb for -- it fires the
-  # tick the ship lands, after the arrival resolves and before production, so
-  # the colony is bought out of stock the fleet is already carrying.
+        - {d_x: 0,  d_y: -2, d_z: 0}   # N
+        - {d_x: 0,  d_y: 2,  d_z: 0}   # S
+        - {d_x: 2,  d_y: 0,  d_z: 0}   # E
+        - {d_x: -2, d_y: 0,  d_z: 0}   # W
+  # Both queued off the move just issued, in this same pass: scan outward,
+  # and start banking energy the moment the pause begins.
   - order:
-      ships: all
-      action: colonize
+      ships: {slice: [0, 4]}
+      action: aim_scan
       when: upon_arrival
+      params:
+        - {bearing: N2}
+        - {bearing: S2}
+        - {bearing: E2}
+        - {bearing: W2}
+  - order: {ships: {slice: [0, 4]}, action: set_pod_task, when: upon_arrival,
+           params: {task: produce_energy, pod_index: 2}}
+  - order: {ships: {slice: [0, 4]}, action: set_pod_task, when: upon_arrival,
+           params: {task: produce_energy, pod_index: 3}}
+
+  # First pause turn resolves: this is the bind the producers use, and they
+  # leave immediately -- see header on why they don't wait for the scouts'
+  # second look too.
+  - decide:
+      await: all_scans_resolved
+      from: scan_targets
+      rank_by: energy_capacity
+      pick: max
+      bind: target
+  # Same scan_targets, not re-queried -- the scouts' own aim hasn't changed
+  # since the decide above, so this reads the identical four candidates and
+  # resolves in the same pass. Second-richest by design: the producers are
+  # already headed for the richest, and one org per sector spreads the fleet
+  # across two depleting pools instead of stacking eight ships on one.
+  - decide:
+      await: all_scans_resolved
+      from: scan_targets
+      rank_by: energy_capacity
+      pick: second_max
+      bind: scout_target
+
+  # Producers (4-7): converge as one group, colonize on arrival (retries on
+  # its own until affordable -- see header).
+  - order: {ships: {slice: [4, 8]}, action: move, params: {dest: $target}}
+  - order: {ships: {slice: [4, 8]}, action: colonize, when: upon_arrival}
+
+  # Scouts' second pause turn: a fresh diagonal look (never aimed before by
+  # these orgs), which forces a second real resolution cycle the same way the
+  # first one did, while banking continues underneath it unchanged.
+  - order:
+      ships: {slice: [0, 4]}
+      action: aim_scan
+      params:
+        - {bearing: NE}
+        - {bearing: SW}
+        - {bearing: SE}
+        - {bearing: NW}
+  - decide:
+      await: all_scans_resolved
+      from: scan_targets
+      rank_by: energy_capacity
+      pick: max
+      bind: _pause_turn2
+
+  # Scouts converge on the second-richest find and settle it -- one move,
+  # from the pause spot, not from home.
+  - order: {ships: {slice: [0, 4]}, action: move, params: {dest: $scout_target}}
+  - order: {ships: {slice: [0, 4]}, action: colonize, when: upon_arrival}

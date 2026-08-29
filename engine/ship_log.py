@@ -102,6 +102,16 @@ def dispatch_due_commands(cur, current_turn: int):
     re-fires) if the org no longer exists or its mission is no longer 'idle':
     a player who already gave the org new orders shouldn't have them
     silently clobbered by a stale queued command.
+
+    One exception to one-shot: a refused 'colonize' is rescheduled a turn
+    later instead of dropped. Every other refusal here (a move whose relative
+    offset lands negative, a transfer whose receiver moved on) is a mistake
+    in the order itself, re-issuing it changes nothing -- but a colonize
+    refusal is purely "not enough energy yet" (engine.missions.apply_colonize
+    leaves the org untouched on refusal), the one case where the same order
+    can simply succeed later once the org has produced enough to pay. This is
+    what lets 'upon_arrival colonize' mean "settle as soon as you can afford
+    it" for a document with no way to check its own ships' energy stock.
     """
     rows = cur.execute(
         "SELECT id,org_id,action,params FROM org_command_queue WHERE resolve_turn<=?",
@@ -109,6 +119,7 @@ def dispatch_due_commands(cur, current_turn: int):
     for row in rows:
         org = cur.execute("SELECT player_id,mission FROM organizations WHERE id=?",
                           (row["org_id"],)).fetchone()
+        retry = False
         if org and org["mission"] == "idle":
             handler = ACTIONS.get(row["action"])
             if handler:
@@ -126,7 +137,12 @@ def dispatch_due_commands(cur, current_turn: int):
                         record_command_refused(cur, current_turn, row["id"], row["org_id"],
                                                org["player_id"], row["action"],
                                                outcome["error"])
+                        retry = row["action"] == "colonize"
                 except Exception as exc:
                     record_dispatch_failure(cur, current_turn, row["id"], row["org_id"],
                                             org["player_id"], row["action"], repr(exc))
-        cur.execute("DELETE FROM org_command_queue WHERE id=?", (row["id"],))
+        if retry:
+            cur.execute("UPDATE org_command_queue SET resolve_turn=? WHERE id=?",
+                        (current_turn + 1, row["id"]))
+        else:
+            cur.execute("DELETE FROM org_command_queue WHERE id=?", (row["id"],))

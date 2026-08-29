@@ -350,6 +350,49 @@ def test_duplicate_findings_are_one_candidate():
     assert len(decide._scan_targets(player_id)) == 1
 
 
+def test_second_max_picks_the_runner_up():
+    """The pick a document reaches for when something else already claimed the
+    richest sector -- e.g. sprawl.yaml sending producers to the best find and
+    scouts to the second-best, so the two groups don't stack on one sector."""
+    player_id = seed_player("runnerup@test", "RunnerUp")
+    home = seed_sector(0, 0, 0, energy=50)
+    readings = [("N", (0, -2, 0), 900), ("E", (2, 0, 0), 700), ("S", (0, 2, 0), 500)]
+    for name, (dx, dy, dz), energy in readings:
+        target = seed_sector(dx, dy, dz, energy=energy)
+        ship = seed_ship(player_id, home, name=name)
+        with connection() as conn:
+            conn.execute("""UPDATE organizations SET scan_offset_x=?, scan_offset_y=?,
+                            scan_offset_z=? WHERE id=?""", (dx, dy, dz, ship))
+            conn.execute("INSERT INTO player_sectors (player_id, sector_id, confidence) VALUES (?,?,100)",
+                         (player_id, target))
+
+    value, reason = decide.evaluate(player_id, {
+        "await": "all_scans_resolved", "from": "scan_targets",
+        "rank_by": "energy_capacity", "pick": "second_max", "bind": "target"})
+    assert reason is None
+    assert value["energy_capacity"] == 700
+
+
+def test_second_max_falls_back_to_max_with_only_one_candidate():
+    """A document should not deadlock asking for a runner-up that doesn't
+    exist yet -- it gets the one candidate there is."""
+    player_id = seed_player("solo@test", "Solo")
+    home = seed_sector(0, 0, 0, energy=50)
+    only = seed_sector(0, -2, 0, energy=600)
+    ship = seed_ship(player_id, home, name="Scout")
+    with connection() as conn:
+        conn.execute("""UPDATE organizations SET scan_offset_x=0, scan_offset_y=-2,
+                        scan_offset_z=0 WHERE id=?""", (ship,))
+        conn.execute("INSERT INTO player_sectors (player_id, sector_id, confidence) VALUES (?,?,100)",
+                     (player_id, only))
+
+    value, reason = decide.evaluate(player_id, {
+        "await": "all_scans_resolved", "from": "scan_targets",
+        "rank_by": "energy_capacity", "pick": "second_max", "bind": "target"})
+    assert reason is None
+    assert value["energy_capacity"] == 600
+
+
 # --- the interpreter ---------------------------------------------------------
 
 def test_a_gate_that_has_not_opened_leaves_the_counter_where_it_is():

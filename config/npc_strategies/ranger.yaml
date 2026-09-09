@@ -1,42 +1,32 @@
-# Chart as much of the board as possible: one ship per compass heading,
+# Charting as much of the board as possible: one ship per compass heading,
 # looping for the whole game. Never colonizes and never converges -- both
 # would pull a ship out of the 'idle' selector this loops on for good, which
 # is exactly the turns this document exists to keep spending on new ground.
 #
-# Eight ships and eight named bearings (engine/bearings.SCAN_BEARINGS) is the
-# finest angular spread the vocabulary offers -- a ninth heading does not
-# exist to assign, and doubling any of the eight only re-visits a sibling
-# ship's own sectors, adding nothing new. So the lever left for coverage is
-# what each ship's scanner points at: aimed straight down its own line of
-# travel, a scan mostly just previews where it is about to land anyway, so
-# instead every ship looks one bearing clockwise of its own heading -- an N
-# scout toward NE, an NE scout toward E, and so on around the compass,
-# reaching the wedge between two rays that neither ship would otherwise ever
-# stand on. Cardinal targets get the range-2 form (N2/E2/S2/W2 are the only
-# bearings SCAN_RANGE=2 reaches); a diagonal target has no range-2 name to
-# reach for (bearings.py defines none), so those stay range-1.
+# Each stop fires three scanners in the same tick instead of one: pod 2 looks
+# forward (the direction just travelled), pod 3 looks rear (back the way it
+# came), and the org's own sensor looks flank -- one bearing clockwise of
+# heading, the aim the single-scanner version of this document already
+# measured as a slight edge over aiming straight down the line of travel.
+# Together that is near-360-degree coverage per stop in the one tick the
+# ship actually stands still before its next move fires, rather than a
+# second dwell turn -- `loop: true` has no "arrival + 1" trigger to hold a
+# ship an extra turn without freezing the other seven behind a `decide` gate
+# (measured: 33 sectors, worse than a stray aim -- see docs/ranger_tuning_brief.md
+# in the design bench for the full comparison).
 #
-# Measured, not assumed, against two alternatives on a 24-turn, 4-seat board:
-#   - gating each hop on `all_scans_resolved` before issuing the next (the
-#     same idiom fan_out and sprawl use to wait for a reading) sounds like it
-#     should waste fewer aims, but a `decide` gate holds the *whole* document
-#     -- one program counter for all eight ships -- so it locks every ship's
-#     next hop to the slowest one's resolution. Tried it: 33 distinct sectors
-#     over the game, worse than either loose loop below despite "wasting"
-#     nothing. Lockstep costs more hops than a stray aim costs readings.
-#   - this loose loop (move, aim, repeat, no gate) against survey.yaml's own
-#     loose loop (identical shape, straight-ahead aim instead of clockwise):
-#     87 vs 82 sectors ever recorded on diaspora_four, 69 vs 70 on
-#     scatter_four -- a wash, not a clear win. Both numbers sit well under
-#     one new sector per aim issued regardless of which cell is aimed at, so
-#     confidence decay and resolution timing are doing more to cap total
-#     coverage here than bearing choice is. Kept anyway on the diaspora_four
-#     result and because it is not worse, but this is not a proven win.
+# In transit, pod 2 makes food and pod 3 makes goods. Both were produce_goods
+# stock configuration before; a ranger's own food pods are the only consumer
+# of that goods output; splitting one pod to food directly keeps the food
+# pods fed without routing the whole draw through a goods intermediate.
 name: ranger
 description: >
-  Eight ships hold eight compass headings and never stop advancing, each
-  aiming its scanner one bearing clockwise of its own line of travel to
-  widen the swath charted rather than just preview its own next landing.
+  Eight ships hold eight compass headings and never stop advancing. On
+  arrival at each waypoint, three scanners fire the same tick -- forward
+  (pod 2), rear (pod 3), and flank (the org's own sensor) -- for near-
+  360-degree coverage per stop instead of one narrow look. In transit,
+  pod 2 makes food and pod 3 makes goods, so the produce_goods pods' fixed
+  cost buys the resources that actually keep the ship solvent.
 loop: true
 steps:
   - order:
@@ -51,16 +41,55 @@ steps:
         - {d_x: -2, d_y: 2,  d_z: 0}   # SW
         - {d_x: -2, d_y: 0,  d_z: 0}   # W
         - {d_x: -2, d_y: -2, d_z: 0}   # NW
-  # One bearing clockwise of the move list above, same order.
+
+  # Under way: pod 2 -> food, pod 3 -> goods (split, not both on one task).
+  - order: {ships: idle, action: set_pod_task, when: upon_departure,
+           params: {task: produce_food, pod_index: 2}}
+  - order: {ships: idle, action: set_pod_task, when: upon_departure,
+           params: {task: produce_goods, pod_index: 3}}
+
+  # Forward: pod 2, same direction as the heading just taken.
+  - order:
+      ships: idle
+      action: set_pod_task
+      when: upon_arrival
+      params:
+        - {task: scan, pod_index: 2, bearing: N2}
+        - {task: scan, pod_index: 2, bearing: NE}
+        - {task: scan, pod_index: 2, bearing: E2}
+        - {task: scan, pod_index: 2, bearing: SE}
+        - {task: scan, pod_index: 2, bearing: S2}
+        - {task: scan, pod_index: 2, bearing: SW}
+        - {task: scan, pod_index: 2, bearing: W2}
+        - {task: scan, pod_index: 2, bearing: NW}
+
+  # Rear: pod 3, opposite the heading.
+  - order:
+      ships: idle
+      action: set_pod_task
+      when: upon_arrival
+      params:
+        - {task: scan, pod_index: 3, bearing: S2}
+        - {task: scan, pod_index: 3, bearing: SW}
+        - {task: scan, pod_index: 3, bearing: W2}
+        - {task: scan, pod_index: 3, bearing: NW}
+        - {task: scan, pod_index: 3, bearing: N2}
+        - {task: scan, pod_index: 3, bearing: NE}
+        - {task: scan, pod_index: 3, bearing: E2}
+        - {task: scan, pod_index: 3, bearing: SE}
+
+  # Flank: the org's own sensor, one bearing clockwise of heading -- the
+  # aim this document measured as a slight edge over straight-ahead.
   - order:
       ships: idle
       action: aim_scan
+      when: upon_arrival
       params:
-        - {bearing: NE}   # N-heading ship looks toward NE
-        - {bearing: E2}   # NE-heading ship looks toward E
-        - {bearing: SE}   # E-heading ship looks toward SE
-        - {bearing: S2}   # SE-heading ship looks toward S
-        - {bearing: SW}   # S-heading ship looks toward SW
-        - {bearing: W2}   # SW-heading ship looks toward W
-        - {bearing: NW}   # W-heading ship looks toward NW
-        - {bearing: N2}   # NW-heading ship looks toward N
+        - {bearing: NE}
+        - {bearing: E2}
+        - {bearing: SE}
+        - {bearing: S2}
+        - {bearing: SW}
+        - {bearing: W2}
+        - {bearing: NW}
+        - {bearing: N2}

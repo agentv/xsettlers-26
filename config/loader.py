@@ -24,7 +24,7 @@ DEFAULT_STARTING_FILL = 0.3
 # NOT the "sentinel sector" (id = -1), the parking slot for ships in transit,
 # which must stay at 0 energy -- that zero is the entire mechanism
 # suppressing energy harvesting mid-flight.
-HOME_SECTOR_ENERGY = 2_200.0
+HOME_SECTOR_ENERGY = 750.0
 
 @dataclass
 class GameSettings:
@@ -194,7 +194,7 @@ class GameConfig:
 
 def load_starting_configuration(path: str) -> StartingConfiguration:
     """
-    Load a scenario from its own YAML file (e.g. config/game0.yaml). Adding a
+    Load a scenario from its own YAML file (e.g. config/game2.yaml). Adding a
     playable scenario is just adding a config/game<N>.yaml -- no code change,
     and nothing to register: list_scenarios() discovers it by glob.
 
@@ -366,7 +366,7 @@ def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameC
     optionally one scenario.
 
     scenario_override is a repo-root-relative path to a scenario file (e.g.
-    "config/game1.yaml"). Omit it to load just the engine settings and
+    "config/game3.yaml"). Omit it to load just the engine settings and
     directory -- callers that only want score_weights or need to resolve a
     token to an identity have no business asserting which game is being
     played. When it is given, the scenario's participants are resolved

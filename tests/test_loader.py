@@ -67,7 +67,7 @@ def test_load_config_without_a_scenario_has_directory_but_no_seats():
     assert {p.email for p in cfg.players} >= {"vincent@example.com", "player2@example.com"}
 
 def test_load_config_with_a_scenario_resolves_its_seats():
-    cfg = load_config(scenario_override="config/game0.yaml")
+    cfg = load_config(scenario_override="config/game2.yaml")
     assert cfg.starting_configuration.name == "Diaspora"
     assert [s.home_sector for s in cfg.seats] == [[25, 25, 0], [25, 50, 0]]
     assert [s.display_name for s in cfg.seats] == ["Vincent", "Player Two"]
@@ -99,7 +99,7 @@ def test_every_shipped_scenario_declares_its_own_fill():
     one silently, so changing the project default can never quietly rebalance
     an existing game. All three sit at 0.3 today; that is a coincidence of
     tuning, not a rule."""
-    for name in ("game0", "game1", "game_solo"):
+    for name in ("game1", "game2", "game3"):
         sc = load_starting_configuration(f"config/{name}.yaml")
         assert sc.starting_fill == 0.3, name
         assert all(p.starting_fill == 0.3 for p in sc.pods_per_ship), name
@@ -156,8 +156,8 @@ def test_shipped_scenarios_declare_their_own_player_counts():
     """The whole point of the participants model: player count is a property
     of the scenario, not of the service."""
     counts = {name: len(load_starting_configuration(f"config/{name}.yaml").participants)
-              for name in ("game0", "game1", "game_solo")}
-    assert counts == {"game0": 2, "game1": 2, "game_solo": 1}
+              for name in ("game1", "game2", "game3")}
+    assert counts == {"game1": 1, "game2": 2, "game3": 2}
 
 def test_scenario_without_participants_is_rejected():
     with pytest.raises(ValueError, match="Missing required config field: participants"):
@@ -180,7 +180,7 @@ def _write(tmp_path, map_block: str):
 def test_scenario_without_a_map_block_is_open_space():
     """The map is optional -- every shipped scenario predates it and must keep
     loading unchanged."""
-    sc = load_starting_configuration("config/game0.yaml")
+    sc = load_starting_configuration("config/game2.yaml")
     assert sc.map.hotspots == []
     assert sc.map.scatter is None
 

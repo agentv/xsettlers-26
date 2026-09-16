@@ -36,8 +36,8 @@ from npc.profiles import assign_npc_profile
 from npc.strategies import strategy_names
 from xsettlers_mcp.game_select import get_active_game, list_scenarios
 
-SCENARIO_FILE = "config/game0.yaml"
-SCENARIO_NAME = "game0"
+SCENARIO_FILE = "config/game2.yaml"
+SCENARIO_NAME = "game2"
 GAME_NAME = "xsettlers26"
 
 VALID_KINDS = {"person", "npc"}
@@ -256,7 +256,7 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
     Person at lobby-join time under GameHouse rather than in-game by a player
     (../gamehouse/docs/data_model.md, settled 2026-08-07). None falls back to
     SCENARIO_FILE. Every seating rule below then reads from the resolved
-    scenario, not from game0: the lobby size players are validated against and
+    scenario, not from game2: the lobby size players are validated against and
     the home sectors seats are dealt from both belong to the scenario actually
     being played.
 
@@ -296,7 +296,7 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
         display_name = f"Player {gh_id}" if kind == "person" else str(gh_id)
         # Home sectors taken positionally from the resolved scenario's own
         # authored participants -- reuses its spatial design (opposite
-        # corners, in game0's case) without a real email to match against.
+        # corners, in game2's case) without a real email to match against.
         # Bounded by lobby.max_players, which is derived from that same
         # participants list, so the index cannot run off the end.
         home_sector = sc.participants[i].home_sector

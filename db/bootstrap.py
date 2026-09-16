@@ -113,7 +113,7 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
     """
     Initialize a fresh game. Safe to call repeatedly — guards against double-init.
 
-    scenario_file (repo-root-relative, e.g. "config/game0.yaml") names which
+    scenario_file (repo-root-relative, e.g. "config/game2.yaml") names which
     game in the library to bootstrap; it is required, since there is no
     default scenario. The scenario's participants, resolved against the
     player directory, decide both who plays and where each of them starts —

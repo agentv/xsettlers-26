@@ -5,40 +5,40 @@ def _clear_active_game():
     with connection() as conn:
         conn.execute("DELETE FROM games")
 
-def test_list_scenarios_finds_game0():
+def test_list_scenarios_finds_game2():
     scenarios = list_scenarios()
     names = {s["scenario_name"] for s in scenarios}
-    assert "game0" in names
-    game0 = next(s for s in scenarios if s["scenario_name"] == "game0")
-    assert game0["name"] == "Diaspora"
-    assert game0["description"]
+    assert "game2" in names
+    game2 = next(s for s in scenarios if s["scenario_name"] == "game2")
+    assert game2["name"] == "Diaspora"
+    assert game2["description"]
 
-def test_list_scenarios_finds_game1():
+def test_list_scenarios_finds_game3():
     scenarios = list_scenarios()
     names = {s["scenario_name"] for s in scenarios}
-    assert "game1" in names
-    game1 = next(s for s in scenarios if s["scenario_name"] == "game1")
-    assert game1["name"] == "Outbreak"
-    assert game1["description"]
+    assert "game3" in names
+    game3 = next(s for s in scenarios if s["scenario_name"] == "game3")
+    assert game3["name"] == "Outbreak"
+    assert game3["description"]
 
 def test_list_scenarios_finds_the_solo_scenario():
-    solo = next(s for s in list_scenarios() if s["scenario_name"] == "game_solo")
+    solo = next(s for s in list_scenarios() if s["scenario_name"] == "game1")
     assert solo["player_count"] == 1
 
 def test_list_scenarios_returns_only_games_the_player_is_seated_in():
     """A token is an invitation to specific games, not to the whole library.
-    Player Two is in the directory but not a participant in game_solo."""
+    Player Two is in the directory but not a participant in game1 (Solo)."""
     mine = {s["scenario_name"] for s in list_scenarios("REPLACE_WITH_GENERATED_TOKEN_2")}
-    assert mine == {"game0", "game1"}
+    assert mine == {"game2", "game3"}
     everyones = {s["scenario_name"] for s in list_scenarios("REPLACE_WITH_GENERATED_TOKEN_1")}
-    assert everyones == {"game0", "game1", "game_solo"}
+    assert everyones == {"game1", "game2", "game3"}
 
 def test_list_scenarios_tells_an_unknown_token_nothing():
     assert list_scenarios("U_NOT_ON_ROSTER") == []
 
 def test_select_scenario_rejects_a_known_player_not_seated_in_that_scenario():
     _clear_active_game()
-    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_2", "game_solo")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_2", "game1")
     assert result["ok"] is False
     assert "not a participant" in result["error"]
     assert get_active_game() is None      # nothing was bootstrapped
@@ -47,7 +47,7 @@ def test_select_scenario_bootstraps_a_solo_game_with_one_player():
     """Player count is a property of the scenario, not the service -- no code
     path branches on how many participants there are."""
     _clear_active_game()
-    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game_solo")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game1")
     assert result["ok"] is True
     with connection() as conn:
         players = conn.execute("SELECT display_name FROM players").fetchall()
@@ -59,7 +59,7 @@ def test_get_active_game_none_before_selection():
 
 def test_select_scenario_unknown_player():
     _clear_active_game()
-    result = select_scenario("U_NOT_ON_ROSTER", "game0")
+    result = select_scenario("U_NOT_ON_ROSTER", "game2")
     assert result["ok"] is False
 
 def test_select_scenario_unknown_scenario_name():
@@ -69,11 +69,11 @@ def test_select_scenario_unknown_scenario_name():
 
 def test_select_scenario_bootstraps_and_activates():
     _clear_active_game()
-    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")
     assert result["ok"] is True
     assert result["already_active"] is False
     active = get_active_game()
-    assert active["scenario_name"] == "game0"
+    assert active["scenario_name"] == "game2"
     # Roster players now exist in the DB, seeded by bootstrap_game()
     with connection() as conn:
         count = conn.execute("SELECT COUNT(*) FROM players").fetchone()[0]
@@ -81,15 +81,15 @@ def test_select_scenario_bootstraps_and_activates():
 
 def test_select_scenario_idempotent_same_scenario():
     _clear_active_game()
-    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
-    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")
     assert result["ok"] is True
     assert result["already_active"] is True
 
 def test_select_scenario_rejects_switching_once_active():
     _clear_active_game()
-    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
-    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game1")
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game3")
     assert "error" in result
     active = get_active_game()
-    assert active["scenario_name"] == "game0"  # unchanged
+    assert active["scenario_name"] == "game2"  # unchanged

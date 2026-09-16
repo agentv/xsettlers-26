@@ -25,13 +25,13 @@ def test_gameplay_blocked_before_any_scenario_selected():
 
 def test_gameplay_blocked_for_unrecognized_player_even_after_selection():
     _clear_active_game()
-    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")
     result = show_civilization_status("U_TOTAL_STRANGER")
     assert "error" in result
 
 def test_gameplay_works_for_roster_player_after_selection():
     _clear_active_game()
-    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")
     result = show_civilization_status("REPLACE_WITH_GENERATED_TOKEN_1")
     assert "error" not in result
     assert result["turn"] == 0
@@ -107,7 +107,7 @@ def test_every_player_facing_tool_rejects_an_unknown_token():
         lambda: organization_reports.show_game_status(S),
     ]
     _clear_active_game()
-    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")   # a real game exists
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")   # a real game exists
     for call in calls:
         assert _stranger_sees_only(call()), call
 
@@ -117,7 +117,7 @@ def test_declare_end_turn_cannot_be_triggered_by_a_stranger():
     to reach check_consensus_acceleration() and end everyone's turn."""
     from xsettlers_mcp.tools.player_tools import declare_end_turn
     _clear_active_game()
-    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game0")
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")
     with connection() as conn:
         before = conn.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()[0]
     assert _stranger_sees_only(declare_end_turn("U_TOTAL_STRANGER"))

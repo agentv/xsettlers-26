@@ -14,7 +14,7 @@ def authenticate(player_token: str, scenario_file: str = None) -> dict:
       a directory identity and stops there. The directory says who exists on
       this service; it says nothing about which games they play.
     - *May you play THIS game?* Given scenario_file (repo-root-relative, e.g.
-      "config/game0.yaml"), the identity must additionally be a participant in
+      "config/game2.yaml"), the identity must additionally be a participant in
       that scenario. A token is an identity, not a blanket invitation to every
       game in the library.
 

@@ -1,9 +1,8 @@
 from db.connection import connection, get_connection
 from db.bootstrap import bootstrap_game
 from db.sectors import MIN_SECTOR_ENERGY, MAX_SECTOR_ENERGY
-from config.loader import HOME_SECTOR_ENERGY
 
-def _bootstrap(scenario_file="config/game0.yaml", scenario_name="game0"):
+def _bootstrap(scenario_file="config/game2.yaml", scenario_name="game2"):
     bootstrap_game(scenario_file=scenario_file, scenario_name=scenario_name,
                     selected_by="test")
 
@@ -26,7 +25,7 @@ def test_bootstrap_home_colony_gets_same_pod_loadout_as_ship():
     docs/player_guide.md's Outbreak section. A home_colony step that creates
     the organization without attaching pods is the failure this pins.
     """
-    _bootstrap(scenario_file="config/game1.yaml", scenario_name="game1")
+    _bootstrap(scenario_file="config/game3.yaml", scenario_name="game3")
     conn = get_connection()
     colonies = conn.execute(
         "SELECT id, player_id FROM organizations WHERE org_type='colony'"
@@ -44,7 +43,7 @@ def test_bootstrap_home_colony_gets_same_pod_loadout_as_ship():
     conn.close()
 
 def test_bootstrap_diaspora_ships_alongside_colony():
-    _bootstrap(scenario_file="config/game1.yaml", scenario_name="game1")
+    _bootstrap(scenario_file="config/game3.yaml", scenario_name="game3")
     with connection() as conn:
         for (player_id,) in conn.execute("SELECT id FROM players").fetchall():
             ships = conn.execute(
@@ -95,7 +94,7 @@ def test_bootstrap_seats_players_at_their_scenario_declared_home_sectors():
            [("Vincent", 25, 25, 0), ("Player Two", 25, 50, 0)]
 
 def test_bootstrap_solo_scenario_seeds_exactly_one_player():
-    _bootstrap(scenario_file="config/game_solo.yaml", scenario_name="game_solo")
+    _bootstrap(scenario_file="config/game1.yaml", scenario_name="game1")
     with connection() as conn:
         players = conn.execute("SELECT id FROM players").fetchall()
         sectors = conn.execute("SELECT COUNT(*) AS n FROM sectors WHERE id != -1").fetchone()["n"]
@@ -106,7 +105,7 @@ def test_bootstrap_solo_scenario_seeds_exactly_one_player():
     assert len(players) == 1
     assert sectors == 1        # one participant, one home sector revealed
     assert ships == 8
-    assert colonies == 1       # game_solo sets home_colony: true
+    assert colonies == 1       # game1 sets home_colony: true
 
 def test_bootstrap_seeds_pods_at_the_scenario_starting_fill(tmp_path, monkeypatch):
     """The scenario decides how rich a game begins, not db/bootstrap.py."""
@@ -139,15 +138,15 @@ def test_bootstrap_seeds_only_home_sectors_not_full_grid():
     """Sectors are lazily instantiated (see db/sectors.py's reveal_sector) --
     bootstrap should only reveal the two players' home sectors, not a
     pre-seeded grid. Home sectors are exempt from the discovery roll and
-    seeded flat and bottomless instead (HOME_SECTOR_ENERGY) -- a player's own
-    footing should never be what runs out from under them."""
+    seeded flat and bottomless instead, per game2.yaml's home_sector_energy --
+    a player's own footing should never be what runs out from under them."""
     _bootstrap()
     with connection() as conn:
         sectors = conn.execute("""SELECT coord_x,coord_y,coord_z,energy_capacity
             FROM sectors WHERE id != -1""").fetchall()
     assert len(sectors) == 2
     for s in sectors:
-        assert s["energy_capacity"] == HOME_SECTOR_ENERGY
+        assert s["energy_capacity"] == 2200     # game2.yaml's home_sector_energy
         # Emphatically not a lucky roll: home is far above the richest
         # possible discovery, so this cannot pass by coincidence.
         assert s["energy_capacity"] > MAX_SECTOR_ENERGY
@@ -170,7 +169,7 @@ def test_home_sector_is_rich_but_the_transit_sentinel_stays_at_zero():
         homes = conn.execute(
             "SELECT energy_capacity AS e FROM sectors WHERE id!=-1").fetchall()
     assert sentinel["e"] == 0.0
-    assert all(h["e"] == HOME_SECTOR_ENERGY for h in homes)
+    assert all(h["e"] == 2200 for h in homes)     # game2.yaml's home_sector_energy
 
 
 # --- the scenario's map ---
@@ -279,7 +278,7 @@ def test_bootstrap_the_crowd_seats_blue_and_red_close_together():
     apart would still bootstrap fine and silently stop being the experiment it
     exists to be."""
     import math
-    _bootstrap(scenario_file="config/game_crowd.yaml", scenario_name="game_crowd")
+    _bootstrap(scenario_file="config/game4.yaml", scenario_name="game4")
     with connection() as conn:
         rows = conn.execute("""SELECT p.display_name, s.coord_x, s.coord_y, s.coord_z
             FROM players p JOIN organizations o ON o.player_id = p.id

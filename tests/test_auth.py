@@ -14,15 +14,15 @@ def test_authenticate_unknown_player():
 
 def test_authenticate_accepts_a_participant_of_the_named_scenario():
     result = authenticate("REPLACE_WITH_GENERATED_TOKEN_1",
-                          scenario_file="config/game_solo.yaml")
+                          scenario_file="config/game1.yaml")
     assert result["ok"] is True
     assert result["display_name"] == "Vincent"
 
 def test_authenticate_rejects_a_known_player_who_is_not_a_participant():
     """A token is an identity, not a blanket invitation to every game in the
-    library. Player Two is in the directory but not seated in game_solo."""
+    library. Player Two is in the directory but not seated in game1."""
     result = authenticate("REPLACE_WITH_GENERATED_TOKEN_2",
-                          scenario_file="config/game_solo.yaml")
+                          scenario_file="config/game1.yaml")
     assert result["ok"] is False
     assert "not a participant" in result["error"]
 

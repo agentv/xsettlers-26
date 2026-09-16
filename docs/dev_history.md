@@ -413,9 +413,17 @@ databases created before 2026-08-02 (`slack_user_id` → `player_token`,
 only live database. If an older database ever turns up, recover them from
 commit `14b5fa2` rather than rewriting them from memory.
 
-**Scenario names swapped once.** "Diaspora" is `config/game0.yaml` (ships
-only, no home colony); "Outbreak" is `config/game1.yaml` (colony + fleet).
-Anything written before that swap has them the other way round.
+**Scenario file numbers were reassigned once, on top of an earlier name
+swap.** "Diaspora" (ships only, no home colony) and "Outbreak" (colony +
+fleet) once traded which of `game0`/`game1` each was; anything written before
+that swap has them the other way round. Later, the ad hoc filenames were
+resequenced into a single numbering: `game1` = Solo, `game2` = Diaspora,
+`game3` = Outbreak, `game4` = The Crowd. The display names (Solo, Diaspora,
+Outbreak, The Crowd) did not change, only the filenames — and, since
+`xsettlers_mcp/game_select.py` derives `scenario_name`/`scenario_key` from the
+filename, the identifiers used by `select_scenario` and GameHouse's
+`scenario_key` too. Anything written before that resequencing may still refer
+to `game0` (Diaspora) or `game_solo`/`game_crowd` by their old names.
 
 ## Rival detection (built 2026-08-18)
 

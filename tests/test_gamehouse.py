@@ -3,7 +3,7 @@ GameHouse handoff surface -- see xsettlers_mcp/gamehouse.py. Covers both
 directions: the scenario list xsettlers publishes at registration, and the
 start_session push GameHouse makes once a lobby closes, carrying the
 scenario_key the Person chose at join time. scenario_key=None remains valid
-and resolves to Diaspora (config/game0.yaml), which is what every handoff
+and resolves to Diaspora (config/game2.yaml), which is what every handoff
 sent before scenario selection existed.
 """
 import json
@@ -29,7 +29,7 @@ def _npc(label, strategy="turtle", config=None):
 
 def test_start_session_rejects_wrong_player_count():
     _clear_active_game()
-    result = start_session("tok1", [_person(1)])  # game0 requires exactly 2
+    result = start_session("tok1", [_person(1)])  # game2 requires exactly 2
     assert "error" in result
 
 def test_start_session_rejects_unknown_kind():
@@ -80,7 +80,7 @@ def test_start_session_seats_a_person_and_an_npc():
                                                        config={"scout_distance": 2})])
     assert result["ok"] is True
     assert result["already_active"] is False
-    assert result["scenario_name"] == "game0"
+    assert result["scenario_name"] == "game2"
     assert len(result["players"]) == 2
 
     person_entry = next(p for p in result["players"] if p["kind"] == "person")
@@ -97,7 +97,7 @@ def test_start_session_seats_a_person_and_an_npc():
     assert person_row["player_token"] == person_entry["player_token"]
     assert npc_row["is_npc"] == 1
 
-    # Home sectors match game0.yaml's own two authored participants,
+    # Home sectors match game2.yaml's own two authored participants,
     # positionally (person is entry 0, npc is entry 1).
     with connection() as conn:
         orgs = conn.execute("""SELECT o.player_id, s.coord_x, s.coord_y, s.coord_z
@@ -105,7 +105,7 @@ def test_start_session_seats_a_person_and_an_npc():
             WHERE o.player_id IN (?,?) LIMIT 2""",
             (person_row["id"], npc_row["id"])).fetchall()
     coords = {(o["coord_x"], o["coord_y"], o["coord_z"]) for o in orgs}
-    assert coords <= {(25, 25, 0), (25, 50, 0)}  # game0.yaml's two home_sector values
+    assert coords <= {(25, 25, 0), (25, 50, 0)}  # game2.yaml's two home_sector values
 
 def test_start_session_bootstraps_ships_and_pods():
     _clear_active_game()
@@ -117,7 +117,7 @@ def test_start_session_bootstraps_ships_and_pods():
             (person_id,)).fetchone()
         pods = conn.execute("""SELECT COUNT(*) AS n FROM pods p
             JOIN organizations o ON o.id=p.org_id WHERE o.player_id=?""", (person_id,)).fetchone()
-    assert ships["n"] == 8  # game0.yaml's ships_per_player
+    assert ships["n"] == 8  # game2.yaml's ships_per_player
     assert pods["n"] == 8 * 6  # 6 pod templates per ship
 
 def test_start_session_assigns_npc_profile_with_config():
@@ -155,7 +155,7 @@ def test_start_session_is_idempotent_for_the_same_token():
     _clear_active_game()
     start_session("tok1", [_person(1), _npc("npc-1")])
     result = start_session("tok1", [_person(1), _npc("npc-1")])
-    assert result == {"ok": True, "already_active": True, "scenario_name": "game0"}
+    assert result == {"ok": True, "already_active": True, "scenario_name": "game2"}
 
 def test_start_session_rejects_a_different_token_while_active():
     _clear_active_game()
@@ -368,33 +368,33 @@ def test_registered_scenarios_publishes_each_scenarios_own_sizing():
     on a 0s one, and both are offerable by the same service."""
     from xsettlers_mcp.gamehouse import registered_scenarios
     by_key = {e["scenario_key"]: e for e in registered_scenarios()}
-    assert by_key["game0"] == {"scenario_key": "game0", "min_players": 2,
+    assert by_key["game2"] == {"scenario_key": "game2", "min_players": 2,
                                "max_players": 2, "wait_window_seconds": 120}
-    assert by_key["game_solo"] == {"scenario_key": "game_solo", "min_players": 1,
+    assert by_key["game1"] == {"scenario_key": "game1", "min_players": 1,
                                    "max_players": 1, "wait_window_seconds": 0}
 
 def test_resolve_scenario_maps_a_key_to_its_file():
     from xsettlers_mcp.gamehouse import resolve_scenario
-    assert resolve_scenario("game1") == ("config/game1.yaml", "game1")
-    assert resolve_scenario(None) == ("config/game0.yaml", "game0")
+    assert resolve_scenario("game3") == ("config/game3.yaml", "game3")
+    assert resolve_scenario(None) == ("config/game2.yaml", "game2")
     assert resolve_scenario("no-such-scenario") is None
 
 def test_start_session_bootstraps_the_scenario_gamehouse_chose():
     _clear_active_game()
-    result = start_session("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game1")
+    result = start_session("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game3")
     assert result["ok"] is True
     with connection() as conn:
         row = conn.execute("SELECT scenario_name, scenario_file FROM games WHERE id=1").fetchone()
-    assert row["scenario_name"] == "game1"
-    assert row["scenario_file"] == "config/game1.yaml"
+    assert row["scenario_name"] == "game3"
+    assert row["scenario_file"] == "config/game3.yaml"
 
 def test_start_session_seats_players_at_the_chosen_scenarios_home_sectors():
     """Home sectors come from the resolved scenario's own participants, not
-    game0's -- the seating has to follow the map actually being played."""
+    game2's -- the seating has to follow the map actually being played."""
     from config.loader import load_starting_configuration
     _clear_active_game()
-    start_session("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game1")
-    expected = [p.home_sector for p in load_starting_configuration("config/game1.yaml").participants]
+    start_session("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game3")
+    expected = [p.home_sector for p in load_starting_configuration("config/game3.yaml").participants]
     with connection() as conn:
         rows = conn.execute("""SELECT s.coord_x, s.coord_y, s.coord_z FROM players p
             JOIN organizations o ON o.player_id = p.id

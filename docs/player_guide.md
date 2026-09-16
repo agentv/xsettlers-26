@@ -273,7 +273,7 @@ A scenario decides who plays, where they start, what they start with, and how
 rich they start. Three ship today; `list_scenarios` shows the ones you're
 seated in.
 
-### Solo (`game_solo`)
+### Solo (`game1`)
 
 One player, no rivals. Eight ships plus an established colony at
 `(10,10,0)`, everything starting at 30% of storage capacity — so production
@@ -281,12 +281,12 @@ actually matters from turn 1. Because you're the only player, declaring end of
 turn advances the clock immediately instead of waiting out the timer, which
 makes this much the best scenario for learning the game or testing a client.
 
-### Diaspora (`game0`)
+### Diaspora (`game2`)
 
 Two players, 8 ships each, **no starting colony** — everyone begins mobile and
 picks their own moment to plant roots. Home sectors are 25 sectors apart.
 
-### Outbreak (`game1`)
+### Outbreak (`game3`)
 
 One foothold, and a fleet to expand from it.
 
@@ -307,4 +307,4 @@ start you rich — but starting lean is what makes production matter from turn 1
 instead of being wasted against a hold that is already full.
 
 > *Naming note: Outbreak was originally sketched under the name "Diaspora"
-> before either scenario file existed. That name now belongs to `game0`.*
+> before either scenario file existed. That name now belongs to `game2`.*

@@ -1,5 +1,5 @@
-# Starting configuration for XSettlers MVP (game0).
-# To create a new game variant, copy this file, rename it (e.g. game1.yaml).
+# Starting configuration for XSettlers MVP -- Diaspora (game2).
+# To create a new game variant, copy this file, rename it (e.g. game5.yaml).
 # It's automatically discoverable via xsettlers_mcp/game_select.py's
 # list_scenarios() -- no need to touch game_config.yaml. name/description
 # are required and shown to players when they're choosing which scenario

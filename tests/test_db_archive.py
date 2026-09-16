@@ -39,7 +39,7 @@ def test_archived_live_path_accepts_a_new_bootstrap_without_a_restart():
     archive_active_database()
     # bootstrap_game() assumes init_schema() already ran -- exactly what
     # archive_active_database() just did against the fresh DB_PATH.
-    bootstrap_game(scenario_file="config/game_solo.yaml", scenario_name="game_solo")
+    bootstrap_game(scenario_file="config/game1.yaml", scenario_name="game1")
     with connection() as conn:
         n = conn.execute("SELECT COUNT(*) AS n FROM players").fetchone()["n"]
     assert n >= 1

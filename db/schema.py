@@ -108,6 +108,13 @@ def init_schema():
             scenario_file   TEXT NOT NULL,
             selected_by     TEXT,
             bootstrapped_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            -- How many turns this game runs before scores are tallied --
+            -- the active scenario's own StartingConfiguration.turn_limit,
+            -- copied in by db/bootstrap.py. Nullable rather than NOT NULL
+            -- only so ADDED_COLUMNS below can add it to a deployed volume's
+            -- existing games row; engine/turn.py's get_turn_limit() falls
+            -- back to DEFAULT_TURN_LIMIT for a NULL it finds there.
+            turn_limit      INTEGER,
             CHECK (id = 1)
         );
         -- GameHouse handoff: the session_token GameHouse pushes via
@@ -333,6 +340,7 @@ ADDED_COLUMNS = {
     "organizations": {"task_force_id": "INTEGER REFERENCES task_forces(id)",
                       "call_sign": "TEXT"},
     "task_forces": {"call_sign": "TEXT"},
+    "games": {"turn_limit": "INTEGER"},
 }
 
 

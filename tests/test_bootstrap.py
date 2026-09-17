@@ -272,6 +272,38 @@ def test_home_energy_is_the_scenarios_figure_not_a_hotspot_roll(tmp_path):
     assert energy == 2200
 
 
+def test_turn_limit_is_written_from_the_scenario(tmp_path):
+    """Game length is a scenario setting, not an engine constant -- bootstrap
+    copies the scenario's own turn_limit into the games row.
+
+    fresh_db pre-seeds a games row of its own (see conftest.seed_active_game),
+    so this clears it first -- otherwise bootstrap_game()'s INSERT OR IGNORE
+    finds a row already there and silently keeps it, the same reason
+    test_game_select.py's _clear_active_game() exists."""
+    with connection() as conn:
+        conn.execute("DELETE FROM games")
+    path = tmp_path / "game_short.yaml"
+    path.write_text(
+        'name: "Short"\ndescription: "d"\nturn_limit: 5\n'
+        'participants:\n  - {player: "vincent@example.com", home_sector: [0, 0, 0]}\n'
+        'ships_per_player: 1\n'
+        'pods_per_ship:\n  - {task: produce_energy, count: 1, storage_capacity: 100.0}\n')
+    bootstrap_game(scenario_file=str(path), scenario_name="short", selected_by="test")
+    with connection() as conn:
+        limit = conn.execute("SELECT turn_limit FROM games WHERE id=1").fetchone()["turn_limit"]
+    assert limit == 5
+
+
+def test_turn_limit_falls_back_to_the_project_default_when_unstated(tmp_path):
+    with connection() as conn:
+        conn.execute("DELETE FROM games")
+    bootstrap_game(scenario_file=_mapped_scenario(tmp_path, ''),
+                    scenario_name="mapped", selected_by="test")
+    with connection() as conn:
+        limit = conn.execute("SELECT turn_limit FROM games WHERE id=1").fetchone()["turn_limit"]
+    assert limit == 20
+
+
 def test_bootstrap_the_crowd_seats_blue_and_red_close_together():
     """The Crowd's whole premise is the starting distance, so the coordinates
     are the thing worth pinning -- a scenario that quietly drifted its homes

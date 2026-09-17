@@ -47,6 +47,9 @@ starting_fill: 0.3
 # parks ships in transit and stays at 0.
 home_sector_energy: 2200
 
+# How many turns this scenario runs before scores are tallied.
+turn_limit: 20
+
 # Each ship receives one pod per entry below, repeated `count` times.
 # Mission values are the canonical pod missions (see Product Requirements /
 # Data Model & Storage Design): idle | produce_energy | produce_food | produce_goods | scan.

@@ -38,6 +38,9 @@ starting_fill: 0.3
 # parks ships in transit and stays at 0.
 home_sector_energy: 2200
 
+# How many turns this scenario runs before scores are tallied.
+turn_limit: 20
+
 # Same 6-pod loadout as game2's Diaspora, applied to every ship AND
 # to the home colony (see home_colony below and db/bootstrap.py).
 pods_per_ship:

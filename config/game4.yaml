@@ -35,6 +35,7 @@ ships_per_player: 8
 # to the crowding.
 starting_fill: 0.3
 home_sector_energy: 2200
+turn_limit: 20
 
 pods_per_ship:
   - {task: produce_energy, count: 2, storage_capacity: 100.0}

@@ -26,24 +26,34 @@ DEFAULT_STARTING_FILL = 0.3
 # suppressing energy harvesting mid-flight.
 HOME_SECTOR_ENERGY = 750.0
 
+# How many turns a scenario runs before scores are tallied and the game ends,
+# when the scenario doesn't say otherwise. Game length is a scenario
+# characteristic, not an engine-wide constant -- see
+# StartingConfiguration.turn_limit. db/bootstrap.py writes the resolved value
+# into the `games` table at bootstrap, and engine/turn.py's get_turn_limit()
+# reads it back from there for whichever game is currently active.
+DEFAULT_TURN_LIMIT = 20
+
 @dataclass
 class GameSettings:
     """
     Engine-wide settings from config/game_config.yaml's `game:` block.
 
     Only `max_players` and `score_weights` are actually consumed today.
-    `tick_seconds`/`turn_limit`/`confidence_decay_per_turn` are parsed but
-    then shadowed by GAME_TICK_SECONDS/TURN_LIMIT/CONFIDENCE_DECAY_PER_TURN
-    -- kept here deliberately, pending the precedence rule (YAML supplies the
-    default, env overrides it) that docs/TODO.md tracks applying to all three
-    at once. A YAML key with no env counterpart and no consumer has nothing to
-    reconcile against and does not belong here.
+    `tick_seconds`/`confidence_decay_per_turn` are parsed but then shadowed by
+    GAME_TICK_SECONDS/CONFIDENCE_DECAY_PER_TURN -- kept here deliberately,
+    pending the precedence rule (YAML supplies the default, env overrides it)
+    that docs/TODO.md tracks applying to both at once. A YAML key with no env
+    counterpart and no consumer has nothing to reconcile against and does not
+    belong here.
+
+    `turn_limit` is NOT here -- game length is a scenario setting
+    (StartingConfiguration.turn_limit below), not an engine-wide one.
     """
     name: str
     tick_seconds: int
     confidence_decay_per_turn: int
     max_players: int
-    turn_limit: int
     score_weights: dict
 
 @dataclass
@@ -156,6 +166,9 @@ class StartingConfiguration:
     # Energy seeded into each player's home sector, overriding the ordinary
     # discovery roll. See HOME_SECTOR_ENERGY.
     home_sector_energy: float = HOME_SECTOR_ENERGY
+    # How many turns this scenario runs before scores are tallied. See
+    # DEFAULT_TURN_LIMIT.
+    turn_limit: int = DEFAULT_TURN_LIMIT
     # Where the map is richer than open space. Home is deliberately NOT
     # expressed here: home_sector_energy above is an absolute figure written
     # over whatever home rolled, because a starting position is a promise
@@ -238,6 +251,7 @@ def load_starting_configuration(path: str) -> StartingConfiguration:
         starting_fill=scenario_fill,
         home_sector_energy=float(sc_raw.get("home_sector_energy",
                                             HOME_SECTOR_ENERGY)),
+        turn_limit=int(sc_raw.get("turn_limit", DEFAULT_TURN_LIMIT)),
         map=_load_map(sc_raw.get("map") or {}),
     )
 
@@ -381,7 +395,6 @@ def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameC
         confidence_decay_per_turn=int(_require(g, "confidence_decay_per_turn",
                                                "game.confidence_decay_per_turn")),
         max_players=int(_require(g, "max_players", "game.max_players")),
-        turn_limit=int(_require(g, "turn_limit", "game.turn_limit")),
         score_weights=g.get("score_weights", {"energy": 1, "goods": 1, "food": 1}),
     )
     players = [PlayerDef(

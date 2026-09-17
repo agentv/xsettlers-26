@@ -47,7 +47,7 @@ The local `xsettlers.db` is scratch — safe to `rm` and restart clean.
 
 Requires **Python 3.12** (per the Dockerfile) and nothing else — storage is the standard-library `sqlite3` module, no extension to load. Deploy target is Fly.io (`fly.toml`, `Dockerfile`), persistent volume at `/data`.
 
-Config is env-driven (`.env.example`, via `python-dotenv`): `DB_PATH`, `GAME_CONFIG_PATH`, `CONFIDENCE_DECAY_PER_TURN`, `GAME_TICK_SECONDS`, `TURN_LIMIT`. **These env vars shadow `config/game_config.yaml`, whose `game:` block is largely inert** — the shadowed fields are kept deliberately for a precedence rule tracked in `docs/TODO.md`, so don't "clean them up", and check that something reads a field before changing its value there.
+Config is env-driven (`.env.example`, via `python-dotenv`): `DB_PATH`, `GAME_CONFIG_PATH`, `CONFIDENCE_DECAY_PER_TURN`, `GAME_TICK_SECONDS`. **These env vars shadow `config/game_config.yaml`, whose `game:` block is largely inert** — the shadowed fields are kept deliberately for a precedence rule tracked in `docs/TODO.md`, so don't "clean them up", and check that something reads a field before changing its value there. `turn_limit` is *not* one of these: game length is a per-scenario setting (`StartingConfiguration.turn_limit` in `config/loader.py`, copied into the `games` table at bootstrap and read back by `engine/turn.py`'s `get_turn_limit()`), not an engine-wide env-driven constant.
 
 **Two sibling repos, neither imported here, both able to break from a change here.**
 

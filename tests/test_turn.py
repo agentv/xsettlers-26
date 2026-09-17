@@ -189,14 +189,36 @@ def test_fog_does_not_decay_a_sector_you_occupy():
     end_of_turn()
     assert _confidence(pid, home) == 100
 
+# --- turn_limit is per-game (the active scenario's own figure), not a
+#     fixed engine constant (see config/loader.py's StartingConfiguration
+#     .turn_limit and db/bootstrap.py, which copies it into games.turn_limit) ---
+
+def test_get_turn_limit_reflects_the_active_games_own_value():
+    from engine.turn import get_turn_limit
+    with connection() as conn:
+        conn.execute("UPDATE games SET turn_limit=3 WHERE id=1")
+    assert get_turn_limit() == 3
+
+def test_is_game_over_respects_a_short_scenarios_turn_limit():
+    from engine.turn import is_game_over
+    with connection() as conn:
+        conn.execute("UPDATE games SET turn_limit=2 WHERE id=1")
+    pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
+    seed_pod(oid, task="produce_goods", storage_current=50.0)
+    assert not is_game_over()
+    end_of_turn()
+    assert not is_game_over()
+    end_of_turn()
+    assert is_game_over()
+
 # --- end-of-game scoreboard (must be recorded, not just printed) ---
 
 def _play_to_game_over():
-    from engine.turn import TURN_LIMIT
+    from engine.turn import get_turn_limit
     pid = seed_player(); sid = seed_sector(0, 0, 0); oid = seed_ship(pid, sid)
     seed_pod(oid, task="produce_goods", storage_current=50.0)
     seed_pod(oid, task="produce_food", storage_current=100.0)
-    for _ in range(TURN_LIMIT):
+    for _ in range(get_turn_limit()):
         end_of_turn()
     return pid
 
@@ -221,7 +243,7 @@ def test_final_scores_are_recorded_as_an_event_not_just_printed():
 def test_a_tied_game_has_two_winners():
     """Nothing breaks a tie, so both players on rank 1 are named as winners
     and the header says "Winners", plural."""
-    from engine.turn import get_final_scores, TURN_LIMIT
+    from engine.turn import get_final_scores, get_turn_limit
     from xsettlers_mcp.tools.organization_reports import show_game_status
     for i, (email, token, name) in enumerate([("a@test.com", "U_A", "A"),
                                               ("b@test.com", "U_B", "B")]):
@@ -229,7 +251,7 @@ def test_a_tied_game_has_two_winners():
         oid = seed_ship(pid, seed_sector(i, 0, 0), name=f"Ship {name}")
         seed_pod(oid, task="produce_goods", storage_current=50.0)
         seed_pod(oid, task="produce_food", storage_current=100.0)
-    for _ in range(TURN_LIMIT):
+    for _ in range(get_turn_limit()):
         end_of_turn()
     final = get_final_scores()
     assert sorted(final["winners"]) == ["A", "B"]

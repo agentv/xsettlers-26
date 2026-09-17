@@ -14,7 +14,7 @@ from xsettlers_mcp.tools.registry import mcp_tool
 from config.loader import load_config
 from xsettlers_mcp.tools.session import player_tool, ORG_NOT_OWNED
 from engine.production import org_production
-from engine.turn import get_next_tick_at, get_final_scores, TURN_LIMIT
+from engine.turn import get_next_tick_at, get_final_scores, get_turn_limit
 from engine.scoring import player_standings
 from engine.scanning import aim_label, scanners_on
 from views.format import (RESOURCE_ABBREV, TASK_ABBREV, TASK_DISPLAY,
@@ -233,13 +233,13 @@ def show_civilization_status(sess) -> dict:
 
     return {
         "turn": current_turn,
-        "turn_limit": TURN_LIMIT,
+        "turn_limit": get_turn_limit(),
         "next_tick_at": next_tick_at,
         "next_tick_countdown": tick_countdown(next_tick_at),
         "organizations": orgs,
         "assets": assets,
         "display": {
-            "header": turn_header(current_turn, TURN_LIMIT, next_tick_at),
+            "header": turn_header(current_turn, get_turn_limit(), next_tick_at),
             "rows_key": "organizations",
             "columns": ["short_name", "status", "cargo_display", "storage_summary",
                         "tasking_summary", "production_summary"],
@@ -325,7 +325,7 @@ def show_game_status(sess) -> dict:
         winners = final.get("winners") or [n for n in [final.get("winner")] if n]
     header = (f"FINAL — game over at turn {final['final_turn']} of {final['turn_limit']}. "
               f"{winners_label(winners)}" if game_over
-              else turn_header(current_turn, TURN_LIMIT, next_tick_at))
+              else turn_header(current_turn, get_turn_limit(), next_tick_at))
 
     # Whole-number display variants -- score/energy/food/goods never carry a
     # meaningful fraction (production and upkeep are integer per-turn amounts),
@@ -340,7 +340,7 @@ def show_game_status(sess) -> dict:
 
     return {
         "turn": current_turn,
-        "turn_limit": TURN_LIMIT,
+        "turn_limit": get_turn_limit(),
         "next_tick_at": next_tick_at,
         "next_tick_countdown": next_tick_countdown,
         "game_over": game_over,

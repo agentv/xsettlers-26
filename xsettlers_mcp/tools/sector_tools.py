@@ -4,7 +4,7 @@ from db.sectors import (CONFIDENCE_DECAY_PER_TURN, MAX_SECTOR_ENERGY,
                         MIN_SECTOR_ENERGY, TURNS_TO_BLINK_OUT)
 from db.sightings import sightings_by_sector
 from engine.scanning import aim_label, scanners_on
-from engine.turn import get_next_tick_at, TURN_LIMIT
+from engine.turn import get_next_tick_at, get_turn_limit
 from views.format import ENERGY_UNIT, in_thousands, turn_header
 from xsettlers_mcp.tools.session import player_tool
 
@@ -438,7 +438,7 @@ def show_sector_neighborhood(
             # the one helper, so a player reading two reports side by side
             # cannot be told two different things about the clock.
             "header": f"Neighborhood of {origin}"
-                      + (f" — {turn_header(current_turn, TURN_LIMIT, next_tick_at)}"
+                      + (f" — {turn_header(current_turn, get_turn_limit(), next_tick_at)}"
                          if current_turn is not None else ""),
             "grid": grid,
             "legend": legend,
@@ -577,7 +577,7 @@ def show_neighborhood_resources(
             # the one helper, so two reports read side by side cannot be told
             # different things about the clock.
             "header": f"Resources near {center['label']}"
-                      + (f" — {turn_header(current_turn, TURN_LIMIT, next_tick_at)}"
+                      + (f" — {turn_header(current_turn, get_turn_limit(), next_tick_at)}"
                          if current_turn is not None else ""),
             "grid": grid,
             "legend": RESOURCE_LEGEND,

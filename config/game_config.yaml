@@ -11,10 +11,15 @@ game:
   # equally valid. How many players a *particular* game has is decided by that
   # scenario's participants list, not here.
   max_players: 8
-  turn_limit: 20
+
+  # (No `turn_limit` key -- game length is a scenario setting, not an engine
+  # one. See each config/game<N>.yaml's own `turn_limit`; StartingConfiguration
+  # in config/loader.py carries it and db/bootstrap.py writes it into the
+  # `games` table, where engine/turn.py's get_turn_limit() reads it back for
+  # the currently active game.)
 
   # (No `dimensions` or `feature_flags` keys -- both were removed 2026-08-11.
-  # Neither was read by any code anywhere, and unlike tick_seconds/turn_limit/
+  # Neither was read by any code anywhere, and unlike tick_seconds/
   # confidence_decay_per_turn above there was no env var shadowing them either,
   # so there was nothing to reconcile: `dimensions: 2` had sat here contradicting
   # the loader's own default of 3 with nothing to notice. Re-add them alongside

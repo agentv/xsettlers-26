@@ -192,10 +192,10 @@ def bootstrap_game(config_path: str = None, scenario_file: str = None,
                         sc.pods_per_ship, is_mobile=0)
 
     cur.execute("INSERT OR IGNORE INTO game_state (id,current_turn) VALUES (1,0)")
-    cur.execute("""INSERT OR IGNORE INTO games (id,scenario_name,scenario_file,selected_by)
-        VALUES (1,?,?,?)""",
+    cur.execute("""INSERT OR IGNORE INTO games (id,scenario_name,scenario_file,selected_by,turn_limit)
+        VALUES (1,?,?,?,?)""",
         (scenario_name or cfg.starting_configuration.name,
          scenario_file or "(default from game_config.yaml)",
-         selected_by))
+         selected_by, sc.turn_limit))
     conn.commit(); conn.close()
     print("Bootstrap complete.")

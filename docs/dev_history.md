@@ -425,6 +425,20 @@ filename, the identifiers used by `select_scenario` and GameHouse's
 `scenario_key` too. Anything written before that resequencing may still refer
 to `game0` (Diaspora) or `game_solo`/`game_crowd` by their old names.
 
+**`turn_limit` moved from an engine-wide env var to a per-scenario setting.**
+It used to be `engine/turn.py`'s `TURN_LIMIT = int(os.getenv("TURN_LIMIT",
+20))`, read at import time and shared by every scenario regardless of what
+was actually bootstrapped. Now it's `StartingConfiguration.turn_limit`
+(`config/loader.py`, default `DEFAULT_TURN_LIMIT = 20` for a scenario that
+doesn't set it), copied by `db/bootstrap.py` into the new `games.turn_limit`
+column at bootstrap, and read back per-game by `engine/turn.py`'s
+`get_turn_limit()` -- the same shape `home_sector_energy` already used. Every
+shipped scenario declares `turn_limit: 20` explicitly, so the visible length
+of a game hasn't changed, only where the number lives. `games.turn_limit` is
+nullable (`db/schema.py`'s `ADDED_COLUMNS`, for a deployed volume's existing
+row) and `get_turn_limit()` falls back to `DEFAULT_TURN_LIMIT` on a NULL
+there, or before any scenario has been bootstrapped.
+
 ## Rival detection (built 2026-08-18)
 
 ~~`engine/turn.py` — **rival detection is unbuilt**~~ Built 2026-08-18. A scan now reveals the organizations standing in its target sector as well as the sector's own resources, each org rolling its own d6 detection check (`db/sightings.py`, threshold 6 of 6 — certain for now, and the die is rolled anyway so lowering it later changes odds without shifting a seeded run's roll sequence). Sightings land in the new `org_sightings` table, one row per (observer, org), upserted on re-sighting, and a `scan.contact` event names what was detected. Intel is per sector and ages on the ordinary fog-of-war schedule: sightings are read only through `player_sectors`, so they inherit the sector's confidence and blink out with it at 0, and a scan is authoritative for its sector — what it finds replaces what you believed, so an emptied sector stops reporting a ghost. `show_sector_neighborhood` distinguishes "R" (a rival there now, shown only where you stand) from "r" (one a scan saw there). **Still unbuilt: the `pod.scanned`/`org.scanned` events**, and no NPC strategy scans toward an opponent, so nothing in the library produces contact on its own — see the Crowd note under NPC strategies.

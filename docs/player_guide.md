@@ -360,11 +360,9 @@ detail lives in [Product Requirements](product_requirements.md).
 
 ## Scenarios
 
-A scenario decides who plays, where they start, what they start with, and how
-rich they start. Four ship today; `list_scenarios` shows the ones you're
-seated in. Every scenario currently runs for the same 20 turns before scores
-are tallied — that's an engine-wide setting, not something an individual
-scenario controls.
+A scenario decides who plays, where they start, what they start with, how
+rich they start, and how long the game runs. Four ship today; `list_scenarios`
+shows the ones you're seated in.
 
 ### Solo (`game1`)
 
@@ -373,11 +371,13 @@ One player, no rivals. Eight ships plus an established colony at
 actually matters from turn 1. Because you're the only player, declaring end of
 turn advances the clock immediately instead of waiting out the timer, which
 makes this much the best scenario for learning the game or testing a client.
+Runs 20 turns.
 
 ### Diaspora (`game2`)
 
 Two players, 8 ships each, **no starting colony** — everyone begins mobile and
 picks their own moment to plant roots. Home sectors are 25 sectors apart.
+Runs 20 turns.
 
 ### Outbreak (`game3`)
 
@@ -392,6 +392,7 @@ One foothold, and a fleet to expand from it.
   the same 6-pod loadout: 2 energy, 2 goods, 2 food, all producing from turn 1.
 - **Starting positions:** home sectors about 12.7 sectors apart — far enough
   for a real exploration phase, close enough that contact is likely mid-game.
+- **Length:** 20 turns, then scores are tallied.
 
 ### The Crowd (`game4`)
 
@@ -408,6 +409,7 @@ apart that contact is somebody else's problem.
   Outbreak (2 energy, 2 goods, 2 food).
 - **Map:** open space everywhere — no hotspot pulls the fleets toward each
   other, so wherever they end up meeting is down to strategy, not terrain.
+- **Length:** 20 turns, then scores are tallied.
 
 Worth knowing before you rely on it: discovering a sector is not the same as
 discovering who is in it. A scan tells you what a sector holds, not whether a

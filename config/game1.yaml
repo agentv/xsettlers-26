@@ -39,6 +39,9 @@ starting_fill: 0.3
 # parks ships in transit and stays at 0.
 home_sector_energy: 2200
 
+# How many turns this scenario runs before scores are tallied.
+turn_limit: 20
+
 pods_per_ship:
   - {task: produce_energy, count: 2, storage_capacity: 100.0}
   - {task: produce_goods,  count: 2, storage_capacity: 100.0}

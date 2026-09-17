@@ -1,5 +1,5 @@
-import collections, os, json, math
-from config.loader import load_config
+import collections, json, math
+from config.loader import load_config, DEFAULT_TURN_LIMIT
 from db.connection import get_connection, read_one, read_value
 from db.sectors import reveal_sector, CONFIDENCE_DECAY_PER_TURN
 from db.sightings import record_sightings
@@ -15,13 +15,25 @@ from engine.transfers import resolve_due_transfers
 from engine.scoring import score_for, player_standings
 from engine.bearings import get_scan_range
 
-TURN_LIMIT = int(os.getenv("TURN_LIMIT", 20))
-
 def get_current_turn() -> int:
     return read_value("SELECT current_turn FROM game_state WHERE id=1")
 
+def get_turn_limit() -> int:
+    """
+    How many turns the currently active game runs, per its own scenario
+    (StartingConfiguration.turn_limit, written into `games` at bootstrap) --
+    game length is a scenario setting, not an engine-wide one.
+
+    Falls back to DEFAULT_TURN_LIMIT for a NULL, which covers both "no game
+    bootstrapped yet" (is_game_over() is called before end_of_turn() checks
+    for that) and a deployed volume's games row from before this column
+    existed (see db/schema.py's ADDED_COLUMNS).
+    """
+    limit = read_value("SELECT turn_limit FROM games WHERE id=1")
+    return limit if limit is not None else DEFAULT_TURN_LIMIT
+
 def is_game_over() -> bool:
-    return get_current_turn() >= TURN_LIMIT
+    return get_current_turn() >= get_turn_limit()
 
 def get_next_tick_at() -> str | None:
     """
@@ -407,7 +419,7 @@ def end_of_turn():
 
     # 8. Check for game over
     if is_game_over():
-        print(f"Turn limit {TURN_LIMIT} reached — game over. Calculating final scores...")
+        print(f"Turn limit {get_turn_limit()} reached — game over. Calculating final scores...")
         _calculate_final_scores()
 
 def _snapshot_holdings(cur, turn: int, before_holdings: dict, production: dict, consumption: dict):
@@ -481,7 +493,7 @@ def _calculate_final_scores() -> list:
 
     final_turn = cur.execute("SELECT current_turn FROM game_state WHERE id=1").fetchone()["current_turn"]
     record_event_direct(cur, final_turn, FINAL_SCORES_EVENT,
-                         payload={"final_turn": final_turn, "turn_limit": TURN_LIMIT,
+                         payload={"final_turn": final_turn, "turn_limit": get_turn_limit(),
                                   "score_weights": dict(weights),
                                   # Every player on the top rank, not just the
                                   # first row: scoring has no tiebreak, so a tie

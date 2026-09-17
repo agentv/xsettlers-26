@@ -95,10 +95,14 @@ barren, so a poor find costs you upside, not survival. And what you see is
 what is genuinely there: if a rival got somewhere before you, you inherit
 whatever they have already drained out of it.
 
-**Your home sector is the exception.** It is deep enough that you will never
-exhaust it, no matter how long the game runs or how much you park there. Home
-is a refuge, not a prize — the ground you can always fall back on. Everywhere
-else is finite, which is what makes where you go a decision.
+**Your home sector is the exception — but not a bottomless one.** It's seeded
+far richer than anywhere you'll ever discover, so for a game of the current
+length it won't run dry under ordinary play. It still depletes exactly like
+any other sector while you're drawing on it, though — parking your whole
+fleet there and harvesting for the entire game is the one way to actually
+find its bottom. Home is a refuge, not a prize — the ground you can usually
+fall back on. Everywhere else is finite too, which is what makes where you go
+a decision.
 
 **Only energy comes from the map.** Food and goods are manufactured out of
 what you already hold. Energy is therefore the input to your whole economy —
@@ -146,6 +150,28 @@ back to where it started, with no credit for the distance covered.
 
 ---
 
+## Task Forces
+
+Ordering ships one at a time gets tedious once your fleet grows. A **task
+force** is a named group of your own ships you can command as one.
+
+- **Ships only.** Colonies never take movement orders, so they can't join.
+- **You build the roster by hand** — create a task force with an initial
+  list of ships (or none), then add or remove members whenever you like. A
+  ship belongs to at most one task force at a time.
+- **Ordering the task force orders every current member independently.**
+  The mission you give it — move, colonize, defend, attack, idle — goes to
+  each member's own organization exactly as if you'd ordered that ship
+  yourself. It is not all-or-nothing: a member that can't currently accept
+  the order (mid-flight, mid-colonization) fails on its own and reports why,
+  while the rest of the task force still goes through.
+- **Membership survives everything except colonizing.** The moment a member
+  ship colonizes, it leaves its task force — a task force can only ever hold
+  ships.
+- Like a ship or colony, a task force can be given its own **call sign**.
+
+---
+
 ## Colonizing
 
 Any ship can be ordered to colonize the sector it's sitting in. Once that
@@ -167,6 +193,27 @@ Choose the ground carefully, twice over. A colony can never relocate, so it
 lives or dies on the sector you left it in — and it draws that sector down
 1.5× as fast as a ship would. The bonus is real, but it spends the ground
 underneath it quicker.
+
+---
+
+## Sharing Resources
+
+Two of your own organizations sitting together can hand resources back and
+forth — useful for topping up a scout from a colony's stockpile, or
+consolidating goods onto one ship before a long haul.
+
+- **Both must be yours, and both must currently occupy the same real
+  sector** — not in transit.
+- **It's a push, not a request.** There's no accept step; sharing a sector
+  is the only consent required.
+- **It resolves one tick later, not instantly.** What you send stays live in
+  the giver's own economy — still spendable, still at risk of being drawn
+  down by production — right up until the transfer actually fires. At that
+  point the giver sends whatever it still has, up to the amount you ordered;
+  the receiver takes what fits in its own storage, and anything over that is
+  lost.
+- If the two organizations are no longer together when the transfer
+  resolves, nothing moves.
 
 ---
 
@@ -211,6 +258,40 @@ sector keeps it visible indefinitely.
 
 ---
 
+## Standing Orders
+
+Most of the time you command a ship directly, turn by turn. A **standing
+order** is one instruction that fires by itself later, without you having to
+be there to give it again.
+
+You choose when it fires:
+
+- **On departure** — the instant the ship next sets off. Only useful for
+  retasking a pod, since that's the one thing a departing ship doesn't
+  otherwise lock.
+- **On arrival** — the moment the ship's current move resolves, after it
+  lands and before that turn's production runs. The ship has to already be
+  en route when you set this up.
+- **On a turn you name** — a specific turn number, independent of any move.
+
+And what it does when it fires is the same handful of things you can already
+do by hand: move, retask a pod, colonize, aim a scan, or transfer a resource
+to another of your organizations. A few things are worth knowing before you
+rely on one:
+
+- **Give the ship new orders yourself first, and a standing order set for
+  arrival or a named turn is silently dropped** rather than fighting your
+  manual order.
+- **A standing colonize order is the one exception that keeps trying.** If
+  the ship can't afford the energy at the moment it fires, it isn't simply
+  dropped — it's retried automatically on a later turn.
+- Everything else is checked only when it actually fires, not when you set
+  it up. A standing transfer where the two organizations are no longer
+  together, for instance, just quietly fails at that point — the same as if
+  you'd tried it by hand and missed.
+
+---
+
 ## Winning
 
 The game runs for a fixed number of turns. At the end of the last turn,
@@ -245,6 +326,8 @@ the music stops.
 |---|---|
 | See which games you can join | `list_scenarios` |
 | Start or join one | `select_scenario` |
+| Check your own state (organizations, pods) | `get_player_state` |
+| Choose your own display name | `set_display_name` |
 | See how long a move would take, without committing | `preview_move` |
 | Actually move a ship | `confirm_move` |
 | Change your mind mid-flight | `cancel_move` |
@@ -252,7 +335,15 @@ the music stops.
 | Change what a pod is doing | `set_pod_task` |
 | Aim an organization's own sensors | `set_org_scan_bearing` |
 | Aim a scan pod | `set_pod_scan_bearing` |
+| Hand a resource to another of your own organizations | `transfer_resources` |
+| Queue a standing order to fire later on its own | `queue_command` |
 | Give a ship or colony a call sign | `set_call_sign` |
+| Create a task force | `create_task_force` |
+| Add a ship to a task force | `add_to_task_force` |
+| Remove a ship from a task force | `remove_from_task_force` |
+| Order every current member of a task force at once | `order_task_force` |
+| List your task forces and their members | `list_task_forces` |
+| Disband a task force | `disband_task_force` |
 | Give a task force a call sign | `set_task_force_call_sign` |
 | Check on one ship or colony | `show_organization` |
 | Review your whole fleet | `show_civilization_status` |
@@ -270,8 +361,10 @@ detail lives in [Product Requirements](product_requirements.md).
 ## Scenarios
 
 A scenario decides who plays, where they start, what they start with, and how
-rich they start. Three ship today; `list_scenarios` shows the ones you're
-seated in.
+rich they start. Four ship today; `list_scenarios` shows the ones you're
+seated in. Every scenario currently runs for the same 20 turns before scores
+are tallied — that's an engine-wide setting, not something an individual
+scenario controls.
 
 ### Solo (`game1`)
 
@@ -299,9 +392,30 @@ One foothold, and a fleet to expand from it.
   the same 6-pod loadout: 2 energy, 2 goods, 2 food, all producing from turn 1.
 - **Starting positions:** home sectors about 12.7 sectors apart — far enough
   for a real exploration phase, close enough that contact is likely mid-game.
-- **Length:** 20 turns, then scores are tallied.
 
-All three scenarios currently start holds at 30% of capacity. That is a
+### The Crowd (`game4`)
+
+Two players starting close enough to plausibly meet, rather than far enough
+apart that contact is somebody else's problem.
+
+- **Players:** 2 (Blue and Red).
+- **Starting positions:** about 7 sectors apart, near the origin — roughly one
+  scout hop plus a scan, instead of the wide separation every other scenario
+  uses.
+- **Starting colony:** none — both fleets begin mobile, so neither side is
+  pinned down before the question of contact even comes up.
+- **Starting fleet:** 8 ships per player, same 6-pod loadout as Diaspora and
+  Outbreak (2 energy, 2 goods, 2 food).
+- **Map:** open space everywhere — no hotspot pulls the fleets toward each
+  other, so wherever they end up meeting is down to strategy, not terrain.
+
+Worth knowing before you rely on it: discovering a sector is not the same as
+discovering who is in it. A scan tells you what a sector holds, not whether a
+rival fleet is currently sitting there — the two fleets only actually spot
+each other by ending a turn in the same sector. Starting close makes that
+reachable; it doesn't make it automatic.
+
+All four scenarios currently start holds at 30% of capacity. That is a
 scenario setting rather than a rule of the game — a future variant is free to
 start you rich — but starting lean is what makes production matter from turn 1
 instead of being wasted against a hold that is already full.

@@ -439,6 +439,28 @@ nullable (`db/schema.py`'s `ADDED_COLUMNS`, for a deployed volume's existing
 row) and `get_turn_limit()` falls back to `DEFAULT_TURN_LIMIT` on a NULL
 there, or before any scenario has been bootstrapped.
 
+**The player guide is served over MCP, not just read as a file.**
+`views/guide.py`'s `load_guide()` parses `docs/player_guide.md` into one
+`Chapter` per top-level (`##`) heading -- a `###` subheading stays folded
+into whichever chapter it falls under, not a chapter of its own -- and
+`xsettlers_mcp/tools/guide_tools.py` exposes that as two tools:
+`list_guide_chapters` (the index) and `show_guide_chapter` (one chapter's
+complete markdown, addressed by slug or by its exact heading text). Neither
+is `@player_tool` -- the guide is the same for every player and useful
+before anyone has a token, let alone a game, so gating it behind
+authentication would be backwards. A chapter's slug is GitHub's own
+markdown-anchor scheme (`_slugify()` in `views/guide.py`), chosen because
+`docs/player_guide.md` already links its own sections that way by hand (e.g.
+`[Scanning & Discovery](#scanning--discovery)`), so a slug returned by the
+tool and one written into the doc's own prose always agree. Nothing is
+cached -- the file is a few KB and parsing it is microseconds, so re-reading
+it on every call is simpler than getting invalidation right for a saving
+that doesn't matter. Rendering a chapter's prose as a markdown table would
+be the wrong shape entirely, so `views/render.py`'s `render_status()` grew a
+second `display.kind` value, `"text"`, alongside the existing `"map"` --
+returns `data[display["text_key"]]` verbatim rather than building rows out
+of it.
+
 ## Rival detection (built 2026-08-18)
 
 ~~`engine/turn.py` — **rival detection is unbuilt**~~ Built 2026-08-18. A scan now reveals the organizations standing in its target sector as well as the sector's own resources, each org rolling its own d6 detection check (`db/sightings.py`, threshold 6 of 6 — certain for now, and the die is rolled anyway so lowering it later changes odds without shifting a seeded run's roll sequence). Sightings land in the new `org_sightings` table, one row per (observer, org), upserted on re-sighting, and a `scan.contact` event names what was detected. Intel is per sector and ages on the ordinary fog-of-war schedule: sightings are read only through `player_sectors`, so they inherit the sector's confidence and blink out with it at 0, and a scan is authoritative for its sector — what it finds replaces what you believed, so an emptied sector stops reporting a ghost. `show_sector_neighborhood` distinguishes "R" (a rival there now, shown only where you stand) from "r" (one a scan saw there). **Still unbuilt: the `pod.scanned`/`org.scanned` events**, and no NPC strategy scans toward an opponent, so nothing in the library produces contact on its own — see the Crowd note under NPC strategies.

@@ -67,8 +67,10 @@ Any MCP client (Slack, curl, an LLM agent) → POST /mcp (carries player_token)
                           │
                     xsettlers_mcp/tools/*.py  (player_tools, sector_tools, navigation_tools,
                           │                    organization_tools, organization_reports,
-                          │                    task_force_tools)
-                          │                   all gated by session.py's @player_tool
+                          │                    task_force_tools, guide_tools)
+                          │                   all gated by session.py's @player_tool,
+                          │                   except guide_tools -- the player guide needs
+                          │                   no token and no game to be readable
                           │
                     db/connection.py → SQLite (.db file)
 ```
@@ -166,7 +168,7 @@ The ship's log (`org_command_queue`, `engine/ship_log.py`) carries scheduled ord
 
 **A test file follows a subject, not a module.** `test_scanning.py` covers aiming, legality and end-of-turn resolution together, because an org's sensors and a scan pod are supposed to behave identically and only a shared file proves it. Put a new test where its subject lives, not in whichever file happens to import the function.
 
-`test_registry.py` is small but collects 88 of the suite's 544 tests — three parametrized sweeps over all 29 tools. That is one property per tool, not redundancy, and it is what catches schema/signature drift. Leave it alone.
+`test_registry.py` is small but collects 100 of the suite's 619 tests — three parametrized sweeps over all 33 tools. That is one property per tool, not redundancy, and it is what catches schema/signature drift. Leave it alone.
 
 ## Writing comments and docs
 

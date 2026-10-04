@@ -49,10 +49,13 @@ def render_status(data: dict) -> str:
     line or list of lines appended below the table. A column with no entry in
     `column_labels` headers as the field name itself.
 
-    `display.kind == "map"` hands off to render_map(). Dispatch is on the
-    *shape* of the data, never on which tool produced it -- there is no
-    per-tool branching here, so any future tool returning either shape
-    renders with no changes.
+    `display.kind == "map"` hands off to render_map(). `display.kind ==
+    "text"` returns `data[display["text_key"]]` verbatim -- for a tool whose
+    payload is prose (show_guide_chapter), not rows, where building a table
+    out of it would be the wrong shape entirely. Dispatch is on the *shape*
+    of the data, never on which tool produced it -- there is no per-tool
+    branching here, so any future tool returning any of these shapes renders
+    with no changes.
     """
     if "error" in data:
         return f"Error: {data['error']}"
@@ -60,6 +63,8 @@ def render_status(data: dict) -> str:
     display = data.get("display") or {}
     if display.get("kind") == "map":
         return render_map(data)
+    if display.get("kind") == "text":
+        return data.get(display.get("text_key"), "")
     rows = data.get(display.get("rows_key"), [])
     columns = display.get("columns") or []
     labels = display.get("column_labels") or {}

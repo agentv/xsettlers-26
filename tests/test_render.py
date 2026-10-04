@@ -192,6 +192,14 @@ def test_render_status_no_special_casing_by_tool_name():
 def test_render_status_propagates_error():
     assert render_status({"error": "Player not found"}) == "Error: Player not found"
 
+def test_render_status_dispatches_to_verbatim_text_on_display_kind():
+    """display.kind == "text" is for prose, not rows -- render_status returns
+    the named field's content exactly as given rather than building a table
+    out of it (show_guide_chapter's shape)."""
+    data = {"content": "## A Chapter\n\nSome prose.",
+            "display": {"kind": "text", "text_key": "content"}}
+    assert render_status(data) == "## A Chapter\n\nSome prose."
+
 # --- map rendering (display.kind == "map") ---
 
 def _neighborhood():

@@ -412,8 +412,10 @@ def end_of_turn():
     conn.commit()  # flush all mutations before snapshotting
     _snapshot_holdings(cur, current_turn, before_holdings, production, consumption)
 
-    # 7. Increment turn
+    # 7. Increment turn. The memoized renderer output (db/static_assets.py)
+    #    was drawn from pre-tick state, so it is cleared in this same commit.
     cur.execute("UPDATE game_state SET current_turn=current_turn+1 WHERE id=1")
+    cur.execute("DELETE FROM static_assets")
     conn.commit(); conn.close()
     print(f"End of turn {current_turn} complete.")
 

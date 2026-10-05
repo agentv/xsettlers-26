@@ -464,3 +464,14 @@ of it.
 ## Rival detection (built 2026-08-18)
 
 ~~`engine/turn.py` — **rival detection is unbuilt**~~ Built 2026-08-18. A scan now reveals the organizations standing in its target sector as well as the sector's own resources, each org rolling its own d6 detection check (`db/sightings.py`, threshold 6 of 6 — certain for now, and the die is rolled anyway so lowering it later changes odds without shifting a seeded run's roll sequence). Sightings land in the new `org_sightings` table, one row per (observer, org), upserted on re-sighting, and a `scan.contact` event names what was detected. Intel is per sector and ages on the ordinary fog-of-war schedule: sightings are read only through `player_sectors`, so they inherit the sector's confidence and blink out with it at 0, and a scan is authoritative for its sector — what it finds replaces what you believed, so an emptied sector stops reporting a ghost. `show_sector_neighborhood` distinguishes "R" (a rival there now, shown only where you stand) from "r" (one a scan saw there). **Still unbuilt: the `pod.scanned`/`org.scanned` events**, and no NPC strategy scans toward an opponent, so nothing in the library produces contact on its own — see the Crowd note under NPC strategies.
+
+## Static asset memo (built 2026-10-04)
+
+`db/static_assets.py` memoizes renderer output in the `static_assets` table. It sits only on the `html_svg` branch of `server.call_tool`, so the JSON half of a response is still computed live.
+
+- **Keyed by the renderer's input, not by turn or revision.** The key is a digest of the input dict. A renderer's output is a pure function of its input, so an identical input reuses the stored body and a changed input cannot match. Invalidation is exact with no write site to enumerate. A turn-only key would be wrong because `show_sector_neighborhood` reads org aims and rival positions, which change mid-turn. A per-org revision counter with triggers was the alternative; it would be the same result with more machinery.
+- **Cleared at the tick.** `end_of_turn()` deletes every row in the same commit that increments the turn, so no pre-tick body survives.
+- **Lazy.** Rendering happens on first request, never at turn end.
+- **Live fallback.** A locked or missing table costs only the memo. The renderer is called directly.
+- **No byte-identical requirement.** An asset is trusted each time it is built.
+- **Rendering happens outside any connection**, so a slow layout never holds a write lock.

@@ -315,6 +315,14 @@ def init_schema():
         CREATE INDEX IF NOT EXISTS idx_events_subject ON events(subject_type, subject_id);
         CREATE INDEX IF NOT EXISTS idx_events_type    ON events(event_type);
         CREATE INDEX IF NOT EXISTS idx_events_resolve ON events(event_type, resolve_at_turn);
+
+        -- Memoized renderer output, keyed by a digest of the data it was drawn
+        -- from (db/static_assets.py). Cleared at each tick by end_of_turn().
+        CREATE TABLE IF NOT EXISTS static_assets (
+            digest TEXT PRIMARY KEY,
+            asset  TEXT NOT NULL,
+            body   TEXT NOT NULL
+        );
     """)
     _add_missing_columns(cur)
     conn.commit()

@@ -24,6 +24,7 @@ import xsettlers_mcp.tools.guide_tools          # noqa: F401
 from xsettlers_mcp.gamehouse import register_with_gamehouse, run_results_reporter
 from xsettlers_mcp.tools.registry import TOOLS
 from db.schema import init_schema
+from db.static_assets import get_or_render
 from views.neighborhood import render_neighborhood_svg
 from views.svg_renderer import render_org_card_svg
 from engine.clock import run_clock
@@ -93,7 +94,8 @@ async def call_tool(name: str, arguments: dict):
     renderer = SVG_RENDERERS.get(name) if response_format == "html_svg" else None
     if renderer:
         return [types.TextContent(type="text", text=_as_json(result)),
-                types.TextContent(type="text", text=renderer(result)),
+                types.TextContent(type="text",
+                                  text=get_or_render(name, result, renderer)),
                 types.TextContent(type="text", text=SVG_DIRECTIVE)]
     return [types.TextContent(type="text", text=_as_json(result)),
             types.TextContent(type="text", text=_as_markdown(result)),

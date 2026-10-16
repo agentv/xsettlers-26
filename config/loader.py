@@ -374,6 +374,31 @@ def resolve_seats(starting_configuration: StartingConfiguration,
         ))
     return seats
 
+PLACEHOLDER_PREFIX = "REPLACE_WITH_GENERATED_TOKEN_"
+
+
+def resolve_player_token(token: str, env=None) -> str:
+    """Swap a committed placeholder for the real credential held outside git.
+
+    A directory token of REPLACE_WITH_GENERATED_TOKEN_<N> is replaced by the
+    environment variable XSETTLERS_PLAYER_TOKEN_<N> when it is set. A
+    placeholder left unresolved is kept as-is, unless
+    XSETTLERS_REQUIRE_REAL_TOKENS is set, in which case loading fails: a
+    deployment that sets it can never serve a publicly guessable token."""
+    env = os.environ if env is None else env
+    if not token.startswith(PLACEHOLDER_PREFIX):
+        return token
+    suffix = token[len(PLACEHOLDER_PREFIX):]
+    real = env.get(f"XSETTLERS_PLAYER_TOKEN_{suffix}")
+    if real:
+        return real
+    if env.get("XSETTLERS_REQUIRE_REAL_TOKENS"):
+        raise ValueError(
+            f"player directory token {token} is a placeholder and "
+            f"XSETTLERS_PLAYER_TOKEN_{suffix} is not set")
+    return token
+
+
 def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameConfig:
     """
     Load the service-wide config (engine settings + player directory), and
@@ -400,7 +425,8 @@ def load_config(path: str = CONFIG_PATH, scenario_override: str = None) -> GameC
     players = [PlayerDef(
         email=_require(p, "email", "players[].email"),
         display_name=_require(p, "display_name", "players[].display_name"),
-        player_token=_require(p, "player_token", "players[].player_token"),
+        player_token=resolve_player_token(
+            _require(p, "player_token", "players[].player_token")),
     ) for p in raw.get("players", [])]
     seen = set()
     for p in players:

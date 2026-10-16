@@ -229,3 +229,24 @@ def test_map_rejects_a_malformed_layout_at_load_time(tmp_path):
     ]:
         with pytest.raises(ValueError, match=complaint):
             load_starting_configuration(_write(tmp_path, block))
+
+
+# --- player token resolution ---
+
+def test_placeholder_token_is_replaced_from_env():
+    from config.loader import resolve_player_token
+    env = {"XSETTLERS_PLAYER_TOKEN_2": "real-secret"}
+    assert resolve_player_token("REPLACE_WITH_GENERATED_TOKEN_2", env) == "real-secret"
+
+
+def test_unresolved_placeholder_is_kept_unless_real_tokens_required():
+    from config.loader import resolve_player_token
+    assert resolve_player_token("REPLACE_WITH_GENERATED_TOKEN_1", {}) == "REPLACE_WITH_GENERATED_TOKEN_1"
+    with pytest.raises(ValueError):
+        resolve_player_token("REPLACE_WITH_GENERATED_TOKEN_1",
+                             {"XSETTLERS_REQUIRE_REAL_TOKENS": "1"})
+
+
+def test_non_placeholder_token_passes_through():
+    from config.loader import resolve_player_token
+    assert resolve_player_token("already-real", {"XSETTLERS_REQUIRE_REAL_TOKENS": "1"}) == "already-real"

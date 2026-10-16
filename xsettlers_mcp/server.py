@@ -234,7 +234,8 @@ async def main():
     else:
         print(f"GameHouse registration skipped/failed: {registration.get('error')}")
     port = int(os.getenv("PORT", 8080))
-    config = uvicorn.Config(starlette_app, host="0.0.0.0", port=port, log_level="info")
+    host = os.getenv("XSETTLERS_HOST", "127.0.0.1")
+    config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
     # The results reporter is gathered here, in the server layer, rather than
     # hooked into game-over: both paths that end a game live in engine/, which

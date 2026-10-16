@@ -8,5 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 EXPOSE 8080
+ENV XSETTLERS_HOST=0.0.0.0
 
 CMD ["python", "-m", "xsettlers_mcp.server"]

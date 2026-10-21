@@ -158,7 +158,7 @@ The ship's log (`org_command_queue`, `engine/ship_log.py`) carries scheduled ord
 - **The length of the participants list is the scenario's player count.** A solo game and a five-player game differ only in YAML; no code branches on player count. `max_players` is an engine ceiling, never a floor.
 - **Adding a playable scenario is adding a `config/game<N>.yaml`** — no code change, and no touching `game_config.yaml` unless the scenario needs a player the directory lacks.
 - `config/loader.py`'s `resolve_seats()` pairs each participant with their directory entry into one `Seat`. Nothing downstream pairs two lists by index.
-- **Don't commit real player tokens.** A directory entry's `player_token` is that player's actual auth credential, but this file is tracked in git and baked into the Docker image at build time. The committed values are deliberate placeholders (`REPLACE_WITH_GENERATED_TOKEN_*`); keeping real ones out of git while `xsettlers_mcp/auth.py` still reads them at runtime is unresolved.
+- **Don't commit real player tokens.** A directory entry's `player_token` is that player's actual auth credential, but this file is tracked in git and baked into the Docker image at build time. The committed values are deliberate placeholders (`REPLACE_WITH_GENERATED_TOKEN_<N>`) and stay that way: `config/loader.py`'s `resolve_player_token()` swaps each for env var `XSETTLERS_PLAYER_TOKEN_<N>` (Fly secrets in production). The Dockerfile sets `XSETTLERS_REQUIRE_REAL_TOKENS=1`, so a deployed container refuses to start on an unresolved placeholder — set a new player's secret before deploying.
 
 ### Testing conventions
 

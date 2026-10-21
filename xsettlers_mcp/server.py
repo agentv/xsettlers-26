@@ -174,19 +174,28 @@ async def health(request):
 # ever receive a 401.
 #
 # What stands between the internet and the game is `player_token` alone --
-# every tool resolves it against the roster and rejects anything else. Note
-# the two things that makes true right now, neither of them comfortable:
+# every tool resolves it against the roster and rejects anything else.
 #
-#   1. The roster in config/game_config.yaml holds placeholder tokens
-#      (REPLACE_WITH_GENERATED_TOKEN_*) and that file is in a PUBLIC repo, as
-#      is this server's URL. Anyone who reads the repo can play as anyone.
-#   2. There is no rate limiting, so nothing slows a caller down.
+# The roster in config/game_config.yaml is in a PUBLIC repo and holds only
+# placeholder tokens (REPLACE_WITH_GENERATED_TOKEN_<N>). config/loader.py's
+# resolve_player_token() swaps each for env var XSETTLERS_PLAYER_TOKEN_<N>
+# (Fly secrets in production), and the Dockerfile sets
+# XSETTLERS_REQUIRE_REAL_TOKENS=1 so a deployed container refuses to start
+# while any placeholder is unresolved. A placeholder is never a live
+# credential where it matters.
+#
+# What stays thin:
+#
+#   1. A token has no expiry and no revocation path short of rotating the
+#      secret and redeploying.
+#   2. There is no rate limiting and no Host/Origin check, so nothing slows
+#      a caller down.
 #
 # Accepted knowingly: the game holds nothing of value and nobody knows it
 # exists. Both facts stop being true the moment either changes.
 #
-# Hardening means per-player tokens that live somewhere other than git, plus
-# expiry and revocation for them -- NOT OAuth. Proof of identity and a
+# Hardening means per-player tokens in a table with expiry and revocation
+# -- NOT OAuth. Proof of identity and a
 # browser-redirect login are separable, and the opaque-token-in-a-table
 # pattern is what ../gamehouse settled on for the same problem. See
 # docs/TODO.md.

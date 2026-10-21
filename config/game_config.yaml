@@ -59,10 +59,14 @@ game:
 # tool call; xsettlers_mcp/auth.py compares it against this directory. Tokens
 # deliberately never appear in a scenario file.
 #
-# SECURITY: this file is committed to git. The placeholder values below are
-# NOT real secrets -- generate fresh tokens before any real deployment, and
-# treat this file as sensitive from that point on (consider gitignoring a
-# real deployment's copy, same as .env, rather than committing live tokens).
+# SECURITY: this file is committed to a public repo, so the values below stay
+# placeholders and are never edited to real tokens. At load time each
+# REPLACE_WITH_GENERATED_TOKEN_<N> is replaced by env var
+# XSETTLERS_PLAYER_TOKEN_<N> (Fly secrets in production; see
+# config/loader.py's resolve_player_token). An unresolved placeholder is
+# tolerated locally and in tests, and refused wherever
+# XSETTLERS_REQUIRE_REAL_TOKENS is set -- the Dockerfile sets it. Adding a
+# player means a new placeholder here plus its secret, set BEFORE deploying.
 players:
   - {email: "vincent@example.com", display_name: "Vincent", player_token: "REPLACE_WITH_GENERATED_TOKEN_1"}
   - {email: "player2@example.com", display_name: "Player Two", player_token: "REPLACE_WITH_GENERATED_TOKEN_2"}

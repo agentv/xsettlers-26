@@ -61,10 +61,10 @@ def test_colony_outproduces_ship_at_the_multiplier():
     assert (after["colony"][1] - before["colony"][1]) - (after["ship"][1] - before["ship"][1]) \
         == pytest.approx(base_food * (COLONY_PRODUCTION_MULTIPLIER - 1))
 
-def test_colony_strips_its_sector_faster_than_a_ship():
-    """The bonus applies to the sector draw too, not just to what lands in
-    storage -- a colony's advantage burns through the ground it stands on
-    proportionally faster, so the reward carries its own clock."""
+def test_colony_draws_its_sector_no_faster_than_a_ship():
+    """The bonus applies to what lands in storage, not to the sector draw --
+    a colony produces more from the same effort, taking exactly what a ship
+    would take from the ground it stands on."""
     pid = seed_player()
     ship_sector = seed_sector(x=1, energy=1000.0)
     colony_sector = seed_sector(x=2, energy=1000.0)
@@ -87,7 +87,7 @@ def test_colony_strips_its_sector_faster_than_a_ship():
                                  (sec,)).fetchone()["e"]
         drawn[label] = 1000.0 - remaining
     conn.close()
-    assert drawn["colony"] == pytest.approx(drawn["ship"] * COLONY_PRODUCTION_MULTIPLIER)
+    assert drawn["colony"] == pytest.approx(drawn["ship"])
 
 def test_storage_capped_at_capacity():
     pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)

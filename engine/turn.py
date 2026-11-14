@@ -286,16 +286,12 @@ def end_of_turn():
         #    Known gap: pods of different players sharing a sector are served
         #    by pod id, so whoever processes first gets first claim.
         if task in ("produce_energy", "produce_food", "produce_goods"):
-            # Colony bonus (see COLONY_PRODUCTION_MULTIPLIER): applied to the
-            # output side only -- `recipe` below is left at the base rate, so
-            # a colony pays a ship's costs and gets 1.5x back. Folded into the
-            # amounts here rather than at the point of storage so that every
-            # downstream consequence follows automatically: the sector cap is
-            # measured against what will actually be taken, and the sector is
-            # drained by that same larger figure.
+            # Colony bonus (see COLONY_PRODUCTION_MULTIPLIER): applied to what
+            # lands in storage only. `recipe` and the sector draw both stay at
+            # the base rate, so a colony pays a ship's costs, takes a ship's
+            # share of the ground, and gets 1.5x back.
             multiplier = get_production_multiplier(pod["org_type"])
-            base_production = {resource: amount * multiplier
-                               for resource, amount in get_production(task).items()}
+            base_production = get_production(task)
             recipe = get_consumption_recipe(task)
             org_id = pod["org_id"]
 
@@ -308,11 +304,12 @@ def end_of_turn():
 
             if ratio > 0:
                 for resource, base_amount in base_production.items():
-                    amount = base_amount * ratio
-                    if resource in RESOURCE_CAPACITY_COLUMN and amount > 0:
+                    drawn = base_amount * ratio
+                    amount = drawn * multiplier
+                    if resource in RESOURCE_CAPACITY_COLUMN and drawn > 0:
                         col = RESOURCE_CAPACITY_COLUMN[resource]
                         cur.execute(f"UPDATE sectors SET {col}=MAX(0,{col}-?) WHERE id=?",
-                                    (amount, pod["org_sector_id"]))
+                                    (drawn, pod["org_sector_id"]))
                     # Fills this pod's own free space first, then spills into
                     # other org pods with room, then is lost if the whole org
                     # is full (see store_org_resource) -- production tallied

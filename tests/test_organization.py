@@ -6,6 +6,7 @@ from xsettlers_mcp.tools.organization_tools import (
     UNIMPLEMENTED_MISSIONS, VALID_ORG_MISSIONS, WEAPONS_INOPERABLE
 )
 from engine.production import COLONIZATION_ENERGY_COST
+from xsettlers_mcp.tools.navigation_tools import confirm_move
 from tests.conftest import seed_player, seed_sector, seed_ship, seed_pod
 
 # --- set_mission happy path ---
@@ -162,6 +163,18 @@ def test_set_pod_task_produce_energy():
     with connection() as conn:
         assert conn.execute("SELECT task FROM pods WHERE id=?",
                             (pod,)).fetchone()["task"] == "produce_energy"
+
+def test_set_pod_task_allowed_while_in_transit():
+    """Transit locks the ship's mission, not its crew: a player can retask
+    pods mid-voyage, e.g. standing a scanner down to save food."""
+    pid = seed_player(); sid = seed_sector(); oid = seed_ship(pid, sid)
+    pod = seed_pod(oid, task="scan")
+    assert confirm_move("U_P1", oid, 4, 0, 0).get("confirmed") is True
+    assert "error" in set_mission("U_P1", oid, "idle")
+    assert set_pod_task("U_P1", pod, "produce_food").get("ok") is True
+    with connection() as conn:
+        assert conn.execute("SELECT task FROM pods WHERE id=?",
+                            (pod,)).fetchone()["task"] == "produce_food"
 
 # --- set_pod_task negative paths ---
 

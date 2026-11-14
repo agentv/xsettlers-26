@@ -29,8 +29,8 @@ starting_fill: 0.3
 # (db/sectors.py rolls 400 + d6 x 100 -- 500 to 1000 -- for everywhere else,
 # scaled by the `map:` block below where one applies).
 #
-# Rich but finite. A fleet that colonizes in place on turn one draws 96
-# energy/turn, so this lasts it roughly 24 turns -- past the 20-turn horizon,
+# Rich but finite. A fleet that colonizes in place on turn one draws 64
+# energy/turn, so this lasts it roughly 34 turns -- past the 20-turn horizon,
 # deliberately, because a fleet's own stored energy runs out well before its
 # ground does. See config/loader.py's HOME_SECTOR_ENERGY for the arithmetic
 # and why the sector is not currently the binding constraint. Per-scenario by

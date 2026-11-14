@@ -110,10 +110,9 @@ so an organization that runs dry goes blind as well as idle.
 
 **Colonies multiply output by 1.5** (`COLONY_PRODUCTION_MULTIPLIER`). Every
 pod aboard a colony produces 1.5× its base rate; ships
-produce 1.0×. The multiplier applies to output only — costs and upkeep are
-identical to a ship's — and it applies to the sector draw as well as to what
-lands in storage, so a colony harvesting energy strips its sector 1.5× as
-fast. Because costs are fixed, the effect on the *margin* is much larger than
+produce 1.0×. The multiplier applies to what lands in storage only — costs,
+upkeep and the sector draw are identical to a ship's, so a colony harvesting
+energy depletes its sector no faster than a ship would. Because costs are fixed, the effect on the *margin* is much larger than
 1.5×: a 6-pod org netting +1 energy / +1 food / +2 goods a turn as a ship nets
 +7 / +6 / +4 as a colony, roughly tripling its score rate.
 

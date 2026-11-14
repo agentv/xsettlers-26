@@ -126,9 +126,12 @@ turns proportional to the distance. While it's en route:
 
 - The ship is **in transit**, sitting in no normal sector; you'll see it
   flagged as such.
-- It **can't be given a new mission**, and its pods can't be retasked, until
-  it arrives — or you cancel the move. Set anything you want it doing on
-  arrival *before* you send it.
+- It **can't be given a new mission** until it arrives — or you cancel the
+  move.
+- Its **pods can still be retasked** at any point on the way. Energy can't be
+  harvested in transit and scans don't report back, so it can pay to switch
+  those pods to food or goods for the voyage, then switch them back before
+  landing.
 - Its food and goods pods **keep working** the entire time, spending down the
   energy it's carrying with no way to replace it. A long voyage can arrive
   with empty tanks and no way to restart its own economy.
@@ -186,13 +189,16 @@ can be comfortably profitable as a colony.
 **Colonizing costs 30 energy**, taken from the ship's holds the moment you
 give the order. A ship without it is simply refused — this is the one cost
 in the game with no partial credit, because there's no such thing as half a
-colony. The ship is then locked for a short transition window before the
-conversion finishes, and it works at the old ship rate until it does.
+colony.
 
-Choose the ground carefully, twice over. A colony can never relocate, so it
-lives or dies on the sector you left it in — and it draws that sector down
-1.5× as fast as a ship would. The bonus is real, but it spends the ground
-underneath it quicker.
+**The conversion takes three turns**: the turn you give the order and the two
+after it. For those three turns the ship can't move or take a new mission
+(there is no cancelling a colonize order), though its pods can still be
+retasked, and it produces at the ship rate. It becomes a colony as the third
+turn ends, and works at the colony rate from the fourth turn on.
+
+Choose the ground carefully. A colony can never relocate, so it lives or dies
+on the sector you left it in.
 
 ---
 

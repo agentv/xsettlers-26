@@ -10,9 +10,8 @@ POD_PRODUCTION = {
 # multiple of its base rate. Ships get 1.0.
 #
 # Deliberately output-only: POD_CONSUMPTION_RECIPE and ORG_UPKEEP_COST are
-# untouched, so a colony pays what a ship pays and gets more back. The
-# multiplier applies to the sector draw too (see engine/turn.py), so a colony
-# strips its sector 1.5x as fast.
+# untouched, and so is the sector draw (see engine/turn.py): a colony pays
+# what a ship pays, takes what a ship takes from the ground, and gets more back.
 COLONY_PRODUCTION_MULTIPLIER = 1.5
 
 # One-time energy price to convert a ship into a colony, charged in full at

@@ -131,7 +131,7 @@ The rules below bite from anywhere. Each carries its full reasoning at the point
 7. Holdings snapshot (must run *after* all mutations, hence the explicit `conn.commit()` before it)
 8. Increment turn counter; check `is_game_over()` (turn limit reached) and calculate final scores if so
 
-The clock (`engine/clock.py`) calls `end_of_turn()` on a fixed interval (`GAME_TICK_SECONDS`); `check_consensus_acceleration()` lets all-players-declared consensus fire it early.
+The clock (`engine/clock.py`) calls `end_of_turn()` on a fixed interval (`GAME_TICK_SECONDS`); `check_consensus_acceleration()` fires it early once every living (`is_npc = 0`) player has declared; NPCs are never waited on.
 
 ### NPC strategies — data first, code only when it must be
 

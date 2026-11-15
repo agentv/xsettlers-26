@@ -161,7 +161,7 @@ energy depletes its sector no faster than a ship would. Because costs are fixed,
 # Turn Structure
 
 * The game advances in **turns**. The current turn is stored in `game_state`.
-* A player **declares end of turn** when they have no further moves. Once all players have declared, the turn resolves (consensus acceleration).
+* A player **declares end of turn** when they have no further moves. Once all living (human) players have declared, the turn resolves (consensus acceleration). NPCs never declare and are never waited on.
 * Players may **rescind** their end-of-turn declaration before resolution.
 * End-of-turn engine actions, in order:
     * **NPC decisions** — every `is_npc=1` player's registered strategy (see `npc/strategies.py`) acts, via the same tool functions a human player would call, before anything else this turn resolves
@@ -251,7 +251,7 @@ Both take either a compass `bearing` or an explicit `offset_x/y/z`, and passing 
 
 ### Declare End of Turn (`declare_end_turn`)
 
-Signals that the player has no further moves this tick. Once all players have declared, the turn resolves via consensus acceleration.
+Signals that the player has no further moves this tick. Once all living (human) players have declared, the turn resolves via consensus acceleration; NPCs are not counted.
 
 ### Rescind End of Turn (`rescind_end_turn`)
 

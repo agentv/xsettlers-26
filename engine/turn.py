@@ -534,7 +534,7 @@ def _handle_attack(cur, org, params): pass   # stub
 
 def check_consensus_acceleration():
     """
-    End the turn now if every human player has declared. NPCs are not
+    End the turn now if every living (human) player has declared. NPCs are not
     waited on: they never declare, and they act at step 0 of every
     end_of_turn() regardless, so counting them would mean no game with an
     NPC in it could ever end a turn early.

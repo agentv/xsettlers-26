@@ -533,7 +533,14 @@ def _handle_defend(cur, org, params): pass   # stub
 def _handle_attack(cur, org, params): pass   # stub
 
 def check_consensus_acceleration():
-    undeclared = read_value("SELECT COUNT(*) FROM players WHERE end_turn_declared=0")
+    """
+    End the turn now if every living (human) player has declared. NPCs are not
+    waited on: they never declare, and they act at step 0 of every
+    end_of_turn() regardless, so counting them would mean no game with an
+    NPC in it could ever end a turn early.
+    """
+    undeclared = read_value(
+        "SELECT COUNT(*) FROM players WHERE end_turn_declared=0 AND is_npc=0")
     if undeclared == 0:
         print("All players declared end of turn — accelerating clock.")
         end_of_turn(); return True

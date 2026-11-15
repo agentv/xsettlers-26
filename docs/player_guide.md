@@ -35,9 +35,10 @@ wins** — and value is not the same as volume. See [Winning](#winning).
 
 The game is played turn by turn. You issue commands whenever you're ready —
 there's no real-time pressure. The turn resolves on a fixed timer, or early
-the moment every player has declared they're done: ships that were traveling
-arrive, pods produce, scans reveal what they found, and the universe advances
-by one tick.
+the moment every living player has declared they're done: ships that were
+traveling arrive, pods produce, scans reveal what they found, and the universe
+advances by one tick. (NPCs never hold a turn up; they act and then wait on
+the living players.)
 
 You play through an **MCP client** — Slack is the intended home, but the
 server doesn't care which client you use.

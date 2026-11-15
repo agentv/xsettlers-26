@@ -2,7 +2,7 @@
 # reinitializes an empty one at DB_PATH in its place, so a running server can
 # accept a new game (select_scenario/start_session) without a process
 # restart. Deciding WHEN it's safe to do this is not this module's job -- see
-# xsettlers_mcp/gamehouse.py's _game_settled(), which is the only caller.
+# xsettlers_mcp/game_select.py's archive_if_settled(), which is the only caller.
 
 import os
 from datetime import datetime, timezone

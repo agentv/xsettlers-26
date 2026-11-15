@@ -52,7 +52,7 @@ Config is env-driven (`.env.example`, via `python-dotenv`): `DB_PATH`, `GAME_CON
 **Two sibling repos, neither imported here, both able to break from a change here.**
 
 - `../xsettlers-designer` runs tournaments and matchup simulation. It installs this repo editable (that is what `pyproject.toml` is for) and drives `engine.turn.end_of_turn()` in-process — so it is a **real consumer of `engine/`, `db/` and `npc/`**, and `pyproject.toml`'s package list has to keep matching this repo's top-level packages. The Fly build ignores `pyproject.toml` entirely.
-- `../gamehouse` exchanges traffic three ways, all in `xsettlers_mcp/gamehouse.py`, which documents the wire contract and the results envelope. To run the pair locally: start GameHouse from its own root on port 8090 (`DB_PATH=gamehouse.db PORT=8090 .venv/bin/python3 -m gamehouse_mcp.server`), and start xsettlers with `GAMEHOUSE_URL=http://localhost:8090/mcp` and `XSETTLERS_PUBLIC_URL=http://localhost:8080/mcp` — without both, registration silently no-ops by design.
+- `../gamehouse` exchanges traffic three ways, all in `xsettlers_mcp/gamehouse.py`, which documents the wire contract and the results envelope. To run the pair locally: start GameHouse from its own root on port 8090 (`DB_PATH=gamehouse.db PORT=8090 .venv/bin/python3 -m gamehouse_mcp.server`), and start xsettlers with `GAMEHOUSE_URL=http://localhost:8090/mcp` and `XSETTLERS_PUBLIC_URL=http://localhost:8080/mcp` — without both, registration silently no-ops by design. `start_session`, the one tool that mints player tokens, also needs `GAMEHOUSE_HANDOFF_SECRET` set to the same value on both sides; unset, the handoff is refused rather than open.
 
 **Two things to check rather than assume**: run `fly status --app xsettlers` before trusting anything about what is deployed — the deployed commit has lagged `main` by whole branches. And re-read `../gamehouse/docs/data_model.md` before touching `xsettlers_mcp/gamehouse.py`; that wire contract is a fast-moving sibling project, not a stable external dependency, and it has changed without warning mid-session.
 
@@ -131,7 +131,7 @@ The rules below bite from anywhere. Each carries its full reasoning at the point
 7. Holdings snapshot (must run *after* all mutations, hence the explicit `conn.commit()` before it)
 8. Increment turn counter; check `is_game_over()` (turn limit reached) and calculate final scores if so
 
-The clock (`engine/clock.py`) calls `end_of_turn()` on a fixed interval (`GAME_TICK_SECONDS`); `check_consensus_acceleration()` lets all-players-declared consensus fire it early.
+The clock (`engine/clock.py`) calls `end_of_turn()` on a fixed interval (`GAME_TICK_SECONDS`); `check_consensus_acceleration()` fires it early once every living (`is_npc = 0`) player has declared; NPCs are never waited on.
 
 ### NPC strategies — data first, code only when it must be
 

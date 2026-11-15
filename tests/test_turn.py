@@ -300,3 +300,13 @@ def test_show_game_status_is_not_final_mid_game():
 # can stop being legal. This is the branch that handles it, on the engine
 # side, for both scan paths (see engine/turn.py's _resolve_scan).
 
+
+def test_consensus_does_not_wait_for_npcs():
+    """NPCs never declare end of turn, so counting them would stop any game
+    with an NPC from ever ending a turn early."""
+    seed_player()
+    npc = seed_player(email="npc@test.com", player_token="U_NPC", display_name="Bot")
+    with connection() as conn:
+        conn.execute("UPDATE players SET is_npc=1 WHERE id=?", (npc,))
+        conn.execute("UPDATE players SET end_turn_declared=1 WHERE is_npc=0")
+    assert check_consensus_acceleration() is True

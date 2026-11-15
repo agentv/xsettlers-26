@@ -22,6 +22,7 @@ Two directions of traffic:
     once a lobby closes."""
 from xsettlers_mcp.tools.registry import mcp_tool
 import asyncio
+import hmac
 import os
 import secrets
 from mcp import ClientSession
@@ -30,11 +31,12 @@ from config.loader import load_starting_configuration
 from db.connection import get_connection, read_one
 from db.bootstrap import bootstrap_game
 from db.events import record_event
-from db.archive import archive_active_database
 from engine.turn import get_final_scores
 from npc.profiles import assign_npc_profile
 from npc.strategies import strategy_names
-from xsettlers_mcp.game_select import get_active_game, list_scenarios
+from xsettlers_mcp.game_select import (RESULTS_REPORTED_EVENT, all_scenarios,
+                                       archive_if_settled, gamehouse_session_token,
+                                       get_active_game, results_reported)
 
 SCENARIO_FILE = "config/game2.yaml"
 SCENARIO_NAME = "game2"
@@ -51,11 +53,18 @@ VALID_KINDS = {"person", "npc"}
 PLACEMENT_FIELD = "placement"
 SCORE_FIELD = "score"
 
-# Written once when the hand-back succeeds, so a second poll doesn't push
-# again. report_results only matches journal rows still 'in_progress', so a
-# repeat call isn't destructive -- it just returns an error per entry, which
-# is noise standing in for a fact we can record properly.
-RESULTS_REPORTED_EVENT = "game.results_reported"
+# RESULTS_REPORTED_EVENT (imported above) is written once when the hand-back
+# succeeds, so a second poll doesn't push again. report_results only matches
+# journal rows still 'in_progress', so a repeat call isn't destructive -- it
+# just returns an error per entry, which is noise standing in for a fact we
+# can record properly.
+
+# The secret GameHouse presents on start_session, set as a Fly secret on both
+# apps. start_session is the one tool that hands out player tokens, so it is
+# the one tool that cannot rest on player_token: without this, anyone who can
+# reach /mcp could seat themselves in an empty instance. Unset means the
+# handoff is disabled, not open.
+HANDOFF_SECRET_ENV = "GAMEHOUSE_HANDOFF_SECRET"
 
 # How often the reporter wakes to check whether the game has finished. Slow on
 # purpose: this is a once-per-game event with no deadline, and the check is
@@ -171,7 +180,7 @@ def registered_scenarios() -> list[dict]:
     the service (../gamehouse/docs/data_model.md, settled 2026-08-26).
     """
     entries = []
-    for entry in list_scenarios():
+    for entry in all_scenarios():
         lobby = load_starting_configuration(entry["file"]).lobby
         entries.append({
             "scenario_key": entry["scenario_name"],
@@ -193,17 +202,23 @@ def resolve_scenario(scenario_key: str | None) -> tuple[str, str] | None:
     """
     if scenario_key is None:
         return SCENARIO_FILE, SCENARIO_NAME
-    for entry in list_scenarios():
+    for entry in all_scenarios():
         if entry["scenario_name"] == scenario_key:
             return entry["file"], entry["scenario_name"]
     return None
 
-def _validate_players(players: list, lobby) -> dict | None:
+def _handoff_authorized(handoff_secret) -> bool:
+    expected = os.getenv(HANDOFF_SECRET_ENV)
+    if not expected or not isinstance(handoff_secret, str):
+        return False
+    return hmac.compare_digest(expected, handoff_secret)
+
+def _validate_players(players: list, lobby, scenario_name: str) -> dict | None:
     """Returns an error dict if the players list is malformed, else None."""
     if not isinstance(players, list) or not players:
         return {"error": "players must be a non-empty list"}
     if not (lobby.min_players <= len(players) <= lobby.max_players):
-        return {"error": f"{SCENARIO_NAME} requires between {lobby.min_players} and "
+        return {"error": f"{scenario_name} requires between {lobby.min_players} and "
                          f"{lobby.max_players} players, got {len(players)}"}
     ids = [p.get("player_id") for p in players if isinstance(p, dict)]
     duplicates = sorted({str(i) for i in ids if ids.count(i) > 1})
@@ -241,10 +256,12 @@ def _validate_players(players: list, lobby) -> dict | None:
     "registered via register_game. Bootstraps the game and returns each "
     "entry's xsettlers_player_id, plus a freshly generated player_token for "
     "person-kind entries -- GameHouse is responsible for relaying that "
-    "token back to the actual human player. Not something a player calls "
-    "directly.",
+    "token back to the actual human player. handoff_secret must match the "
+    "secret this deployment shares with GameHouse. Not something a player "
+    "calls directly.",
     players={"type": "array", "items": {"type": "object"}})
-def start_session(session_token: str, players: list, scenario_key: str = None) -> dict:
+def start_session(session_token: str, players: list, scenario_key: str = None,
+                  handoff_secret: str = None) -> dict:
     """
     The actual handoff: GameHouse closes a lobby and calls this once,
     minting session_token and describing every participant (see
@@ -266,16 +283,23 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
     email or display_name, so both are synthesized here -- xsettlers'
     players.email/display_name columns exist for the existing static-roster
     auth path, which a GameHouse-driven session has no use for beyond
-    satisfying the schema."""
+    satisfying the schema.
+
+    Refused outright unless handoff_secret matches GAMEHOUSE_HANDOFF_SECRET
+    (see HANDOFF_SECRET_ENV): this tool mints credentials, so it is gated
+    before anything about the request is examined."""
+    if not _handoff_authorized(handoff_secret):
+        return {"error": "start_session is only callable by GameHouse"}
     resolved = resolve_scenario(scenario_key)
     if resolved is None:
         return {"error": f"Unknown scenario_key '{scenario_key}'"}
     scenario_file, scenario_name = resolved
     sc = load_starting_configuration(scenario_file)
-    err = _validate_players(players, sc.lobby)
+    err = _validate_players(players, sc.lobby, scenario_name)
     if err:
         return err
 
+    archive_if_settled()
     active = get_active_game()
     conn = get_connection(); cur = conn.cursor()
     existing_session = cur.execute("SELECT session_token FROM game_session WHERE id=1").fetchone()
@@ -307,8 +331,10 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
         if kind == "person":
             generated_tokens[gh_id] = token
 
+    # selected_by names who chose the game, never a credential: the
+    # session_token stays in game_session alone.
     bootstrap_game(scenario_file=scenario_file, scenario_name=scenario_name,
-                   selected_by=session_token, roster_override=roster_override)
+                   selected_by="GameHouse", roster_override=roster_override)
 
     conn = get_connection(); cur = conn.cursor()
     by_email = {r["email"]: r["id"] for r in cur.execute("SELECT id, email FROM players").fetchall()}
@@ -341,7 +367,7 @@ def start_session(session_token: str, players: list, scenario_key: str = None) -
                 (session_token,))
     conn.commit(); conn.close()
 
-    return {"ok": True, "already_active": False, "scenario_name": SCENARIO_NAME,
+    return {"ok": True, "already_active": False, "scenario_name": scenario_name,
             "players": result_players}
 
 
@@ -394,31 +420,6 @@ def build_results() -> list:
     return results
 
 
-def _results_already_reported() -> bool:
-    return read_one("SELECT id FROM events WHERE event_type=? LIMIT 1",
-                    (RESULTS_REPORTED_EVENT,)) is not None
-
-
-def _session_token():
-    row = read_one("SELECT session_token FROM game_session WHERE id=1")
-    return row["session_token"] if row else None
-
-
-def _game_settled() -> bool:
-    """
-    True once the game is over and nothing GameHouse-related is still
-    pending -- either this was never a GameHouse game, or the hand-back has
-    already gone out. This is the gate for archive_active_database(): moving
-    the live DB aside before a pending hand-back succeeds would strand the
-    scoreboard GameHouse still needs to poll for, the same way archiving
-    would break a plain (non-GameHouse) player's ability to read their final
-    score if it ran before the game was actually over.
-    """
-    if not get_final_scores():
-        return False
-    return _session_token() is None or _results_already_reported()
-
-
 async def report_results() -> dict:
     """
     Hand the finished game's scoreboard back to GameHouse, once.
@@ -439,12 +440,12 @@ async def report_results() -> dict:
       - already reported: a previous poll succeeded.
       - no person-backed players: an all-NPC game has no Person to credit.
     """
-    session_token = _session_token()
+    session_token = gamehouse_session_token()
     if not session_token:
         return {"ok": False, "skipped": "no GameHouse session for this game"}
     if not get_final_scores():
         return {"ok": False, "skipped": "game is not over"}
-    if _results_already_reported():
+    if results_reported():
         return {"ok": False, "skipped": "results already reported"}
 
     results = build_results()
@@ -479,8 +480,10 @@ async def _reporter_tick():
     """
     One pass of run_results_reporter's work, split out so a test can drive a
     single iteration without unrolling an infinite loop: report results if
-    the game just ended, then archive the finished database once nothing is
-    still waiting on it (see _game_settled()).
+    the game just ended, then archive a finished GameHouse game once its
+    hand-back is done. A select_scenario game is left in place, final
+    scoreboard readable, until the next game is asked for (see
+    game_select.archive_if_settled).
     """
     outcome = await report_results()
     if outcome.get("ok") and outcome.get("reported") is not None:
@@ -489,8 +492,8 @@ async def _reporter_tick():
     elif outcome.get("error"):
         print(f"Results hand-back failed (will retry): {outcome['error']}")
 
-    if _game_settled():
-        archived = archive_active_database()
+    if gamehouse_session_token() is not None:
+        archived = archive_if_settled()
         if archived:
             print(f"Game over -- archived finished database to {archived}")
 

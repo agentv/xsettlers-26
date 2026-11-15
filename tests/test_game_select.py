@@ -1,12 +1,12 @@
 from db.connection import connection
-from xsettlers_mcp.game_select import list_scenarios, get_active_game, select_scenario
+from xsettlers_mcp.game_select import all_scenarios, list_scenarios, get_active_game, select_scenario
 
 def _clear_active_game():
     with connection() as conn:
         conn.execute("DELETE FROM games")
 
 def test_list_scenarios_finds_game2():
-    scenarios = list_scenarios()
+    scenarios = all_scenarios()
     names = {s["scenario_name"] for s in scenarios}
     assert "game2" in names
     game2 = next(s for s in scenarios if s["scenario_name"] == "game2")
@@ -14,7 +14,7 @@ def test_list_scenarios_finds_game2():
     assert game2["description"]
 
 def test_list_scenarios_finds_game3():
-    scenarios = list_scenarios()
+    scenarios = all_scenarios()
     names = {s["scenario_name"] for s in scenarios}
     assert "game3" in names
     game3 = next(s for s in scenarios if s["scenario_name"] == "game3")
@@ -22,7 +22,7 @@ def test_list_scenarios_finds_game3():
     assert game3["description"]
 
 def test_list_scenarios_finds_the_solo_scenario():
-    solo = next(s for s in list_scenarios() if s["scenario_name"] == "game1")
+    solo = next(s for s in all_scenarios() if s["scenario_name"] == "game1")
     assert solo["player_count"] == 1
 
 def test_list_scenarios_returns_only_games_the_player_is_seated_in():
@@ -93,3 +93,39 @@ def test_select_scenario_rejects_switching_once_active():
     assert "error" in result
     active = get_active_game()
     assert active["scenario_name"] == "game2"  # unchanged
+
+def test_list_scenarios_requires_a_token_on_the_mcp_surface():
+    """Without a token the tool used to return the whole library, participant
+    emails included. all_scenarios() is the internal view; the tool always
+    filters by who is asking."""
+    from xsettlers_mcp.tools.registry import TOOLS
+    assert "player_token" in TOOLS["list_scenarios"]["schema"]["required"]
+
+def test_select_scenario_never_hands_back_another_players_token():
+    _clear_active_game()
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_2", "game2")
+    assert result["already_active"] is True
+    assert "REPLACE_WITH_GENERATED_TOKEN_1" not in str(result)
+    assert result["scenario"]["selected_by"] == "Vincent"
+
+def _finish_game():
+    from engine.turn import end_of_turn, is_game_over
+    guard = 0
+    while not is_game_over() and guard < 200:
+        end_of_turn(); guard += 1
+
+def test_a_finished_game_stays_readable_until_the_next_one_is_selected():
+    import asyncio
+    from xsettlers_mcp.gamehouse import _reporter_tick
+    from xsettlers_mcp.tools.organization_reports import show_game_status
+    _clear_active_game()
+    select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game1")
+    _finish_game()
+    asyncio.run(_reporter_tick())
+    final = show_game_status("REPLACE_WITH_GENERATED_TOKEN_1")
+    assert final["game_over"] is True, "the reporter must not archive a non-GameHouse game"
+
+    result = select_scenario("REPLACE_WITH_GENERATED_TOKEN_1", "game2")
+    assert result["ok"] is True and result["already_active"] is False
+    assert get_active_game()["scenario_name"] == "game2"

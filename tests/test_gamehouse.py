@@ -7,9 +7,21 @@ and resolves to Diaspora (config/game2.yaml), which is what every handoff
 sent before scenario selection existed.
 """
 import json
+import pytest
 from db.connection import connection
-from xsettlers_mcp.gamehouse import start_session
+from xsettlers_mcp.gamehouse import start_session, HANDOFF_SECRET_ENV
 from xsettlers_mcp.tools.player_tools import get_player_state
+
+HANDOFF_SECRET = "test-handoff-secret"
+
+@pytest.fixture(autouse=True)
+def _handoff_secret(monkeypatch):
+    monkeypatch.setenv(HANDOFF_SECRET_ENV, HANDOFF_SECRET)
+
+def _start(session_token, players, scenario_key=None):
+    """start_session as GameHouse calls it, presenting the shared secret."""
+    return start_session(session_token, players, scenario_key=scenario_key,
+                         handoff_secret=HANDOFF_SECRET)
 
 def _clear_active_game():
     with connection() as conn:
@@ -25,33 +37,66 @@ def _npc(label, strategy="turtle", config=None):
         profile["config"] = config
     return {"player_id": label, "kind": "npc", "profile": profile}
 
+# --- start_session: who may call it ---
+#
+# start_session mints player tokens, so it cannot rest on player_token the way
+# every other tool does: only a caller holding the shared secret gets through.
+
+def test_start_session_refuses_a_caller_without_the_secret():
+    _clear_active_game()
+    result = start_session("tok1", [_person(1), _npc("npc-1")])
+    assert "error" in result
+    with connection() as conn:
+        assert conn.execute("SELECT COUNT(*) n FROM games").fetchone()["n"] == 0
+
+def test_start_session_refuses_a_wrong_secret():
+    _clear_active_game()
+    result = start_session("tok1", [_person(1), _npc("npc-1")], handoff_secret="guess")
+    assert "error" in result
+
+def test_start_session_is_disabled_when_no_secret_is_configured(monkeypatch):
+    monkeypatch.delenv(HANDOFF_SECRET_ENV)
+    _clear_active_game()
+    result = start_session("tok1", [_person(1), _npc("npc-1")], handoff_secret="")
+    assert "error" in result
+
+def test_start_session_reports_the_scenario_it_actually_started():
+    _clear_active_game()
+    result = _start("tok1", [_person(1), _npc("npc-1")], scenario_key="game3")
+    assert result["scenario_name"] == "game3"
+
+def test_start_session_names_the_chosen_scenario_in_a_sizing_error():
+    _clear_active_game()
+    result = _start("tok1", [_person(1)], scenario_key="game3")
+    assert "game3" in result["error"]
+
 # --- start_session: validation ---
 
 def test_start_session_rejects_wrong_player_count():
     _clear_active_game()
-    result = start_session("tok1", [_person(1)])  # game2 requires exactly 2
+    result = _start("tok1", [_person(1)])  # game2 requires exactly 2
     assert "error" in result
 
 def test_start_session_rejects_unknown_kind():
     _clear_active_game()
-    result = start_session("tok1", [_person(1), {"player_id": 2, "kind": "robot"}])
+    result = _start("tok1", [_person(1), {"player_id": 2, "kind": "robot"}])
     assert "error" in result
 
 def test_start_session_rejects_npc_with_unregistered_strategy():
     _clear_active_game()
-    result = start_session("tok1", [_person(1), _npc("npc-1", strategy="does_not_exist")])
+    result = _start("tok1", [_person(1), _npc("npc-1", strategy="does_not_exist")])
     assert "error" in result
 
 def test_start_session_rejects_empty_players_list():
     _clear_active_game()
-    result = start_session("tok1", [])
+    result = _start("tok1", [])
     assert "error" in result
 
 def test_start_session_accepts_scenario_key_without_crashing():
     """push_start_session always sends scenario_key, so a signature missing
     this kwarg would TypeError instead of returning cleanly."""
     _clear_active_game()
-    result = start_session("tok1", [_person(1), _npc("npc-1")], scenario_key=None)
+    result = _start("tok1", [_person(1), _npc("npc-1")], scenario_key=None)
     assert result["ok"] is True
 
 def test_start_session_tool_schema_permits_null_scenario_key():
@@ -76,7 +121,7 @@ def test_start_session_tool_schema_permits_null_scenario_key():
 
 def test_start_session_seats_a_person_and_an_npc():
     _clear_active_game()
-    result = start_session("tok1", [_person(42), _npc("npc-1", strategy="fan_out",
+    result = _start("tok1", [_person(42), _npc("npc-1", strategy="fan_out",
                                                        config={"scout_distance": 2})])
     assert result["ok"] is True
     assert result["already_active"] is False
@@ -109,7 +154,7 @@ def test_start_session_seats_a_person_and_an_npc():
 
 def test_start_session_bootstraps_ships_and_pods():
     _clear_active_game()
-    result = start_session("tok1", [_person(1), _npc("npc-1")])
+    result = _start("tok1", [_person(1), _npc("npc-1")])
     person_id = next(p for p in result["players"] if p["kind"] == "person")["xsettlers_player_id"]
     with connection() as conn:
         ships = conn.execute(
@@ -122,7 +167,7 @@ def test_start_session_bootstraps_ships_and_pods():
 
 def test_start_session_assigns_npc_profile_with_config():
     _clear_active_game()
-    result = start_session("tok1", [_person(1), _npc("npc-1", strategy="fan_out",
+    result = _start("tok1", [_person(1), _npc("npc-1", strategy="fan_out",
                                                        config={"aggression": 2})])
     npc_id = next(p for p in result["players"] if p["kind"] == "npc")["xsettlers_player_id"]
     with connection() as conn:
@@ -134,7 +179,7 @@ def test_start_session_assigns_npc_profile_with_config():
 
 def test_start_session_stores_the_session_token():
     _clear_active_game()
-    start_session("tok-xyz", [_person(1), _npc("npc-1")])
+    _start("tok-xyz", [_person(1), _npc("npc-1")])
     with connection() as conn:
         row = conn.execute("SELECT session_token FROM game_session WHERE id=1").fetchone()
     assert row["session_token"] == "tok-xyz"
@@ -143,7 +188,7 @@ def test_returned_player_token_actually_works_against_gameplay_tools():
     """The concrete proof this is wired into the existing, untouched
     player_token auth path -- not just DB rows that happen to look right."""
     _clear_active_game()
-    result = start_session("tok1", [_person(1), _npc("npc-1")])
+    result = _start("tok1", [_person(1), _npc("npc-1")])
     person_token = next(p for p in result["players"] if p["kind"] == "person")["player_token"]
     state = get_player_state(person_token)
     assert "error" not in state
@@ -153,14 +198,14 @@ def test_returned_player_token_actually_works_against_gameplay_tools():
 
 def test_start_session_is_idempotent_for_the_same_token():
     _clear_active_game()
-    start_session("tok1", [_person(1), _npc("npc-1")])
-    result = start_session("tok1", [_person(1), _npc("npc-1")])
+    _start("tok1", [_person(1), _npc("npc-1")])
+    result = _start("tok1", [_person(1), _npc("npc-1")])
     assert result == {"ok": True, "already_active": True, "scenario_name": "game2"}
 
 def test_start_session_rejects_a_different_token_while_active():
     _clear_active_game()
-    start_session("tok1", [_person(1), _npc("npc-1")])
-    result = start_session("tok2", [_person(99), _npc("npc-2")])
+    _start("tok1", [_person(1), _npc("npc-1")])
+    result = _start("tok2", [_person(99), _npc("npc-2")])
     assert "error" in result
 
 
@@ -170,7 +215,7 @@ def test_a_referenced_npc_seated_here_actually_plays():
     with nothing calling the strategy by hand."""
     from engine.turn import end_of_turn
     _clear_active_game()
-    result = start_session("tok1", [_person(42), _npc("npc-1", strategy="fan_out")])
+    result = _start("tok1", [_person(42), _npc("npc-1", strategy="fan_out")])
     assert result["ok"] is True
     npc_id = next(p for p in result["players"] if p["kind"] == "npc")["xsettlers_player_id"]
 
@@ -210,7 +255,7 @@ def test_start_session_stamps_the_gamehouse_person_id_on_person_seats_only():
     """`gamehouse_person_id IS NOT NULL` is what the hand-back filters on, so
     it has to mean exactly 'GameHouse has a Person for this seat'."""
     _clear_active_game()
-    start_session("tok1", [_person(42), _npc("npc-1")])
+    _start("tok1", [_person(42), _npc("npc-1")])
     with connection() as conn:
         rows = {r["email"]: r["gamehouse_person_id"] for r in conn.execute(
             "SELECT email, gamehouse_person_id FROM players").fetchall()}
@@ -220,7 +265,7 @@ def test_start_session_stamps_the_gamehouse_person_id_on_person_seats_only():
 def test_build_results_carries_the_envelope_keyed_by_gamehouse_person_id():
     from xsettlers_mcp.gamehouse import build_results, PLACEMENT_FIELD, SCORE_FIELD
     _clear_active_game()
-    start_session("tok1", [_person(42), _npc("npc-1")])
+    _start("tok1", [_person(42), _npc("npc-1")])
     _finish_game()
 
     results = build_results()
@@ -238,7 +283,7 @@ def test_build_results_matches_the_recorded_scoreboard_not_a_recomputation():
     from engine.turn import get_final_scores
     from xsettlers_mcp.gamehouse import build_results, PLACEMENT_FIELD, SCORE_FIELD
     _clear_active_game()
-    start_session("tok1", [_person(42), _npc("npc-1")])
+    _start("tok1", [_person(42), _npc("npc-1")])
     _finish_game()
 
     recorded = {s["player_id"]: s for s in get_final_scores()["standings"]}
@@ -251,7 +296,7 @@ def test_build_results_matches_the_recorded_scoreboard_not_a_recomputation():
 def test_build_results_is_empty_before_the_game_ends():
     from xsettlers_mcp.gamehouse import build_results
     _clear_active_game()
-    start_session("tok1", [_person(42), _npc("npc-1")])
+    _start("tok1", [_person(42), _npc("npc-1")])
     assert build_results() == []
 
 def test_report_results_skips_when_there_is_no_gamehouse_session():
@@ -269,7 +314,7 @@ def test_report_results_skips_while_the_game_is_still_running():
     import asyncio
     from xsettlers_mcp.gamehouse import report_results
     _clear_active_game()
-    start_session("tok1", [_person(42), _npc("npc-1")])
+    _start("tok1", [_person(42), _npc("npc-1")])
     outcome = asyncio.run(report_results())
     assert outcome["ok"] is False and "not over" in outcome["skipped"]
 
@@ -277,9 +322,9 @@ def test_an_all_npc_game_records_the_event_without_calling_gamehouse():
     """Nothing to report is a resolved state, not a permanent retry: without
     the event, the reporter would poll this game forever."""
     import asyncio
-    from xsettlers_mcp.gamehouse import report_results, RESULTS_REPORTED_EVENT
+    from xsettlers_mcp.gamehouse import report_results, RESULTS_REPORTED_EVENT  # noqa
     _clear_active_game()
-    start_session("tok1", [_npc("npc-1"), _npc("npc-2")])
+    _start("tok1", [_npc("npc-1"), _npc("npc-2")])
     _finish_game()
 
     outcome = asyncio.run(report_results())
@@ -293,7 +338,7 @@ def test_results_are_reported_only_once():
     import asyncio
     from xsettlers_mcp.gamehouse import report_results
     _clear_active_game()
-    start_session("tok1", [_npc("npc-1"), _npc("npc-2")])
+    _start("tok1", [_npc("npc-1"), _npc("npc-2")])
     _finish_game()
     assert asyncio.run(report_results())["ok"] is True
     again = asyncio.run(report_results())
@@ -308,14 +353,14 @@ def test_results_are_reported_only_once():
 # decides WHEN it's safe to call it.
 
 def test_game_settled_is_false_while_the_game_is_running():
-    from xsettlers_mcp.gamehouse import _game_settled
+    from xsettlers_mcp.game_select import game_settled as _game_settled
     _clear_active_game()
     assert _game_settled() is False
 
 def test_game_settled_is_true_immediately_for_a_non_gamehouse_game():
     """A plain (select_scenario-style) game has no session_token, so there is
     nothing to wait for -- settled the instant it ends."""
-    from xsettlers_mcp.gamehouse import _game_settled
+    from xsettlers_mcp.game_select import game_settled as _game_settled
     from tests.conftest import seed_player
     # fresh_db already seeds an active (non-GameHouse) game -- clearing it
     # would make end_of_turn() no-op forever, per CLAUDE.md.
@@ -325,9 +370,10 @@ def test_game_settled_is_true_immediately_for_a_non_gamehouse_game():
 
 def test_game_settled_waits_for_the_gamehouse_handback():
     import asyncio
-    from xsettlers_mcp.gamehouse import _game_settled, report_results
+    from xsettlers_mcp.gamehouse import report_results
+    from xsettlers_mcp.game_select import game_settled as _game_settled
     _clear_active_game()
-    start_session("tok1", [_npc("npc-1"), _npc("npc-2")])
+    _start("tok1", [_npc("npc-1"), _npc("npc-2")])
     _finish_game()
     assert _game_settled() is False, "results haven't been reported yet"
     asyncio.run(report_results())
@@ -337,7 +383,7 @@ def test_reporter_tick_archives_only_once_settled():
     import asyncio, os
     from xsettlers_mcp.gamehouse import _reporter_tick
     _clear_active_game()
-    start_session("tok1", [_npc("npc-1"), _npc("npc-2")])
+    _start("tok1", [_npc("npc-1"), _npc("npc-2")])
     db_path = os.environ["DB_PATH"]
 
     asyncio.run(_reporter_tick())  # game still running: no report, no archive
@@ -381,7 +427,7 @@ def test_resolve_scenario_maps_a_key_to_its_file():
 
 def test_start_session_bootstraps_the_scenario_gamehouse_chose():
     _clear_active_game()
-    result = start_session("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game3")
+    result = _start("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game3")
     assert result["ok"] is True
     with connection() as conn:
         row = conn.execute("SELECT scenario_name, scenario_file FROM games WHERE id=1").fetchone()
@@ -393,7 +439,7 @@ def test_start_session_seats_players_at_the_chosen_scenarios_home_sectors():
     game2's -- the seating has to follow the map actually being played."""
     from config.loader import load_starting_configuration
     _clear_active_game()
-    start_session("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game3")
+    _start("tok-g1", [_person(1), _npc("npc-1")], scenario_key="game3")
     expected = [p.home_sector for p in load_starting_configuration("config/game3.yaml").participants]
     with connection() as conn:
         rows = conn.execute("""SELECT s.coord_x, s.coord_y, s.coord_z FROM players p
@@ -405,7 +451,7 @@ def test_start_session_seats_players_at_the_chosen_scenarios_home_sectors():
 
 def test_start_session_rejects_an_unknown_scenario_key():
     _clear_active_game()
-    result = start_session("tok-x", [_person(1), _npc("npc-1")], scenario_key="not-a-scenario")
+    result = _start("tok-x", [_person(1), _npc("npc-1")], scenario_key="not-a-scenario")
     assert "error" in result and "not-a-scenario" in result["error"]
     with connection() as conn:
         assert conn.execute("SELECT COUNT(*) n FROM games").fetchone()["n"] == 0
@@ -416,7 +462,7 @@ def test_start_session_refuses_a_roster_with_one_player_twice():
     lobby-side cause is fixed in GameHouse; this keeps the crash from being
     the way we find out about the next one."""
     _clear_active_game()
-    result = start_session("tok-dup", [_person(7), _person(7)])
+    result = _start("tok-dup", [_person(7), _person(7)])
     assert "error" in result and "7" in result["error"]
     with connection() as conn:
         assert conn.execute("SELECT COUNT(*) n FROM games").fetchone()["n"] == 0
